@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import AuthLayout from "./AuthLayout";
@@ -21,8 +21,11 @@ export default function LoginPage() {
   const [tenantSlug, setTenantSlug] = useState("");
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    if (user) nav("/app", { replace: true });
+  }, [user, nav]);
+
   if (user) {
-    nav("/app", { replace: true });
     return null;
   }
 

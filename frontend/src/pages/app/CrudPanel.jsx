@@ -8,8 +8,18 @@ import { useI18n } from "@/lib/i18n";
 import { APPUI } from "@/constants/testIds";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { PageHeader, EmptyState, LoadingRows, StatusPill } from "./_shared";
+
+/** Remove empty strings from payload so Optional[EmailStr] etc. validate. */
+function cleanPayload(obj) {
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v === "" || v === undefined) continue;
+    out[k] = v;
+  }
+  return out;
+}
 
 /**
  * Generic CRUD panel for a scoped module.
@@ -86,8 +96,9 @@ export default function CrudPanel({
 
   const onSubmit = (e) => {
     e.preventDefault();
-    if (editing) updateMut.mutate({ id: editing.id, payload: form });
-    else createMut.mutate(form);
+    const clean = cleanPayload(form);
+    if (editing) updateMut.mutate({ id: editing.id, payload: clean });
+    else createMut.mutate(clean);
   };
 
   const items = data?.items || [];
@@ -206,6 +217,9 @@ export default function CrudPanel({
             <DialogTitle className="font-display text-xl">
               {editing ? `${t("actions.edit")} ${moduleKey}` : `${t("actions.new")} ${moduleKey}`}
             </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Fill in the details below and click Save.
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={onSubmit} className="space-y-4">
             {renderForm(form, setForm)}

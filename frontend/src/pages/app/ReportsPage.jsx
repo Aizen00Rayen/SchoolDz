@@ -36,7 +36,7 @@ export default function ReportsPage() {
 
       <div className="surface-card p-5">
         <h3 className="font-display font-semibold text-lg mb-4">Revenue by month</h3>
-        <div className="h-72">
+        <div className="h-72 min-h-[280px]">
           {data?.revenue_trend && (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={data.revenue_trend}>

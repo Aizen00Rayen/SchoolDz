@@ -95,7 +95,7 @@ export default function DashboardPage() {
               +12.4%
             </div>
           </div>
-          <div className="h-64">
+          <div className="h-64 min-h-[280px]">
             {data?.revenue_trend && (
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={data.revenue_trend}>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import AuthLayout from "./AuthLayout";
@@ -48,8 +48,11 @@ export default function RegisterPage() {
   const [centerType, setCenterType] = useState("tutoring");
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    if (user) nav("/app", { replace: true });
+  }, [user, nav]);
+
   if (user) {
-    nav("/app", { replace: true });
     return null;
   }
 

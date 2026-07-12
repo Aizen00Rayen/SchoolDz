@@ -9,7 +9,7 @@ import { PageHeader, EmptyState } from "./_shared";
 import { Field } from "./StudentsPage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -119,6 +119,9 @@ export default function UsersPage() {
         <DialogContent className="max-w-lg bg-card">
           <DialogHeader>
             <DialogTitle className="font-display text-xl">Add team member</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Grant a colleague access with a specific role.
+            </DialogDescription>
           </DialogHeader>
           <form
             onSubmit={(e) => {
