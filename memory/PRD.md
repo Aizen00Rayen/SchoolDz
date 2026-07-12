@@ -25,21 +25,24 @@ Multi-tenant cloud ERP for tutoring centers, language schools, coding academies,
 - **Preview subdomain**: path-based `/app/*` (docs for real `slug.schooldz.com` provided).
 
 ## MVP — implemented (Jan 2026)
-- ✅ Landing marketing page (Swiss-brutalism editorial style, FR/EN/AR toggle, dark/light).
+- ✅ Landing marketing page — completely rebuilt (Jan 2026, v2): mouse-follow spotlight, aurora orbs, word-by-word hero reveal, 3D tilt interactive dashboard preview with rotating live sessions and floating cards, animated count-up stats, bento feature grid with hover lift, marquee of center types, pricing with rocket icon. FR/EN/AR + RTL.
 - ✅ Auth: register (creates tenant + owner), login, forgot password (dev token), reset.
 - ✅ Tenant workspace shell: sidebar, topbar with ⌘K global command palette, tenant switcher, theme + language switchers.
-- ✅ Dashboard with KPIs, revenue trend area chart, today's sessions, recent students/payments.
+- ✅ Dashboard with KPIs, revenue trend area chart, today's sessions, recent students/payments (all i18n).
 - ✅ Students, Parents, Teachers, Courses, Groups, Sessions — full CRUD with search.
 - ✅ Attendance — fast one-click marking (present/late/excused/absent) with bulk save.
-- ✅ Payments — invoicing with auto invoice_number, status pills, kinds (registration/monthly/course/installment).
+- ✅ Payments — invoicing with auto invoice_number, status pills, kinds.
 - ✅ Reports — KPIs + bar chart.
 - ✅ Settings — workspace, branding (primary/accent color, logo, language, currency, timezone, prefixes).
 - ✅ Users — team member management with roles.
 - ✅ Global search across students/teachers/parents/courses/groups/payments.
-- ✅ Seed data: 3 users (admin, owner, teacher), 3 parents, 3 teachers, 4 courses, 4 groups, 15 students, 32 sessions, ~60 attendance rows, 30 payments.
-- ✅ RBAC enforcement (owner/director/staff/super_admin).
-- ✅ Tenant isolation verified by testing agent.
-- ✅ FR/EN/AR with RTL support.
+- ✅ NEW: **/admin/login + /admin platform console** for super admin — platform KPIs (tenants total/active/trial/suspended, users, students, revenue) + tenant table with suspend/activate/hard-delete.
+- ✅ Seed data: super admin, generic demo tenant "Alpha Demo Academy" (slug `alpha-demo`) with fictional international names (removed all client-identifying data).
+- ✅ Complete i18n coverage (FR/EN/AR) across landing, auth, app shell, dashboard, admin.
+- ✅ RBAC enforcement + tenant isolation verified.
+
+## Test coverage
+- iteration_2: **100% backend** (24/24 pytest) + **100% frontend** (Playwright).
 
 ## Backlog (P1)
 - Timetable weekly calendar with drag & drop + conflict detection.
