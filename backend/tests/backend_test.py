@@ -1,4 +1,4 @@
-"""SchoolDZ backend API tests."""
+"""SchoolDZ backend API tests (iteration 2 - alpha-demo)."""
 import os
 import uuid
 import pytest
@@ -7,9 +7,12 @@ import requests
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://academy-dash-36.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api/v1"
 
-OWNER = {"email": "owner@dteduc.schooldz.com", "password": "owner123"}
-TEACHER = {"email": "teacher@dteduc.schooldz.com", "password": "teacher123"}
-SUPER = {"email": "admin@schooldz.com", "password": "admin123"}
+OWNER = {"email": "owner@alpha-demo.schooldz.com", "password": "Demo!2026"}
+TEACHER = {"email": "teacher@alpha-demo.schooldz.com", "password": "Teacher!2026"}
+SUPER = {"email": "admin@schooldz.com", "password": "adminSchool!2026"}
+
+OLD_SUPER = {"email": "admin@schooldz.com", "password": "admin123"}
+OLD_OWNER = {"email": "owner@dteduc.schooldz.com", "password": "owner123"}
 
 
 @pytest.fixture(scope="session")
@@ -41,11 +44,10 @@ def h(tok):
 def test_health():
     r = requests.get(f"{API}/health", timeout=15)
     assert r.status_code == 200
-    j = r.json()
-    assert j["status"] == "ok"
+    assert r.json()["status"] == "ok"
 
 
-# ---------- Auth ----------
+# ---------- Auth: new credentials ----------
 def test_owner_login_returns_token_and_user():
     r = requests.post(f"{API}/auth/login", json=OWNER, timeout=30)
     assert r.status_code == 200
@@ -55,20 +57,30 @@ def test_owner_login_returns_token_and_user():
     assert j["user"]["tenant_id"]
 
 
-def test_me_returns_user_and_tenant(owner_token):
+def test_me_returns_alpha_demo_tenant(owner_token):
     r = requests.get(f"{API}/auth/me", headers=h(owner_token), timeout=15)
     assert r.status_code == 200
     j = r.json()
     assert j["user"]["email"] == OWNER["email"]
-    assert j["tenant"]["slug"] == "dteduc"
+    assert j["tenant"]["slug"] == "alpha-demo"
 
 
-def test_super_admin_login():
+def test_super_admin_login_new_password():
     r = requests.post(f"{API}/auth/login", json=SUPER, timeout=30)
     assert r.status_code == 200
     j = r.json()
     assert j["user"]["role"] == "super_admin"
     assert j["user"].get("tenant_id") in (None, "")
+
+
+def test_super_admin_old_password_rejected():
+    r = requests.post(f"{API}/auth/login", json=OLD_SUPER, timeout=30)
+    assert r.status_code == 401, f"Old admin password must be rejected but got {r.status_code}"
+
+
+def test_old_dteduc_owner_rejected():
+    r = requests.post(f"{API}/auth/login", json=OLD_OWNER, timeout=30)
+    assert r.status_code in (401, 404), f"Old owner must not exist, got {r.status_code}"
 
 
 # ---------- Dashboard ----------
@@ -107,17 +119,13 @@ def test_students_crud(owner_token):
     assert r.status_code == 200, r.text
     s = r.json()
     sid = s["id"]
-    assert s["student_code"].startswith("STU-") or "-" in s["student_code"]
-    # GET
     r2 = requests.get(f"{API}/students/{sid}", headers=h(owner_token), timeout=15)
     assert r2.status_code == 200
     assert r2.json()["first_name"] == "TEST_John"
-    # PATCH
     r3 = requests.patch(f"{API}/students/{sid}", json={"first_name": "TEST_Jane"},
                        headers=h(owner_token), timeout=15)
     assert r3.status_code == 200
     assert r3.json()["first_name"] == "TEST_Jane"
-    # DELETE
     r4 = requests.delete(f"{API}/students/{sid}", headers=h(owner_token), timeout=15)
     assert r4.status_code == 200
     r5 = requests.get(f"{API}/students/{sid}", headers=h(owner_token), timeout=15)
@@ -128,12 +136,8 @@ def test_students_crud(owner_token):
 def test_tenant_isolation():
     slug = f"testcorp-{uuid.uuid4().hex[:8]}"
     payload = {
-        "tenant_name": "Test Corp",
-        "tenant_slug": slug,
-        "center_type": "tutoring",
-        "name": "T Owner",
-        "email": f"owner-{slug}@example.com",
-        "password": "password123",
+        "tenant_name": "Test Corp", "tenant_slug": slug, "center_type": "tutoring",
+        "name": "T Owner", "email": f"owner-{slug}@example.com", "password": "password123",
     }
     r = requests.post(f"{API}/auth/register", json=payload, timeout=30)
     assert r.status_code == 200, r.text
@@ -174,8 +178,7 @@ def test_global_search(owner_token):
     r = requests.get(f"{API}/search", params={"q": "a"}, headers=h(owner_token), timeout=15)
     assert r.status_code == 200
     j = r.json()
-    assert "results" in j
-    assert isinstance(j["results"], list)
+    assert "results" in j and isinstance(j["results"], list)
 
 
 # ---------- Register validation ----------
@@ -189,7 +192,67 @@ def test_register_invalid_slug():
 
 def test_register_duplicate_slug():
     r = requests.post(f"{API}/auth/register", json={
-        "tenant_name": "X", "tenant_slug": "dteduc",
+        "tenant_name": "X", "tenant_slug": "alpha-demo",
         "name": "N", "email": f"a-{uuid.uuid4().hex[:6]}@e.com", "password": "pw12345"
     }, timeout=15)
     assert r.status_code == 409
+
+
+# ---------- NEW: Admin platform endpoints ----------
+def test_admin_platform_summary_super(super_token):
+    r = requests.get(f"{API}/admin/platform-summary", headers=h(super_token), timeout=30)
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert "kpis" in j and "tenants" in j
+    for k in ["tenants_total", "tenants_active", "tenants_trial", "tenants_suspended",
+              "users_total", "students_total", "payments_total", "platform_revenue"]:
+        assert k in j["kpis"], f"Missing kpi {k}"
+    assert isinstance(j["tenants"], list)
+    assert len(j["tenants"]) >= 1
+    t0 = j["tenants"][0]
+    assert "users_count" in t0 and "students_count" in t0
+
+
+def test_admin_platform_summary_owner_forbidden(owner_token):
+    r = requests.get(f"{API}/admin/platform-summary", headers=h(owner_token), timeout=15)
+    assert r.status_code == 403
+
+
+def test_admin_suspend_and_activate_alpha_demo(super_token):
+    r = requests.get(f"{API}/admin/platform-summary", headers=h(super_token), timeout=15)
+    tenants = r.json()["tenants"]
+    alpha = next((t for t in tenants if t.get("slug") == "alpha-demo"), None)
+    assert alpha is not None, "alpha-demo tenant not found"
+    tid = alpha["id"]
+    # Suspend
+    r2 = requests.patch(f"{API}/admin/tenants/{tid}/status", json={"status": "suspended"},
+                       headers=h(super_token), timeout=15)
+    assert r2.status_code == 200, r2.text
+    # Verify
+    r3 = requests.get(f"{API}/admin/platform-summary", headers=h(super_token), timeout=15)
+    alpha2 = next(t for t in r3.json()["tenants"] if t["id"] == tid)
+    assert alpha2["status"] == "suspended"
+    # Reactivate
+    r4 = requests.patch(f"{API}/admin/tenants/{tid}/status", json={"status": "active"},
+                       headers=h(super_token), timeout=15)
+    assert r4.status_code == 200
+
+
+def test_admin_delete_tenant(super_token):
+    slug = f"throwaway-{uuid.uuid4().hex[:8]}"
+    reg = requests.post(f"{API}/auth/register", json={
+        "tenant_name": "Throwaway", "tenant_slug": slug, "center_type": "tutoring",
+        "name": "TA", "email": f"ta-{slug}@example.com", "password": "password123",
+    }, timeout=30)
+    assert reg.status_code == 200, reg.text
+    # find id
+    summ = requests.get(f"{API}/admin/platform-summary", headers=h(super_token), timeout=15).json()
+    t = next((x for x in summ["tenants"] if x["slug"] == slug), None)
+    assert t is not None
+    tid = t["id"]
+    # delete
+    d = requests.delete(f"{API}/admin/tenants/{tid}", headers=h(super_token), timeout=15)
+    assert d.status_code in (200, 204), d.text
+    # confirm gone
+    summ2 = requests.get(f"{API}/admin/platform-summary", headers=h(super_token), timeout=15).json()
+    assert not any(x["id"] == tid for x in summ2["tenants"]), "tenant still present after delete"

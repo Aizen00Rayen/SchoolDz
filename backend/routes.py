@@ -877,3 +877,72 @@ async def global_search(q: str = Query(..., min_length=1),
 
 
 router.include_router(search_router)
+
+
+# --------------------------------------------------------------------
+# Super-admin platform endpoints
+# --------------------------------------------------------------------
+admin_router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+@admin_router.get("/platform-summary")
+async def platform_summary(db=Depends(get_db),
+                           _: dict = Depends(require_roles(ROLE_SUPER_ADMIN))):
+    tenants_total = await db.tenants.count_documents({})
+    tenants_active = await db.tenants.count_documents({"status": "active"})
+    tenants_trial = await db.tenants.count_documents({"status": "trial"})
+    tenants_suspended = await db.tenants.count_documents({"status": "suspended"})
+    users_total = await db.users.count_documents({})
+    students_total = await db.students.count_documents({})
+    payments_total = await db.payments.count_documents({})
+
+    # Revenue across all tenants
+    revenue = 0.0
+    async for p in db.payments.find({"status": "paid"}, {"_id": 0, "amount": 1, "discount": 1}):
+        revenue += float(p.get("amount", 0) or 0) - float(p.get("discount", 0) or 0)
+
+    # Tenant list with basic counts
+    tenants = await db.tenants.find({}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    for t in tenants:
+        t["users_count"] = await db.users.count_documents({"tenant_id": t["id"]})
+        t["students_count"] = await db.students.count_documents({"tenant_id": t["id"]})
+
+    return {
+        "kpis": {
+            "tenants_total": tenants_total,
+            "tenants_active": tenants_active,
+            "tenants_trial": tenants_trial,
+            "tenants_suspended": tenants_suspended,
+            "users_total": users_total,
+            "students_total": students_total,
+            "payments_total": payments_total,
+            "platform_revenue": round(revenue, 2),
+        },
+        "tenants": tenants,
+    }
+
+
+@admin_router.patch("/tenants/{tenant_id}/status")
+async def set_tenant_status(tenant_id: str, payload: dict,
+                            db=Depends(get_db),
+                            _: dict = Depends(require_roles(ROLE_SUPER_ADMIN))):
+    status = payload.get("status")
+    if status not in ("active", "trial", "suspended"):
+        raise HTTPException(400, "Invalid status")
+    await db.tenants.update_one({"id": tenant_id},
+                                {"$set": {"status": status, "updated_at": utcnow_iso()}})
+    return sanitize(await db.tenants.find_one({"id": tenant_id}))
+
+
+@admin_router.delete("/tenants/{tenant_id}")
+async def hard_delete_tenant(tenant_id: str, db=Depends(get_db),
+                             _: dict = Depends(require_roles(ROLE_SUPER_ADMIN))):
+    """Cascade delete everything owned by a tenant."""
+    for coll in ("users", "students", "parents", "teachers", "courses",
+                 "groups", "sessions", "attendance", "payments"):
+        await db[coll].delete_many({"tenant_id": tenant_id})
+    await db.tenants.delete_one({"id": tenant_id})
+    return {"ok": True}
+
+
+router.include_router(admin_router)

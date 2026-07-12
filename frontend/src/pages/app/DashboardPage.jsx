@@ -88,8 +88,8 @@ export default function DashboardPage() {
         <div className="lg:col-span-2 surface-card p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="font-display font-semibold text-lg">Revenue trend</h3>
-              <p className="text-xs text-muted-foreground">Last 6 months</p>
+              <h3 className="font-display font-semibold text-lg">{t("dashboard.revenue_trend")}</h3>
+              <p className="text-xs text-muted-foreground">{t("dashboard.last6m")}</p>
             </div>
             <div className="text-xs font-mono px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-600">
               +12.4%
@@ -126,7 +126,7 @@ export default function DashboardPage() {
 
         <div className="surface-card p-5">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-display font-semibold text-lg">Today&apos;s sessions</h3>
+            <h3 className="font-display font-semibold text-lg">{t("dashboard.today_sessions")}</h3>
             <span className="text-xs font-mono text-muted-foreground">
               {data?.today_sessions?.length || 0}
             </span>
@@ -147,7 +147,7 @@ export default function DashboardPage() {
               </div>
             ))}
             {(!data?.today_sessions || data.today_sessions.length === 0) && !isLoading && (
-              <div className="text-sm text-muted-foreground text-center py-8">No sessions today</div>
+              <div className="text-sm text-muted-foreground text-center py-8">{t("dashboard.no_sessions_today")}</div>
             )}
           </div>
         </div>
@@ -157,7 +157,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="surface-card p-5">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-display font-semibold text-lg">Recent students</h3>
+            <h3 className="font-display font-semibold text-lg">{t("dashboard.recent_students")}</h3>
             <Users className="w-4 h-4 text-muted-foreground" />
           </div>
           <div className="space-y-1">
@@ -175,7 +175,7 @@ export default function DashboardPage() {
 
         <div className="surface-card p-5">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-display font-semibold text-lg">Recent payments</h3>
+            <h3 className="font-display font-semibold text-lg">{t("dashboard.recent_payments")}</h3>
             <Wallet className="w-4 h-4 text-muted-foreground" />
           </div>
           <div className="space-y-1">

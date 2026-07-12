@@ -137,3 +137,19 @@
     border: 2px solid hsl(var(--background));
 }
 ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.5); }
+
+/* Marquee for landing */
+@keyframes marquee {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+}
+.animate-marquee {
+    animation: marquee 36s linear infinite;
+    will-change: transform;
+}
+html[dir="rtl"] .animate-marquee {
+    animation-direction: reverse;
+}
+@media (prefers-reduced-motion: reduce) {
+    .animate-marquee { animation: none; }
+}

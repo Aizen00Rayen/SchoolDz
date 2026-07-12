@@ -27,9 +27,9 @@ class Tenant(BaseModel):
     logo_url: Optional[str] = None
     primary_color: str = "#0A0A0B"
     accent_color: str = "#E53935"
-    language: Literal["en", "fr", "ar"] = "fr"
-    currency: str = "DZD"
-    timezone: str = "Africa/Algiers"
+    language: Literal["en", "fr", "ar"] = "en"
+    currency: str = "USD"
+    timezone: str = "UTC"
     invoice_prefix: str = "INV-"
     student_prefix: str = "STU-"
     max_students: int = 500

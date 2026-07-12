@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button";
 export default function AuthLayout({ children, title, subtitle, footer }) {
   const { t, lang, setLang } = useI18n();
   const { theme, toggle } = useTheme();
-
   return (
     <div className="min-h-screen bg-background grid grid-cols-1 lg:grid-cols-2">
       {/* Left panel (branding) */}
@@ -25,15 +24,13 @@ export default function AuthLayout({ children, title, subtitle, footer }) {
 
         <div className="relative z-10">
           <div className="text-xs font-bold uppercase tracking-[0.2em] text-primary-foreground/60 mb-3">
-            The cloud ERP for education
+            {t("auth.brand.tag")}
           </div>
           <h2 className="font-display text-4xl md:text-5xl font-black leading-[1.05] tracking-tighter mb-6">
-            Run your center like a<br />
-            <span className="text-accent">tech company</span>.
+            {t("auth.brand.title")}
           </h2>
           <p className="text-primary-foreground/70 max-w-md leading-relaxed">
-            Multi-tenant workspace. Isolated data. Beautiful dashboards. Everything a modern
-            education center needs — and nothing it doesn&apos;t.
+            {t("auth.brand.desc")}
           </p>
         </div>
 

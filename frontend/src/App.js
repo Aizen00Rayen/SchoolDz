@@ -11,6 +11,8 @@ import PricingPage from "@/pages/marketing/PricingPage";
 import LoginPage from "@/pages/auth/LoginPage";
 import RegisterPage from "@/pages/auth/RegisterPage";
 import ForgotPasswordPage from "@/pages/auth/ForgotPasswordPage";
+import AdminLoginPage from "@/pages/admin/AdminLoginPage";
+import AdminDashboardPage from "@/pages/admin/AdminDashboardPage";
 import AppShell from "@/pages/app/AppShell";
 import DashboardPage from "@/pages/app/DashboardPage";
 import StudentsPage from "@/pages/app/StudentsPage";
@@ -54,6 +56,17 @@ function App() {
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/register" element={<RegisterPage />} />
                 <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+
+                {/* Admin */}
+                <Route path="/admin/login" element={<AdminLoginPage />} />
+                <Route
+                  path="/admin"
+                  element={
+                    <RequireAuth>
+                      <AdminDashboardPage />
+                    </RequireAuth>
+                  }
+                />
 
                 {/* App (tenant workspace) */}
                 <Route

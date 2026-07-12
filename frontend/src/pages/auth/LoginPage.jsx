@@ -16,8 +16,8 @@ export default function LoginPage() {
   const { t } = useI18n();
   const nav = useNavigate();
   const loc = useLocation();
-  const [email, setEmail] = useState("owner@dteduc.schooldz.com");
-  const [password, setPassword] = useState("owner123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [tenantSlug, setTenantSlug] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -47,7 +47,7 @@ export default function LoginPage() {
   return (
     <AuthLayout
       title={t("auth.submit.login")}
-      subtitle="Access your workspace"
+      subtitle={t("auth.access_workspace")}
       footer={
         <>
           {t("auth.no_account")}{" "}
@@ -96,7 +96,7 @@ export default function LoginPage() {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="slug">{t("auth.tenant_slug")} <span className="text-muted-foreground font-normal">(optional)</span></Label>
+          <Label htmlFor="slug">{t("auth.tenant_slug")} <span className="text-muted-foreground font-normal">({t("auth.optional")})</span></Label>
           <Input
             id="slug"
             value={tenantSlug}
@@ -115,10 +115,6 @@ export default function LoginPage() {
         >
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : t("auth.submit.login")}
         </Button>
-
-        <div className="text-xs text-center text-muted-foreground font-mono pt-2">
-          Demo: owner@dteduc.schooldz.com / owner123
-        </div>
       </form>
     </AuthLayout>
   );

@@ -179,10 +179,10 @@ export default function AppShell() {
 
         <div className="p-3 border-t border-border">
           <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2 px-2">
-            Trial
+            {tenant?.plan === "free" ? t("common.trial_active") : t("common.plan_active")}
           </div>
           <div className="px-2 pb-3 text-xs text-muted-foreground">
-            {tenant?.plan === "pro" ? "Pro plan active" : "14 days remaining"}
+            {tenant?.plan === "pro" ? "Pro" : tenant?.plan === "business" ? "Business" : tenant?.plan === "starter" ? "Starter" : "Free"}
           </div>
           <Button
             variant="outline"
@@ -191,7 +191,7 @@ export default function AppShell() {
             onClick={() => nav("/app/settings")}
             data-testid="sidebar-upgrade-button"
           >
-            Manage subscription
+            {t("common.upgrade")}
           </Button>
         </div>
       </aside>
@@ -255,12 +255,12 @@ export default function AppShell() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56 bg-popover">
                 <DropdownMenuLabel>
-                  <div className="text-xs font-normal text-muted-foreground">Signed in as</div>
+                  <div className="text-xs font-normal text-muted-foreground">{t("common.signed_in_as")}</div>
                   <div className="text-sm truncate">{user?.email}</div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={() => nav("/app/settings")}>
-                  <Settings className="w-4 h-4 me-2" /> Settings
+                  <Settings className="w-4 h-4 me-2" /> {t("menu.settings")}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={async () => {
@@ -270,7 +270,7 @@ export default function AppShell() {
                   data-testid={AUTH.logout}
                   className="text-red-600 focus:text-red-600"
                 >
-                  <LogOut className="w-4 h-4 me-2" /> Log out
+                  <LogOut className="w-4 h-4 me-2" /> {t("common.logout")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

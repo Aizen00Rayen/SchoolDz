@@ -86,6 +86,7 @@ async def shutdown() -> None:
 async def seed_super_admin(db) -> None:
     email = os.environ.get("ADMIN_EMAIL", "admin@schooldz.com").lower()
     password = os.environ.get("ADMIN_PASSWORD", "admin123")
+    from core import verify_password
     existing = await db.users.find_one({"email": email})
     if not existing:
         u = User(tenant_id=None, email=email, name="Platform Admin",
@@ -94,34 +95,42 @@ async def seed_super_admin(db) -> None:
         doc["password_hash"] = hash_password(password)
         await db.users.insert_one(doc)
         logger.info("Seeded super admin: %s", email)
+    elif not verify_password(password, existing.get("password_hash", "")):
+        await db.users.update_one({"email": email},
+                                  {"$set": {"password_hash": hash_password(password),
+                                            "role": ROLE_SUPER_ADMIN,
+                                            "updated_at": utcnow_iso()}})
+        logger.info("Updated super admin password")
 
 
 async def seed_demo_tenant(db) -> None:
-    slug = os.environ.get("DEMO_TENANT_SLUG", "dteduc").lower()
+    slug = os.environ.get("DEMO_TENANT_SLUG", "alpha-demo").lower()
     tenant = await db.tenants.find_one({"slug": slug})
     if not tenant:
-        t = Tenant(name="DT Educ", slug=slug, center_type="tutoring", status="active", plan="pro",
-                   language="fr", currency="DZD", primary_color="#0A0A0B", accent_color="#E53935",
+        t = Tenant(name="Alpha Demo Academy", slug=slug, center_type="tutoring",
+                   status="active", plan="pro",
+                   language="fr", currency="DZD", primary_color="#0A0A0B",
+                   accent_color="#E53935",
                    trial_ends_at=(datetime.now(timezone.utc) + timedelta(days=90)).isoformat())
         await db.tenants.insert_one(t.model_dump())
         tenant = t.model_dump()
 
-    owner_email = os.environ.get("DEMO_OWNER_EMAIL", "owner@dteduc.schooldz.com").lower()
-    owner_pass = os.environ.get("DEMO_OWNER_PASSWORD", "owner123")
+    owner_email = os.environ.get("DEMO_OWNER_EMAIL", "owner@alpha-demo.schooldz.com").lower()
+    owner_pass = os.environ.get("DEMO_OWNER_PASSWORD", "Demo!2026")
     existing_owner = await db.users.find_one({"email": owner_email})
     if not existing_owner:
-        u = User(tenant_id=tenant["id"], email=owner_email, name="Youssef Bencheikh",
-                 role=ROLE_OWNER, phone="+213 555 000 111", email_verified=True)
+        u = User(tenant_id=tenant["id"], email=owner_email, name="Alex Rivera",
+                 role=ROLE_OWNER, phone="+1 555 000 111", email_verified=True)
         doc = u.model_dump()
         doc["password_hash"] = hash_password(owner_pass)
         await db.users.insert_one(doc)
 
-    teacher_email = os.environ.get("DEMO_TEACHER_EMAIL", "teacher@dteduc.schooldz.com").lower()
-    teacher_pass = os.environ.get("DEMO_TEACHER_PASSWORD", "teacher123")
+    teacher_email = os.environ.get("DEMO_TEACHER_EMAIL", "teacher@alpha-demo.schooldz.com").lower()
+    teacher_pass = os.environ.get("DEMO_TEACHER_PASSWORD", "Teacher!2026")
     existing_teacher = await db.users.find_one({"email": teacher_email})
     if not existing_teacher:
-        u = User(tenant_id=tenant["id"], email=teacher_email, name="Amina Ould-Ali",
-                 role=ROLE_TEACHER, phone="+213 555 222 333", email_verified=True)
+        u = User(tenant_id=tenant["id"], email=teacher_email, name="Jordan Blake",
+                 role=ROLE_TEACHER, phone="+1 555 222 333", email_verified=True)
         doc = u.model_dump()
         doc["password_hash"] = hash_password(teacher_pass)
         await db.users.insert_one(doc)
@@ -141,12 +150,12 @@ async def _seed_sample_data(db, tenant_id: str) -> None:
 
     # Parents
     parents = [
-        {"name": "Karim Belkacem", "phone": "+213 555 100 100", "email": "karim.b@example.dz",
+        {"name": "Michael Chen", "phone": "+1 555 100 100", "email": "michael.c@example.com",
          "relationship": "father", "occupation": "Engineer"},
-        {"name": "Souad Meziane", "phone": "+213 555 100 200", "email": "souad.m@example.dz",
+        {"name": "Sarah Johnson", "phone": "+1 555 100 200", "email": "sarah.j@example.com",
          "relationship": "mother", "occupation": "Doctor"},
-        {"name": "Farid Haddad", "phone": "+213 555 100 300", "email": "farid.h@example.dz",
-         "relationship": "father", "occupation": "Merchant"},
+        {"name": "David Martinez", "phone": "+1 555 100 300", "email": "david.m@example.com",
+         "relationship": "father", "occupation": "Consultant"},
     ]
     parent_ids: list[str] = []
     for p in parents:
@@ -156,12 +165,12 @@ async def _seed_sample_data(db, tenant_id: str) -> None:
 
     # Teachers
     teachers = [
-        {"first_name": "Amina", "last_name": "Ould-Ali", "email": "amina@dteduc.schooldz.com",
-         "phone": "+213 555 222 333", "subjects": ["English", "IELTS"], "hourly_rate": 2000},
-        {"first_name": "Mohammed", "last_name": "Kaci", "email": "mohammed@dteduc.schooldz.com",
-         "phone": "+213 555 333 444", "subjects": ["Python", "Web"], "hourly_rate": 2500},
-        {"first_name": "Nadia", "last_name": "Benaissa", "email": "nadia@dteduc.schooldz.com",
-         "phone": "+213 555 444 555", "subjects": ["French", "Grammar"], "hourly_rate": 1800},
+        {"first_name": "Jordan", "last_name": "Blake", "email": "jordan@alpha-demo.schooldz.com",
+         "phone": "+1 555 222 333", "subjects": ["English", "IELTS"], "hourly_rate": 45},
+        {"first_name": "Priya", "last_name": "Sharma", "email": "priya@alpha-demo.schooldz.com",
+         "phone": "+1 555 333 444", "subjects": ["Python", "Web"], "hourly_rate": 55},
+        {"first_name": "Marco", "last_name": "Rossi", "email": "marco@alpha-demo.schooldz.com",
+         "phone": "+1 555 444 555", "subjects": ["French", "Grammar"], "hourly_rate": 40},
     ]
     teacher_ids: list[str] = []
     for t in teachers:
@@ -171,14 +180,14 @@ async def _seed_sample_data(db, tenant_id: str) -> None:
 
     # Courses
     courses_seed = [
-        {"title": "English A2", "category": "Languages", "price": 8000, "color": "#3B82F6",
+        {"title": "English A2", "category": "Languages", "price": 180, "color": "#3B82F6",
          "description": "Elementary English for teens and adults."},
-        {"title": "Python for Beginners", "category": "Coding", "price": 12000, "color": "#10B981",
+        {"title": "Python for Beginners", "category": "Coding", "price": 280, "color": "#10B981",
          "description": "Learn programming from scratch with Python."},
-        {"title": "French Grammar", "category": "Languages", "price": 7000, "color": "#F59E0B",
+        {"title": "French Grammar", "category": "Languages", "price": 160, "color": "#F59E0B",
          "description": "Master French grammar rules."},
-        {"title": "BAC Math Prep", "category": "Academic", "price": 10000, "color": "#E53935",
-         "description": "Intensive math preparation for Baccalaureate."},
+        {"title": "Advanced Math", "category": "Academic", "price": 220, "color": "#E53935",
+         "description": "Intensive math prep for standardized exams."},
     ]
     course_ids: list[str] = []
     for c in courses_seed:
@@ -187,10 +196,10 @@ async def _seed_sample_data(db, tenant_id: str) -> None:
         course_ids.append(doc["id"])
 
     # Students
-    first_names = ["Yasmine", "Rayan", "Lina", "Ilyes", "Malak", "Adem", "Nour", "Salah",
-                   "Meriem", "Anis", "Hiba", "Ahmed", "Sarah", "Walid", "Sofia"]
-    last_names = ["Belkacem", "Meziane", "Haddad", "Boudiaf", "Khelifi", "Cherif", "Zerrouki",
-                  "Chettouh", "Djellal", "Saidi"]
+    first_names = ["Emma", "Liam", "Olivia", "Noah", "Ava", "Ethan", "Sophia", "Mason",
+                   "Isabella", "Lucas", "Mia", "Aiden", "Charlotte", "Jackson", "Amelia"]
+    last_names = ["Anderson", "Brown", "Carter", "Davis", "Evans", "Foster", "Grant",
+                  "Hayes", "Ingram", "Jenkins"]
     student_ids: list[str] = []
     for i in range(15):
         fn = first_names[i % len(first_names)]
@@ -200,8 +209,8 @@ async def _seed_sample_data(db, tenant_id: str) -> None:
             first_name=fn, last_name=ln,
             gender="female" if i % 2 == 0 else "male",
             birth_date=(now - timedelta(days=365 * (12 + i % 8))).date().isoformat(),
-            email=f"{fn.lower()}.{ln.lower()}@student.dteduc.dz",
-            phone=f"+213 555 {700 + i:03d} {100 + i:03d}",
+            email=f"{fn.lower()}.{ln.lower()}@student.example.com",
+            phone=f"+1 555 {700 + i:03d} {100 + i:03d}",
             parent_id=parent_ids[i % len(parent_ids)],
             status="active",
             student_code=f"STU-{i + 1:05d}",
@@ -268,7 +277,7 @@ async def _seed_sample_data(db, tenant_id: str) -> None:
         # Registration
         p = Payment(
             tenant_id=tenant_id, student_id=sid, course_id=cid,
-            kind="registration", amount=2000, status="paid",
+            kind="registration", amount=50, status="paid",
             paid_at=(now - timedelta(days=20 + i)).isoformat(),
             invoice_number=f"INV-{i * 2 + 1:06d}",
             method="cash",
@@ -277,7 +286,7 @@ async def _seed_sample_data(db, tenant_id: str) -> None:
         # Monthly
         p2 = Payment(
             tenant_id=tenant_id, student_id=sid, course_id=cid,
-            kind="monthly", amount=8000 + (i % 3) * 2000,
+            kind="monthly", amount=180 + (i % 3) * 40,
             status="paid" if i % 3 != 0 else "pending",
             paid_at=(now - timedelta(days=i)).isoformat() if i % 3 != 0 else None,
             due_date=(now + timedelta(days=5)).isoformat() if i % 3 == 0 else None,

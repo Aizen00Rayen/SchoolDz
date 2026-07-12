@@ -87,7 +87,7 @@ export default function RegisterPage() {
   return (
     <AuthLayout
       title={t("nav.signup")}
-      subtitle="14-day free trial. No credit card."
+      subtitle={t("auth.trial")}
       footer={
         <>
           {t("auth.have_account")}{" "}
@@ -108,7 +108,7 @@ export default function RegisterPage() {
               required
               data-testid={AUTH.registerWorkspaceName}
               className="h-11"
-              placeholder="DT Educ"
+              placeholder="My Academy"
             />
           </div>
           <div className="space-y-2">
@@ -121,7 +121,7 @@ export default function RegisterPage() {
                 required
                 data-testid={AUTH.registerWorkspaceSlug}
                 className="h-11 border-0 font-mono focus-visible:ring-0"
-                placeholder="dteduc"
+                placeholder="my-academy"
               />
               <span className="px-3 text-xs font-mono text-muted-foreground border-s border-border h-full grid place-items-center whitespace-nowrap">
                 .schooldz.com
