@@ -5,30 +5,41 @@ import os
 import re
 import secrets
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from typing import Optional, List
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+import httpx
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
+from fastapi.responses import RedirectResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from core import (
-    ADMIN_ROLES, ALL_ROLES, ROLE_OWNER, ROLE_SUPER_ADMIN, STAFF_ROLES,
-    clear_auth_cookies, create_access_token, create_refresh_token, decode_token,
-    get_current_user, get_db, hash_password, new_id, require_roles,
-    sanitize, sanitize_many, set_auth_cookies, tenant_filter, utcnow_iso,
-    verify_password,
+    ADMIN_ROLES, ROLE_OWNER, ROLE_SUPER_ADMIN, STAFF_ROLES,
+    TENANT_ASSIGNABLE_ROLES,
+    clear_auth_cookies, cookies_secure, create_access_token, create_refresh_token,
+    create_oauth_state, decode_google_id_token, decode_oauth_state, decode_token,
+    get_current_user, get_db, hash_password, new_id, pop_oauth_exchange, rate_limit,
+    require_roles, sanitize, set_auth_cookies, store_oauth_exchange, tenant_filter,
+    utcnow_iso, validate_password, verify_password,
 )
 from models import (
     AttendanceBulk, ClassSession, Course, CourseCreate, Group, GroupCreate,
     GroupEnrollment, LoginRequest, Parent, ParentCreate, Payment, PaymentCreate,
     SessionCreate, Student, StudentCreate, Teacher, TeacherCreate, Tenant,
-    TenantCreate, User, UserCreate, UserRegisterPublic,
-    ForgotPasswordRequest, ResetPasswordRequest,
+    TenantCreate, User, UserCreate, UserRegisterPublic, UserUpdate,
+    ForgotPasswordRequest, ResetPasswordRequest, GoogleExchangeRequest,
 )
 
 
 router = APIRouter(prefix="/api/v1")
 
 SLUG_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$")
+
+
+def safe_regex(q: str) -> dict:
+    """Case-insensitive regex filter with user input escaped (no regex injection/ReDoS)."""
+    return {"$regex": re.escape(q), "$options": "i"}
 
 # --------------------------------------------------------------------
 # Health
@@ -52,8 +63,10 @@ async def _issue_tokens_for(user_doc: dict, response: Response) -> dict:
 
 
 @auth_router.post("/register")
-async def register(payload: UserRegisterPublic, response: Response,
+async def register(payload: UserRegisterPublic, request: Request, response: Response,
                    db: AsyncIOMotorDatabase = Depends(get_db)):
+    rate_limit(request, "register", limit=5, window_seconds=60)
+    validate_password(payload.password)
     slug = payload.tenant_slug.strip().lower()
     if not SLUG_RE.match(slug):
         raise HTTPException(400, "Invalid slug (a-z, 0-9, hyphens, 3-32 chars)")
@@ -87,8 +100,9 @@ async def register(payload: UserRegisterPublic, response: Response,
 
 
 @auth_router.post("/login")
-async def login(payload: LoginRequest, response: Response,
+async def login(payload: LoginRequest, request: Request, response: Response,
                 db: AsyncIOMotorDatabase = Depends(get_db)):
+    rate_limit(request, "login", limit=10, window_seconds=60)
     email = payload.email.lower()
     query: dict = {"email": email}
     if payload.tenant_slug:
@@ -137,13 +151,15 @@ async def refresh(request: Request, response: Response,
     if not user_doc:
         raise HTTPException(401, "User not found")
     access = create_access_token(user_doc)
-    response.set_cookie("access_token", access, httponly=True, secure=False, samesite="lax",
-                        max_age=12 * 3600, path="/")
+    response.set_cookie("access_token", access, httponly=True, secure=cookies_secure(),
+                        samesite="lax", max_age=12 * 3600, path="/")
     return {"access_token": access}
 
 
 @auth_router.post("/forgot-password")
-async def forgot(payload: ForgotPasswordRequest, db: AsyncIOMotorDatabase = Depends(get_db)):
+async def forgot(payload: ForgotPasswordRequest, request: Request,
+                 db: AsyncIOMotorDatabase = Depends(get_db)):
+    rate_limit(request, "forgot", limit=5, window_seconds=300)
     user = await db.users.find_one({"email": payload.email.lower()})
     if user:
         token = secrets.token_urlsafe(32)
@@ -154,13 +170,20 @@ async def forgot(payload: ForgotPasswordRequest, db: AsyncIOMotorDatabase = Depe
             "used": False,
             "created_at": utcnow_iso(),
         })
-        # In dev, return token; production would send email
-        return {"ok": True, "dev_token": token, "message": "Reset link generated (dev mode)"}
+        # Production sends the token by email. Returning it in the response is
+        # account takeover for anyone who knows a victim's email, so it is only
+        # exposed when explicitly enabled for local development.
+        if os.environ.get("DEV_EXPOSE_RESET_TOKENS", "false").lower() == "true":
+            return {"ok": True, "dev_token": token, "message": "Reset link generated (dev mode)"}
+    # Same response whether or not the email exists (no account enumeration)
     return {"ok": True, "message": "If this email exists, a reset link has been sent"}
 
 
 @auth_router.post("/reset-password")
-async def reset(payload: ResetPasswordRequest, db: AsyncIOMotorDatabase = Depends(get_db)):
+async def reset(payload: ResetPasswordRequest, request: Request,
+                db: AsyncIOMotorDatabase = Depends(get_db)):
+    rate_limit(request, "reset", limit=10, window_seconds=300)
+    validate_password(payload.new_password)
     row = await db.password_reset_tokens.find_one({"token": payload.token})
     if not row or row.get("used"):
         raise HTTPException(400, "Invalid or expired token")
@@ -173,6 +196,172 @@ async def reset(payload: ResetPasswordRequest, db: AsyncIOMotorDatabase = Depend
     return {"ok": True}
 
 
+# --------------------------------------------------------------------
+# Google OAuth (Sign in / Sign up with Google)
+# --------------------------------------------------------------------
+GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+
+
+def _google_client_id() -> str:
+    v = os.environ.get("GOOGLE_CLIENT_ID", "")
+    if not v:
+        raise HTTPException(503, "Google sign-in is not configured on this server")
+    return v
+
+
+def _google_client_secret() -> str:
+    v = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+    if not v:
+        raise HTTPException(503, "Google sign-in is not configured on this server")
+    return v
+
+
+def _google_redirect_uri() -> str:
+    return os.environ.get("GOOGLE_REDIRECT_URI", "http://localhost:8001/api/v1/auth/google/callback")
+
+
+def _frontend_url() -> str:
+    return os.environ.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+
+
+@auth_router.get("/google/start")
+async def google_start(request: Request, intent: str = "login",
+                       tenant_name: Optional[str] = None, tenant_slug: Optional[str] = None,
+                       center_type: Optional[str] = None):
+    rate_limit(request, "google_start", limit=20, window_seconds=60)
+    if intent not in ("login", "register"):
+        raise HTTPException(400, "Invalid intent")
+
+    state_payload: dict = {"intent": intent}
+    if intent == "register":
+        if not tenant_name or not tenant_slug:
+            raise HTTPException(400, "tenant_name and tenant_slug are required to sign up")
+        slug = tenant_slug.strip().lower()
+        if not SLUG_RE.match(slug):
+            raise HTTPException(400, "Invalid slug (a-z, 0-9, hyphens, 3-32 chars)")
+        state_payload.update({
+            "tenant_name": tenant_name.strip()[:120],
+            "tenant_slug": slug,
+            "center_type": center_type or "tutoring",
+        })
+
+    state = create_oauth_state(state_payload)
+    params = {
+        "client_id": _google_client_id(),
+        "redirect_uri": _google_redirect_uri(),
+        "response_type": "code",
+        "scope": "openid email profile",
+        "state": state,
+        "access_type": "online",
+        "prompt": "select_account",
+    }
+    return RedirectResponse(f"{GOOGLE_AUTH_URL}?{urlencode(params)}", status_code=302)
+
+
+@auth_router.get("/google/callback")
+async def google_callback(request: Request, code: Optional[str] = None,
+                          state: Optional[str] = None, error: Optional[str] = None,
+                          db: AsyncIOMotorDatabase = Depends(get_db)):
+    front = _frontend_url()
+    rate_limit(request, "google_callback", limit=30, window_seconds=60)
+
+    if error or not code or not state:
+        return RedirectResponse(f"{front}/oauth/callback?error=access_denied", status_code=302)
+
+    try:
+        state_payload = decode_oauth_state(state)
+    except Exception:
+        return RedirectResponse(f"{front}/oauth/callback?error=invalid_state", status_code=302)
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            token_resp = await client.post(GOOGLE_TOKEN_URL, data={
+                "code": code,
+                "client_id": _google_client_id(),
+                "client_secret": _google_client_secret(),
+                "redirect_uri": _google_redirect_uri(),
+                "grant_type": "authorization_code",
+            })
+    except httpx.HTTPError:
+        return RedirectResponse(f"{front}/oauth/callback?error=google_unreachable", status_code=302)
+
+    if token_resp.status_code != 200:
+        return RedirectResponse(f"{front}/oauth/callback?error=google_token_exchange_failed", status_code=302)
+
+    id_token_str = token_resp.json().get("id_token")
+    if not id_token_str:
+        return RedirectResponse(f"{front}/oauth/callback?error=no_id_token", status_code=302)
+
+    try:
+        profile = decode_google_id_token(id_token_str, _google_client_id())
+    except ValueError:
+        return RedirectResponse(f"{front}/oauth/callback?error=invalid_token", status_code=302)
+
+    if not profile.get("email_verified"):
+        return RedirectResponse(f"{front}/oauth/callback?error=email_not_verified", status_code=302)
+
+    email = profile["email"].lower()
+    existing = await db.users.find_one({"email": email})
+
+    if existing:
+        if not existing.get("is_active", True):
+            return RedirectResponse(f"{front}/oauth/callback?error=account_disabled", status_code=302)
+        user_doc = existing
+        if not user_doc.get("google_sub"):
+            await db.users.update_one(
+                {"id": user_doc["id"]},
+                {"$set": {"google_sub": profile["sub"], "auth_provider": "google",
+                          "updated_at": utcnow_iso()}},
+            )
+    else:
+        if state_payload.get("intent") != "register":
+            q = urlencode({"error": "no_account", "email": email})
+            return RedirectResponse(f"{front}/oauth/callback?{q}", status_code=302)
+
+        slug = state_payload["tenant_slug"]
+        if await db.tenants.find_one({"slug": slug}):
+            return RedirectResponse(f"{front}/oauth/callback?error=slug_taken", status_code=302)
+
+        tenant = Tenant(
+            name=state_payload["tenant_name"], slug=slug,
+            center_type=state_payload.get("center_type") or "tutoring",
+            status="trial",
+            trial_ends_at=(datetime.now(timezone.utc) + timedelta(days=14)).isoformat(),
+        )
+        await db.tenants.insert_one(tenant.model_dump())
+
+        new_user = User(
+            tenant_id=tenant.id, email=email,
+            name=profile.get("name") or email.split("@")[0],
+            role=ROLE_OWNER, email_verified=True,
+        )
+        user_doc = new_user.model_dump()
+        # Random, never-shared password hash: this account only authenticates via
+        # Google unless the owner later sets a password through forgot-password.
+        user_doc["password_hash"] = hash_password(secrets.token_urlsafe(32))
+        user_doc["google_sub"] = profile["sub"]
+        user_doc["auth_provider"] = "google"
+        await db.users.insert_one(user_doc)
+
+    access = create_access_token(user_doc)
+    refresh = create_refresh_token(user_doc)
+    exchange_code = store_oauth_exchange({
+        "access_token": access, "refresh_token": refresh, "user": sanitize(user_doc),
+    })
+    return RedirectResponse(f"{front}/oauth/callback?code={exchange_code}", status_code=302)
+
+
+@auth_router.post("/google/exchange")
+async def google_exchange(payload: GoogleExchangeRequest, request: Request, response: Response):
+    rate_limit(request, "google_exchange", limit=20, window_seconds=60)
+    data = pop_oauth_exchange(payload.code)
+    if not data:
+        raise HTTPException(400, "Invalid or expired code")
+    set_auth_cookies(response, data["access_token"], data["refresh_token"])
+    return data
+
+
 router.include_router(auth_router)
 
 
@@ -182,12 +371,17 @@ router.include_router(auth_router)
 tenants_router = APIRouter(prefix="/tenants", tags=["tenants"])
 
 
+# Fields safe to expose on the unauthenticated by-slug endpoint (branding only)
+TENANT_PUBLIC_FIELDS = ("id", "name", "slug", "center_type", "status", "logo_url",
+                        "primary_color", "accent_color", "language")
+
+
 @tenants_router.get("/by-slug/{slug}")
 async def get_tenant_by_slug(slug: str, db: AsyncIOMotorDatabase = Depends(get_db)):
     t = await db.tenants.find_one({"slug": slug.lower()})
     if not t:
         raise HTTPException(404, "Tenant not found")
-    return sanitize(t)
+    return {k: t.get(k) for k in TENANT_PUBLIC_FIELDS}
 
 
 @tenants_router.get("")
@@ -205,6 +399,7 @@ async def create_tenant(payload: TenantCreate, db: AsyncIOMotorDatabase = Depend
         raise HTTPException(400, "Invalid slug")
     if await db.tenants.find_one({"slug": slug}):
         raise HTTPException(409, "Slug already taken")
+    validate_password(payload.owner_password)
     email = payload.owner_email.lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(409, "Owner email already registered")
@@ -219,6 +414,14 @@ async def create_tenant(payload: TenantCreate, db: AsyncIOMotorDatabase = Depend
     return {"tenant": t.model_dump(), "owner": sanitize(doc)}
 
 
+# Settings a tenant owner may edit. Plan, status, quotas and trial dates are
+# billing-controlled: letting an owner PATCH them is a subscription bypass.
+TENANT_OWNER_EDITABLE = {
+    "name", "center_type", "logo_url", "primary_color", "accent_color",
+    "language", "currency", "timezone", "invoice_prefix", "student_prefix",
+}
+
+
 @tenants_router.patch("/{tenant_id}")
 async def update_tenant(tenant_id: str, updates: dict,
                         db: AsyncIOMotorDatabase = Depends(get_db),
@@ -227,9 +430,63 @@ async def update_tenant(tenant_id: str, updates: dict,
         raise HTTPException(403, "Forbidden")
     if user["role"] != ROLE_SUPER_ADMIN and user.get("tenant_id") != tenant_id:
         raise HTTPException(403, "Cannot edit another tenant")
-    updates = {k: v for k, v in updates.items() if k not in ("id", "created_at", "slug")}
+    if user["role"] == ROLE_SUPER_ADMIN:
+        updates = {k: v for k, v in updates.items() if k not in ("id", "created_at", "slug")}
+    else:
+        updates = {k: v for k, v in updates.items() if k in TENANT_OWNER_EDITABLE}
+    if not updates:
+        raise HTTPException(400, "No editable fields in payload")
     updates["updated_at"] = utcnow_iso()
     await db.tenants.update_one({"id": tenant_id}, {"$set": updates})
+    return sanitize(await db.tenants.find_one({"id": tenant_id}))
+
+
+MAX_LOGO_BYTES = 3 * 1024 * 1024  # 3MB
+ALLOWED_LOGO_TYPES = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+}
+LOGO_UPLOAD_DIR = Path(__file__).parent / "uploads" / "logos"
+
+
+@tenants_router.post("/{tenant_id}/logo")
+async def upload_tenant_logo(tenant_id: str, file: UploadFile = File(...),
+                             db: AsyncIOMotorDatabase = Depends(get_db),
+                             user: dict = Depends(get_current_user)):
+    if user["role"] not in (ROLE_SUPER_ADMIN, ROLE_OWNER):
+        raise HTTPException(403, "Forbidden")
+    if user["role"] != ROLE_SUPER_ADMIN and user.get("tenant_id") != tenant_id:
+        raise HTTPException(403, "Cannot edit another tenant")
+
+    ext = ALLOWED_LOGO_TYPES.get(file.content_type)
+    if not ext:
+        raise HTTPException(400, "Only PNG, JPEG, WEBP or GIF images are allowed")
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(400, "Empty file")
+    if len(content) > MAX_LOGO_BYTES:
+        raise HTTPException(400, "Logo must be under 3MB")
+
+    tenant = await db.tenants.find_one({"id": tenant_id})
+    if not tenant:
+        raise HTTPException(404, "Tenant not found")
+
+    LOGO_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    # Random filename: never trust the client-supplied name for a filesystem path.
+    filename = f"{tenant_id}-{secrets.token_hex(6)}{ext}"
+    (LOGO_UPLOAD_DIR / filename).write_bytes(content)
+
+    # Best-effort cleanup of the previous logo so uploads don't accumulate forever.
+    old_logo = tenant.get("logo_url") or ""
+    if old_logo.startswith("/uploads/logos/"):
+        (LOGO_UPLOAD_DIR / old_logo.rsplit("/", 1)[-1]).unlink(missing_ok=True)
+
+    new_url = f"/uploads/logos/{filename}"
+    await db.tenants.update_one({"id": tenant_id},
+                                {"$set": {"logo_url": new_url, "updated_at": utcnow_iso()}})
     return sanitize(await db.tenants.find_one({"id": tenant_id}))
 
 
@@ -258,8 +515,16 @@ async def create_user(payload: UserCreate, db: AsyncIOMotorDatabase = Depends(ge
                       user: dict = Depends(get_current_user)):
     if user["role"] not in ADMIN_ROLES and user["role"] != ROLE_SUPER_ADMIN:
         raise HTTPException(403, "Only owners/directors can add users")
-    if payload.role not in ALL_ROLES:
+    if payload.role not in TENANT_ASSIGNABLE_ROLES:
         raise HTTPException(400, "Invalid role")
+    validate_password(payload.password)
+    # Enforce the tenant's user quota
+    if user.get("tenant_id"):
+        tenant = await db.tenants.find_one({"id": user["tenant_id"]})
+        max_users = (tenant or {}).get("max_users", 20)
+        current = await db.users.count_documents({"tenant_id": user["tenant_id"]})
+        if current >= max_users:
+            raise HTTPException(403, "User limit reached for your plan")
     email = payload.email.lower()
     if await db.users.find_one({"email": email}):
         raise HTTPException(409, "Email already registered")
@@ -271,14 +536,60 @@ async def create_user(payload: UserCreate, db: AsyncIOMotorDatabase = Depends(ge
     return sanitize(doc)
 
 
+@users_router.patch("/{user_id}")
+async def update_user(user_id: str, payload: UserUpdate, db: AsyncIOMotorDatabase = Depends(get_db),
+                      user: dict = Depends(get_current_user)):
+    if user["role"] not in ADMIN_ROLES and user["role"] != ROLE_SUPER_ADMIN:
+        raise HTTPException(403, "Forbidden")
+    q = tenant_filter(user, {"id": user_id})
+    target = await db.users.find_one(q)
+    if not target:
+        raise HTTPException(404, "Not found")
+    if target.get("role") == ROLE_SUPER_ADMIN:
+        raise HTTPException(400, "Cannot edit a super admin account")
+
+    updates: dict = {}
+    if payload.name is not None:
+        name = payload.name.strip()
+        if not name:
+            raise HTTPException(400, "Name cannot be empty")
+        updates["name"] = name
+    if payload.phone is not None:
+        updates["phone"] = payload.phone
+    if payload.role is not None:
+        if payload.role not in TENANT_ASSIGNABLE_ROLES:
+            raise HTTPException(400, "Invalid role")
+        updates["role"] = payload.role
+    if payload.is_active is not None:
+        if user_id == user["id"] and not payload.is_active:
+            raise HTTPException(400, "Cannot deactivate your own account")
+        updates["is_active"] = payload.is_active
+    if payload.email is not None:
+        email = payload.email.lower()
+        if email != target["email"] and await db.users.find_one({"email": email}):
+            raise HTTPException(409, "Email already registered")
+        updates["email"] = email
+
+    if not updates:
+        raise HTTPException(400, "No editable fields in payload")
+    updates["updated_at"] = utcnow_iso()
+    await db.users.update_one(q, {"$set": updates})
+    return sanitize(await db.users.find_one(q, {"_id": 0, "password_hash": 0}))
+
+
 @users_router.delete("/{user_id}")
 async def delete_user(user_id: str, db: AsyncIOMotorDatabase = Depends(get_db),
                       user: dict = Depends(get_current_user)):
     if user["role"] not in ADMIN_ROLES and user["role"] != ROLE_SUPER_ADMIN:
         raise HTTPException(403, "Forbidden")
-    q = tenant_filter(user, {"id": user_id})
     if user_id == user["id"]:
         raise HTTPException(400, "Cannot delete yourself")
+    q = tenant_filter(user, {"id": user_id})
+    target = await db.users.find_one(q)
+    if not target:
+        raise HTTPException(404, "Not found")
+    if target.get("role") == ROLE_SUPER_ADMIN:
+        raise HTTPException(400, "Cannot delete a super admin account")
     await db.users.delete_one(q)
     return {"ok": True}
 
@@ -310,9 +621,15 @@ async def _get_scoped(db, collection: str, item_id: str, user: dict):
     return doc
 
 
+PROTECTED_UPDATE_FIELDS = ("id", "tenant_id", "created_at", "password_hash")
+
+
 async def _update_scoped(db, collection: str, item_id: str, updates: dict, user: dict):
     q = tenant_filter(user, {"id": item_id})
-    updates = {k: v for k, v in updates.items() if k not in ("id", "tenant_id", "created_at")}
+    # Drop protected fields and any key that could smuggle Mongo operators/paths
+    updates = {k: v for k, v in updates.items()
+               if k not in PROTECTED_UPDATE_FIELDS
+               and isinstance(k, str) and not k.startswith("$") and "." not in k}
     updates["updated_at"] = utcnow_iso()
     r = await db[collection].update_one(q, {"$set": updates})
     if r.matched_count == 0:
@@ -342,10 +659,10 @@ async def list_students(db=Depends(get_db), user=Depends(get_current_user),
         extra["status"] = status
     if q:
         extra["$or"] = [
-            {"first_name": {"$regex": q, "$options": "i"}},
-            {"last_name": {"$regex": q, "$options": "i"}},
-            {"email": {"$regex": q, "$options": "i"}},
-            {"phone": {"$regex": q, "$options": "i"}},
+            {"first_name": safe_regex(q)},
+            {"last_name": safe_regex(q)},
+            {"email": safe_regex(q)},
+            {"phone": safe_regex(q)},
         ]
     return await _list_scoped(db, "students", user, extra)
 
@@ -393,9 +710,9 @@ async def list_parents(db=Depends(get_db), user=Depends(get_current_user), q: Op
     extra: dict = {}
     if q:
         extra["$or"] = [
-            {"name": {"$regex": q, "$options": "i"}},
-            {"email": {"$regex": q, "$options": "i"}},
-            {"phone": {"$regex": q, "$options": "i"}},
+            {"name": safe_regex(q)},
+            {"email": safe_regex(q)},
+            {"phone": safe_regex(q)},
         ]
     return await _list_scoped(db, "parents", user, extra)
 
@@ -436,9 +753,9 @@ async def list_teachers(db=Depends(get_db), user=Depends(get_current_user), q: O
     extra: dict = {}
     if q:
         extra["$or"] = [
-            {"first_name": {"$regex": q, "$options": "i"}},
-            {"last_name": {"$regex": q, "$options": "i"}},
-            {"email": {"$regex": q, "$options": "i"}},
+            {"first_name": safe_regex(q)},
+            {"last_name": safe_regex(q)},
+            {"email": safe_regex(q)},
         ]
     return await _list_scoped(db, "teachers", user, extra)
 
@@ -481,8 +798,8 @@ async def list_courses(db=Depends(get_db), user=Depends(get_current_user), q: Op
     extra: dict = {}
     if q:
         extra["$or"] = [
-            {"title": {"$regex": q, "$options": "i"}},
-            {"category": {"$regex": q, "$options": "i"}},
+            {"title": safe_regex(q)},
+            {"category": safe_regex(q)},
         ]
     return await _list_scoped(db, "courses", user, extra)
 
@@ -857,7 +1174,7 @@ async def global_search(q: str = Query(..., min_length=1),
     tid = user.get("tenant_id")
     if not tid:
         return {"results": []}
-    rx = {"$regex": q, "$options": "i"}
+    rx = safe_regex(q)
     results: list = []
 
     async def add(coll: str, filt: dict, label: str, name_fn):
@@ -938,10 +1255,14 @@ async def set_tenant_status(tenant_id: str, payload: dict,
 async def hard_delete_tenant(tenant_id: str, db=Depends(get_db),
                              _: dict = Depends(require_roles(ROLE_SUPER_ADMIN))):
     """Cascade delete everything owned by a tenant."""
+    tenant = await db.tenants.find_one({"id": tenant_id})
     for coll in ("users", "students", "parents", "teachers", "courses",
                  "groups", "sessions", "attendance", "payments"):
         await db[coll].delete_many({"tenant_id": tenant_id})
     await db.tenants.delete_one({"id": tenant_id})
+    logo_url = (tenant or {}).get("logo_url") or ""
+    if logo_url.startswith("/uploads/logos/"):
+        (LOGO_UPLOAD_DIR / logo_url.rsplit("/", 1)[-1]).unlink(missing_ok=True)
     return {"ok": True}
 
 

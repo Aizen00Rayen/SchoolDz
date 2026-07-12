@@ -7,6 +7,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useI18n } from "@/lib/i18n";
+import { useAuth } from "@/lib/auth";
 
 const DEFAULT_FORM = {
   title: "", description: "", category: "", duration_weeks: 12, price: 0,
@@ -15,6 +16,7 @@ const DEFAULT_FORM = {
 
 export default function CoursesPage() {
   const { t } = useI18n();
+  const { tenant } = useAuth();
   return (
     <CrudPanel
       moduleKey="courses"
@@ -37,7 +39,14 @@ export default function CoursesPage() {
           ),
         },
         { key: "duration_weeks", label: "Duration", render: (r) => `${r.duration_weeks || 0}w` },
-        { key: "price", label: "Price", render: (r) => <span className="font-mono">{r.price?.toLocaleString?.() || 0}</span> },
+        {
+          key: "price", label: "Price",
+          render: (r) => (
+            <span className="font-mono">
+              {r.price?.toLocaleString?.() || 0} {tenant?.currency || "DZD"}
+            </span>
+          ),
+        },
         { key: "max_students", label: "Capacity" },
         { key: "status", label: "Status", render: (r) => <StatusPill status={r.status} /> },
       ]}

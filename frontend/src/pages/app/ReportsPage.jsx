@@ -29,9 +29,9 @@ export default function ReportsPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <Card icon={Users} label="Active students" value={stats.students_total} />
-        <Card icon={Wallet} label="Revenue this month" value={`${(stats.revenue_month || 0).toLocaleString()} ${tenant?.currency || ""}`} />
+        <Card icon={Wallet} label="Revenue this month" value={`${(stats.revenue_month || 0).toLocaleString()} ${tenant?.currency || "DZD"}`} />
         <Card icon={TrendingUp} label="Paid invoices" value={paid} />
-        <Card icon={TrendingDown} label="Outstanding" value={`${(stats.outstanding || 0).toLocaleString()} ${tenant?.currency || ""}`} />
+        <Card icon={TrendingDown} label="Outstanding" value={`${(stats.outstanding || 0).toLocaleString()} ${tenant?.currency || "DZD"}`} />
       </div>
 
       <div className="surface-card p-5">

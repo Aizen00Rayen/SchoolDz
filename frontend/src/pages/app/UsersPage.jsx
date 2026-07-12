@@ -138,7 +138,7 @@ export default function UsersPage() {
                 <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required data-testid="users-form-email" />
               </Field>
               <Field label="Password" required>
-                <Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required minLength={6} data-testid="users-form-password" />
+                <Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required minLength={8} data-testid="users-form-password" />
               </Field>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

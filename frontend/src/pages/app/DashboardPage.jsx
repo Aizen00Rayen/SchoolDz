@@ -187,7 +187,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="text-end">
                   <div className="text-sm font-mono font-semibold">
-                    {Math.round(p.amount).toLocaleString()} {tenant?.currency}
+                    {Math.round(p.amount).toLocaleString()} {tenant?.currency || "DZD"}
                   </div>
                   <StatusPill status={p.status} />
                 </div>

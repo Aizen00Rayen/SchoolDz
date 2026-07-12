@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "frontend", "start"],
+      "port": 3000
+    },
+    {
+      "name": "frontend-debug",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd frontend && PORT=3002 BROWSER=none npx craco start"],
+      "port": 3002
+    }
+  ]
+}

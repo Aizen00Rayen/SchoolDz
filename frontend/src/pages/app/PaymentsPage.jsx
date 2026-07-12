@@ -62,7 +62,7 @@ export default function PaymentsPage() {
           key: "amount", label: "Amount",
           render: (r) => (
             <span className="font-mono font-semibold">
-              {Math.round(r.amount).toLocaleString()} {tenant?.currency}
+              {Math.round(r.amount).toLocaleString()} {tenant?.currency || "DZD"}
             </span>
           ),
         },

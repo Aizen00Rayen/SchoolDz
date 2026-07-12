@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { ImagePlus, Loader2 } from "lucide-react";
 import { PageHeader } from "./_shared";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
-import { api, extractError } from "@/lib/api";
+import { api, extractError, resolveFileUrl } from "@/lib/api";
 import { Field } from "./StudentsPage";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,11 +14,15 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 
+const MAX_LOGO_BYTES = 3 * 1024 * 1024;
+const ALLOWED_LOGO_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+
 export default function SettingsPage() {
   const { tenant, user, refreshTenant } = useAuth();
   const { t } = useI18n();
   const qc = useQueryClient();
   const [form, setForm] = useState(tenant || {});
+  const fileInputRef = useRef(null);
 
   const saveMut = useMutation({
     mutationFn: async () => api.patch(`/tenants/${tenant.id}`, form).then((r) => r.data),
@@ -27,6 +32,35 @@ export default function SettingsPage() {
     },
     onError: (e) => toast.error(extractError(e)),
   });
+
+  const uploadLogoMut = useMutation({
+    mutationFn: async (file) => {
+      const body = new FormData();
+      body.append("file", file);
+      return api.post(`/tenants/${tenant.id}/logo`, body).then((r) => r.data);
+    },
+    onSuccess: async (updated) => {
+      toast.success("Logo updated");
+      setForm((f) => ({ ...f, logo_url: updated.logo_url }));
+      await refreshTenant();
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
+  const onLogoSelect = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!ALLOWED_LOGO_TYPES.includes(file.type)) {
+      toast.error("Only PNG, JPEG, WEBP or GIF images are allowed");
+      return;
+    }
+    if (file.size > MAX_LOGO_BYTES) {
+      toast.error("Logo must be under 3MB");
+      return;
+    }
+    uploadLogoMut.mutate(file);
+  };
 
   if (!tenant) return null;
   const canEdit = user?.role === "owner" || user?.role === "director" || user?.role === "super_admin";
@@ -81,8 +115,39 @@ export default function SettingsPage() {
           <Field label="Accent color">
             <Input type="color" value={form.accent_color || "#E53935"} onChange={(e) => setForm({ ...form, accent_color: e.target.value })} disabled={!canEdit} className="h-11" />
           </Field>
-          <Field label="Logo URL">
-            <Input value={form.logo_url || ""} onChange={(e) => setForm({ ...form, logo_url: e.target.value })} placeholder="https://…" disabled={!canEdit} />
+          <Field label="Logo">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-lg border border-border bg-muted grid place-items-center overflow-hidden flex-shrink-0">
+                {form.logo_url ? (
+                  <img src={resolveFileUrl(form.logo_url)} alt="Logo" className="w-full h-full object-cover" />
+                ) : (
+                  <ImagePlus className="w-4 h-4 text-muted-foreground" />
+                )}
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                className="hidden"
+                onChange={onLogoSelect}
+                data-testid="settings-logo-input"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!canEdit || uploadLogoMut.isPending}
+                onClick={() => fileInputRef.current?.click()}
+                data-testid="settings-logo-upload-button"
+              >
+                {uploadLogoMut.isPending ? (
+                  <Loader2 className="w-3.5 h-3.5 me-2 animate-spin" />
+                ) : (
+                  <ImagePlus className="w-3.5 h-3.5 me-2" />
+                )}
+                {form.logo_url ? "Replace logo" : "Upload logo"}
+              </Button>
+            </div>
           </Field>
         </div>
       </div>

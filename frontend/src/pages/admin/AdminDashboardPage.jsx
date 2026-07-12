@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { motion } from "framer-motion";
 import {
   ArrowUpRight, Building2, GraduationCap, LogOut, Moon, Sun,
-  ShieldCheck, Trash2, Users, Wallet, PowerOff, Power,
+  ShieldCheck, Trash2, Users, Wallet, PowerOff, Power, Pencil,
 } from "lucide-react";
 
 import { api, extractError } from "@/lib/api";
@@ -13,7 +13,25 @@ import { useAuth } from "@/lib/auth";
 import { useTheme } from "@/lib/theme";
 import { useI18n } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import { StatusPill } from "@/pages/app/_shared";
+
+const USER_ROLES = [
+  { value: "owner", label: "Owner" },
+  { value: "director", label: "Director" },
+  { value: "secretary", label: "Secretary" },
+  { value: "accountant", label: "Accountant" },
+  { value: "teacher", label: "Teacher" },
+  { value: "parent", label: "Parent" },
+  { value: "student", label: "Student" },
+];
 
 export default function AdminDashboardPage() {
   const { user, tenant, logout } = useAuth();
@@ -54,10 +72,55 @@ export default function AdminDashboardPage() {
     onError: (e) => toast.error(extractError(e)),
   });
 
+  const { data: usersData, isLoading: usersLoading } = useQuery({
+    queryKey: ["admin-users"],
+    queryFn: async () => (await api.get("/users")).data,
+    enabled: user?.role === "super_admin",
+  });
+
+  const [editingUser, setEditingUser] = useState(null);
+  const [editForm, setEditForm] = useState({ name: "", email: "", phone: "", role: "secretary" });
+
+  const toggleActiveMut = useMutation({
+    mutationFn: ({ id, is_active }) =>
+      api.patch(`/users/${id}`, { is_active }).then((r) => r.data),
+    onSuccess: () => {
+      toast.success("User updated");
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
+  const updateUserMut = useMutation({
+    mutationFn: ({ id, payload }) => api.patch(`/users/${id}`, payload).then((r) => r.data),
+    onSuccess: () => {
+      toast.success("User updated");
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+      setEditingUser(null);
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
+  const deleteUserMut = useMutation({
+    mutationFn: (id) => api.delete(`/users/${id}`).then((r) => r.data),
+    onSuccess: () => {
+      toast.success("User removed");
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
   if (!user || user.role !== "super_admin") return null;
 
   const kpis = data?.kpis || {};
   const tenants = data?.tenants || [];
+  const tenantNameById = Object.fromEntries(tenants.map((tt) => [tt.id, tt.name]));
+  const platformUsers = (usersData?.items || []).filter((u) => u.role !== "super_admin");
+
+  const openEdit = (u) => {
+    setEditingUser(u);
+    setEditForm({ name: u.name || "", email: u.email || "", phone: u.phone || "", role: u.role || "secretary" });
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -132,7 +195,7 @@ export default function AdminDashboardPage() {
           <KpiCard
             icon={Wallet}
             label={t("admin.revenue")}
-            value={`$${Math.round(kpis.platform_revenue ?? 0).toLocaleString()}`}
+            value={`${Math.round(kpis.platform_revenue ?? 0).toLocaleString()} DZD`}
             testid="admin-kpi-revenue"
           />
         </div>
@@ -251,7 +314,189 @@ export default function AdminDashboardPage() {
             </div>
           )}
         </div>
+
+        {/* Users table */}
+        <div className="surface-card overflow-hidden mt-8">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <div>
+              <h3 className="font-display font-semibold text-lg">{t("admin.users.title")}</h3>
+              <p className="text-xs text-muted-foreground">
+                {platformUsers.length} {platformUsers.length === 1 ? "user" : "users"} across every workspace
+              </p>
+            </div>
+          </div>
+
+          {usersLoading ? (
+            <div className="p-8 text-center text-muted-foreground text-sm">{t("actions.loading")}</div>
+          ) : platformUsers.length === 0 ? (
+            <div className="p-12 text-center">
+              <Users className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
+              <div className="text-sm text-muted-foreground">No users yet</div>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40 border-b border-border">
+                  <tr>
+                    <Th>Name</Th>
+                    <Th>Email</Th>
+                    <Th>Workspace</Th>
+                    <Th>Role</Th>
+                    <Th>Status</Th>
+                    <Th className="text-end">Actions</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {platformUsers.map((u, i) => (
+                    <motion.tr
+                      key={u.id}
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.02 }}
+                      data-testid={`admin-user-row-${u.id}`}
+                      className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors"
+                    >
+                      <td className="px-4 py-3 font-medium">{u.name}</td>
+                      <td className="px-4 py-3 text-xs">{u.email}</td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                        {tenantNameById[u.tenant_id] || "—"}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-muted capitalize">{u.role}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusPill status={u.is_active === false ? "suspended" : "active"} />
+                      </td>
+                      <td className="px-4 py-2 text-end">
+                        <div className="inline-flex items-center gap-1">
+                          {u.is_active === false ? (
+                            <Button
+                              size="sm" variant="outline"
+                              onClick={() => toggleActiveMut.mutate({ id: u.id, is_active: true })}
+                              data-testid={`admin-user-activate-${u.id}`}
+                              className="h-8 text-xs text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10"
+                            >
+                              <Power className="w-3 h-3 me-1" />
+                              {t("admin.actions.activate")}
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm" variant="outline"
+                              onClick={() => toggleActiveMut.mutate({ id: u.id, is_active: false })}
+                              data-testid={`admin-user-pause-${u.id}`}
+                              className="h-8 text-xs text-amber-600 border-amber-500/30 hover:bg-amber-500/10"
+                            >
+                              <PowerOff className="w-3 h-3 me-1" />
+                              {t("admin.actions.pause")}
+                            </Button>
+                          )}
+                          <Button
+                            size="icon" variant="ghost"
+                            onClick={() => openEdit(u)}
+                            data-testid={`admin-user-edit-${u.id}`}
+                            className="h-8 w-8"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            size="icon" variant="ghost"
+                            onClick={() => {
+                              if (window.confirm(t("admin.confirm.remove_user"))) {
+                                deleteUserMut.mutate(u.id);
+                              }
+                            }}
+                            data-testid={`admin-user-delete-${u.id}`}
+                            className="h-8 w-8 text-red-600 hover:bg-red-500/10"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </td>
+                    </motion.tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </main>
+
+      {/* Edit user dialog */}
+      <Dialog open={!!editingUser} onOpenChange={(open) => !open && setEditingUser(null)}>
+        <DialogContent className="max-w-lg bg-card">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl">{t("admin.users.edit_title")}</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {editingUser?.email}
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!editingUser) return;
+              updateUserMut.mutate({ id: editingUser.id, payload: editForm });
+            }}
+            className="space-y-4"
+          >
+            <div className="space-y-2">
+              <Label htmlFor="edit-name">Full name</Label>
+              <Input
+                id="edit-name"
+                value={editForm.name}
+                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                required
+                data-testid="admin-user-form-name"
+              />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="edit-email">Email</Label>
+                <Input
+                  id="edit-email"
+                  type="email"
+                  value={editForm.email}
+                  onChange={(e) => setEditForm({ ...editForm, email: e.target.value })}
+                  required
+                  data-testid="admin-user-form-email"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-phone">Phone</Label>
+                <Input
+                  id="edit-phone"
+                  value={editForm.phone}
+                  onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                  data-testid="admin-user-form-phone"
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="edit-role">Role</Label>
+              <Select value={editForm.role} onValueChange={(v) => setEditForm({ ...editForm, role: v })}>
+                <SelectTrigger className="bg-background" data-testid="admin-user-form-role"><SelectValue /></SelectTrigger>
+                <SelectContent className="bg-popover">
+                  {USER_ROLES.map((r) => (
+                    <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setEditingUser(null)}>
+                {t("actions.cancel")}
+              </Button>
+              <Button
+                type="submit"
+                disabled={updateUserMut.isPending}
+                data-testid="admin-user-form-submit"
+                className="bg-accent hover:bg-accent/90 text-accent-foreground"
+              >
+                {t("actions.save")}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

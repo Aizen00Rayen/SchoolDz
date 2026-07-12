@@ -45,6 +45,14 @@ export function AuthProvider({ children }) {
     return data.user;
   };
 
+  const loginWithGoogleCode = async (code) => {
+    const { data } = await api.post("/auth/google/exchange", { code });
+    if (data.access_token) setAccessToken(data.access_token);
+    setUser(data.user);
+    await loadMe();
+    return data.user;
+  };
+
   const logout = async () => {
     try {
       await api.post("/auth/logout");
@@ -62,7 +70,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, tenant, loading, login, register, logout, refreshTenant, extractError }}
+      value={{ user, tenant, loading, login, register, loginWithGoogleCode, logout, refreshTenant, extractError }}
     >
       {children}
     </AuthContext.Provider>

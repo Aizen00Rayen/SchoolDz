@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
@@ -11,7 +11,7 @@ import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { useTheme } from "@/lib/theme";
 import { APPUI, AUTH } from "@/constants/testIds";
-import { api } from "@/lib/api";
+import { api, resolveFileUrl } from "@/lib/api";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -121,10 +121,18 @@ export default function AppShell() {
                 data-testid={APPUI.tenantSwitcher}
                 className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:bg-muted transition-colors group"
               >
-                <div className="w-8 h-8 rounded-md bg-primary grid place-items-center flex-shrink-0">
-                  <span className="font-display font-black text-primary-foreground text-sm">
-                    {(tenant?.name || "S")[0]?.toUpperCase()}
-                  </span>
+                <div className="w-8 h-8 rounded-md bg-primary grid place-items-center flex-shrink-0 overflow-hidden">
+                  {tenant?.logo_url ? (
+                    <img
+                      src={resolveFileUrl(tenant.logo_url)}
+                      alt={tenant?.name || "Workspace logo"}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <span className="font-display font-black text-primary-foreground text-sm">
+                      {(tenant?.name || "S")[0]?.toUpperCase()}
+                    </span>
+                  )}
                 </div>
                 <div className="min-w-0 flex-1 text-start">
                   <div className="text-sm font-semibold truncate">
@@ -149,9 +157,11 @@ export default function AppShell() {
                 </div>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => nav("/app/settings")}>
-                <Settings className="w-4 h-4 me-2" />
-                Workspace settings
+              <DropdownMenuItem asChild>
+                <Link to="/app/settings">
+                  <Settings className="w-4 h-4 me-2" />
+                  Workspace settings
+                </Link>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -259,11 +269,13 @@ export default function AppShell() {
                   <div className="text-sm truncate">{user?.email}</div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => nav("/app/settings")}>
-                  <Settings className="w-4 h-4 me-2" /> {t("menu.settings")}
+                <DropdownMenuItem asChild>
+                  <Link to="/app/settings">
+                    <Settings className="w-4 h-4 me-2" /> {t("menu.settings")}
+                  </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  onClick={async () => {
+                  onSelect={async () => {
                     await logout();
                     nav("/", { replace: true });
                   }}

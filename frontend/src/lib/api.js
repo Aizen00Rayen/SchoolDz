@@ -1,7 +1,15 @@
 import axios from "axios";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+export const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 export const API_BASE = `${BACKEND_URL}/api/v1`;
+
+// Resolves a stored relative path (e.g. tenant.logo_url = "/uploads/logos/x.png")
+// into a fetchable absolute URL. Passes absolute URLs through unchanged.
+export function resolveFileUrl(path) {
+  if (!path) return null;
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${BACKEND_URL}${path}`;
+}
 
 // In-memory access token (also cookies are set httpOnly by backend)
 let accessToken = null;

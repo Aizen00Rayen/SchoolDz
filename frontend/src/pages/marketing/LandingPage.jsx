@@ -5,15 +5,16 @@ import {
   useMotionValueEvent, useInView,
 } from "framer-motion";
 import {
-  ArrowRight, Users, CalendarCheck2, Wallet, BookOpen, Sparkles,
-  ShieldCheck, Globe2, BarChart3, Palette, Check, Star, Cpu, Rocket,
-  Zap, Layers, GraduationCap, ArrowUpRight,
+  ArrowRight, Users, CalendarCheck2, Wallet, BookOpen,
+  BarChart3, Check, Star, Cpu, Rocket,
+  Zap, Layers, GraduationCap,
 } from "lucide-react";
 
 import MarketingNav from "./MarketingNav";
 import { useI18n } from "@/lib/i18n";
 import { MARKETING } from "@/constants/testIds";
 import { Button } from "@/components/ui/button";
+import { StickyFeatureCards } from "@/components/ui/sticky-scroll-cards-section";
 
 /* -----------------------------------------------------------
  * Interactive mouse-follow spotlight background
@@ -200,7 +201,7 @@ function DashboardPreview({ lang }) {
                 <div className="grid grid-cols-3 gap-2.5">
                   {[
                     { label: "Students", value: 324, sub: "+12" },
-                    { label: "Revenue", value: "$88K", sub: "+18%", accent: true },
+                    { label: "Revenue", value: "8.8M DZD", sub: "+18%", accent: true },
                     { label: "Attendance", value: "94%", sub: "▲" },
                   ].map((k, i) => (
                     <motion.div
@@ -314,7 +315,7 @@ function DashboardPreview({ lang }) {
               Paid
             </div>
           </div>
-          <div className="font-mono text-lg font-bold">$1,240</div>
+          <div className="font-mono text-lg font-bold">124,000 DZD</div>
           <div className="text-[9px] text-muted-foreground">INV-000042 · just now</div>
         </motion.div>
 
@@ -354,93 +355,39 @@ function CenterTypesMarquee({ types }) {
 }
 
 /* -----------------------------------------------------------
- * Bento feature grid
+ * Sticky-stacking feature cards
  * ----------------------------------------------------------- */
-function BentoGrid({ t, lang }) {
-  const items = [
+function stickyFeatureItems(t) {
+  return [
     {
-      key: "students", icon: GraduationCap, span: "md:col-span-4 md:row-span-2",
-      title: t("feature.students.title"), desc: t("feature.students.desc"),
-      accent: true,
+      title: t("feature.students.title"),
+      description: t("feature.students.desc"),
+      icon: GraduationCap,
+      imageUrl: "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?q=80&w=1200&auto=format&fit=crop",
+      className: "bg-blue-500/10 border-blue-500/20",
     },
     {
-      key: "attendance", icon: CalendarCheck2, span: "md:col-span-4",
-      title: t("feature.attendance.title"), desc: t("feature.attendance.desc"),
+      title: t("feature.attendance.title"),
+      description: t("feature.attendance.desc"),
+      icon: CalendarCheck2,
+      imageUrl: "https://images.unsplash.com/photo-1503676260728-1c00da094a0b?q=80&w=1200&auto=format&fit=crop",
+      className: "bg-emerald-500/10 border-emerald-500/20",
     },
     {
-      key: "payments", icon: Wallet, span: "md:col-span-4",
-      title: t("feature.payments.title"), desc: t("feature.payments.desc"),
+      title: t("feature.payments.title"),
+      description: t("feature.payments.desc"),
+      icon: Wallet,
+      imageUrl: "https://images.unsplash.com/photo-1554224155-6726b3ff858f?q=80&w=1200&auto=format&fit=crop",
+      className: "bg-accent/10 border-accent/20",
     },
     {
-      key: "courses", icon: BookOpen, span: "md:col-span-4",
-      title: t("feature.courses.title"), desc: t("feature.courses.desc"),
-    },
-    {
-      key: "analytics", icon: BarChart3, span: "md:col-span-4",
-      title: t("feature.analytics.title"), desc: t("feature.analytics.desc"),
-    },
-    {
-      key: "security", icon: ShieldCheck, span: "md:col-span-4",
-      title: t("feature.security.title"), desc: t("feature.security.desc"),
-    },
-    {
-      key: "branding", icon: Palette, span: "md:col-span-6",
-      title: t("feature.branding.title"), desc: t("feature.branding.desc"),
-    },
-    {
-      key: "multilang", icon: Globe2, span: "md:col-span-6",
-      title: t("feature.multilang.title"), desc: t("feature.multilang.desc"),
+      title: t("feature.analytics.title"),
+      description: t("feature.analytics.desc"),
+      icon: BarChart3,
+      imageUrl: "https://images.unsplash.com/photo-1551288049-bebda4e38f71?q=80&w=1200&auto=format&fit=crop",
+      className: "bg-amber-500/10 border-amber-500/20",
     },
   ];
-
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-12 gap-4 auto-rows-[minmax(180px,auto)]">
-      {items.map((it, i) => (
-        <motion.div
-          key={it.key}
-          initial={{ opacity: 0, y: 20 }}
-          whileInView={{ opacity: 1, y: 0 }}
-          viewport={{ once: true, margin: "-50px" }}
-          transition={{ duration: 0.5, delay: i * 0.05 }}
-          whileHover={{ y: -4 }}
-          className={`${it.span} group relative overflow-hidden rounded-2xl border p-6 transition-all duration-300 ${
-            it.accent
-              ? "bg-primary text-primary-foreground border-primary shadow-xl"
-              : "bg-card border-border hover:border-foreground/30 hover:shadow-lg"
-          }`}
-        >
-          {/* Ambient hover ring */}
-          <div className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none ${
-            it.accent ? "" : "bg-gradient-to-br from-accent/5 to-transparent"
-          }`} />
-
-          <div className={`w-11 h-11 rounded-xl grid place-items-center mb-4 ${
-            it.accent ? "bg-accent text-accent-foreground" : "bg-accent/10 text-accent"
-          }`}>
-            <it.icon className="w-5 h-5" />
-          </div>
-
-          <h3 className="font-display text-xl font-semibold mb-2 tracking-tight">
-            {it.title}
-          </h3>
-          <p className={`text-sm leading-relaxed ${
-            it.accent ? "text-primary-foreground/70" : "text-muted-foreground"
-          }`}>
-            {it.desc}
-          </p>
-
-          {it.accent && (
-            <div className="absolute bottom-6 end-6 opacity-40">
-              <Sparkles className="w-16 h-16" />
-            </div>
-          )}
-          <ArrowUpRight className={`absolute top-6 end-6 w-4 h-4 opacity-30 group-hover:opacity-70 transition-opacity ${
-            it.accent ? "text-primary-foreground" : "text-foreground"
-          }`} />
-        </motion.div>
-      ))}
-    </div>
-  );
 }
 
 /* -----------------------------------------------------------
@@ -593,9 +540,9 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ============================ FEATURES / BENTO ============================ */}
+      {/* ============================ FEATURES ============================ */}
       <section id="features" className="border-b border-border">
-        <div className="max-w-7xl mx-auto px-6 py-20 md:py-28">
+        <div className="max-w-5xl mx-auto px-6 py-20 md:py-28">
           <div className="max-w-2xl mb-14">
             <p className="text-xs font-bold uppercase tracking-[0.2em] text-accent mb-3">
               {t("nav.features")}
@@ -605,7 +552,7 @@ export default function LandingPage() {
             </h2>
             <p className="text-lg text-muted-foreground">{t("features.subtitle")}</p>
           </div>
-          <BentoGrid t={t} lang={lang} />
+          <StickyFeatureCards features={stickyFeatureItems(t)} />
         </div>
       </section>
 
@@ -669,9 +616,9 @@ export default function LandingPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[
-              { name: "Starter", price: "29", features: ["50 students", "3 users", "Email support", "Core modules"] },
-              { name: "Pro", price: "79", features: ["500 students", "20 users", "Priority support", "Custom branding", "API access"], popular: true },
-              { name: "Business", price: "199", features: ["Unlimited students", "Unlimited users", "24/7 support", "White-label", "SLA + SSO"] },
+              { name: "Basic", price: "2 499", features: ["50 students", "3 users", "Email support", "Core modules"] },
+              { name: "Standard", price: "6 799", features: ["500 students", "20 users", "Priority support", "Custom branding", "API access"], popular: true },
+              { name: "Premium", price: "14 900", features: ["Unlimited students", "Unlimited users", "24/7 support", "White-label", "SLA + SSO"] },
             ].map((p, i) => (
               <motion.div
                 key={p.name}
@@ -697,9 +644,12 @@ export default function LandingPage() {
                 </div>
                 <div className="mb-6">
                   <span className="font-display text-5xl font-black tracking-tighter">
-                    ${p.price}
+                    {p.price}
                   </span>
-                  <span className={`ms-2 text-sm ${p.popular ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
+                  <span className={`ms-2 text-sm font-semibold ${p.popular ? "text-primary-foreground/80" : "text-foreground/80"}`}>
+                    DZD
+                  </span>
+                  <span className={`ms-1 text-sm ${p.popular ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
                     {t("pricing.perMonth")}
                   </span>
                 </div>

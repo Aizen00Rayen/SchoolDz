@@ -3,6 +3,8 @@ SchoolDZ core: auth, dependencies, models base, tenant isolation.
 """
 from __future__ import annotations
 
+import base64
+import json
 import os
 import secrets
 import uuid
@@ -66,13 +68,17 @@ def decode_token(token: str) -> dict:
     return jwt.decode(token, _jwt_secret(), algorithms=[JWT_ALGORITHM])
 
 
+def cookies_secure() -> bool:
+    return os.environ.get("COOKIE_SECURE", "false").lower() == "true"
+
+
 def set_auth_cookies(response, access: str, refresh: str) -> None:
     response.set_cookie(
-        "access_token", access, httponly=True, secure=False, samesite="lax",
+        "access_token", access, httponly=True, secure=cookies_secure(), samesite="lax",
         max_age=ACCESS_TTL_MINUTES * 60, path="/",
     )
     response.set_cookie(
-        "refresh_token", refresh, httponly=True, secure=False, samesite="lax",
+        "refresh_token", refresh, httponly=True, secure=cookies_secure(), samesite="lax",
         max_age=REFRESH_TTL_DAYS * 86400, path="/",
     )
 
@@ -117,6 +123,114 @@ ALL_ROLES = [
 
 STAFF_ROLES = {ROLE_OWNER, ROLE_DIRECTOR, ROLE_SECRETARY, ROLE_ACCOUNTANT, ROLE_TEACHER}
 ADMIN_ROLES = {ROLE_OWNER, ROLE_DIRECTOR}
+
+# Roles a tenant admin is allowed to assign. Never super_admin: that would be
+# a platform-level privilege escalation from inside a tenant.
+TENANT_ASSIGNABLE_ROLES = {
+    ROLE_OWNER, ROLE_DIRECTOR, ROLE_SECRETARY, ROLE_ACCOUNTANT,
+    ROLE_TEACHER, ROLE_PARENT, ROLE_STUDENT,
+}
+
+MIN_PASSWORD_LENGTH = 8
+
+
+def validate_password(password: str) -> None:
+    if not password or len(password) < MIN_PASSWORD_LENGTH:
+        raise HTTPException(400, f"Password must be at least {MIN_PASSWORD_LENGTH} characters")
+    if len(password) > 128:
+        raise HTTPException(400, "Password too long")
+
+
+# ----------------------------- Rate limiting ------------------------------
+# Simple in-memory sliding-window limiter for auth endpoints. Good enough for
+# a single-process deployment; swap for redis-backed limiting when scaling out.
+
+_rate_buckets: dict[str, list[float]] = {}
+
+
+def rate_limit(request: Request, scope: str, limit: int = 10, window_seconds: int = 60) -> None:
+    ip = request.client.host if request.client else "unknown"
+    key = f"{scope}:{ip}"
+    now = datetime.now(timezone.utc).timestamp()
+    bucket = [t for t in _rate_buckets.get(key, []) if now - t < window_seconds]
+    if len(bucket) >= limit:
+        raise HTTPException(429, "Too many attempts, please try again later")
+    bucket.append(now)
+    _rate_buckets[key] = bucket
+    # Opportunistic cleanup to keep memory bounded
+    if len(_rate_buckets) > 10000:
+        stale = [k for k, v in _rate_buckets.items() if not v or now - v[-1] > window_seconds]
+        for k in stale:
+            _rate_buckets.pop(k, None)
+
+
+# ----------------------------- Google OAuth ------------------------------
+# Short-lived signed "state" so /auth/google/callback can trust what intent
+# (login vs. register) and tenant details a /auth/google/start redirect carried,
+# without a server-side session.
+
+def create_oauth_state(payload: dict, ttl_minutes: int = 10) -> str:
+    data = dict(payload)
+    data["type"] = "oauth_state"
+    data["exp"] = datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)
+    return jwt.encode(data, _jwt_secret(), algorithm=JWT_ALGORITHM)
+
+
+def decode_oauth_state(token: str) -> dict:
+    payload = decode_token(token)
+    if payload.get("type") != "oauth_state":
+        raise jwt.InvalidTokenError("not an oauth state token")
+    return payload
+
+
+def decode_google_id_token(id_token_str: str, client_id: str) -> dict:
+    """Decode a Google id_token payload without verifying its signature.
+
+    Safe here because the token was obtained directly from Google's token
+    endpoint over a server-to-server TLS call (not supplied by the browser),
+    so the transport itself already authenticates it. We still check aud/iss/exp
+    so a token minted for a different app or already expired is rejected.
+    """
+    parts = id_token_str.split(".")
+    if len(parts) != 3:
+        raise ValueError("malformed id_token")
+    padded = parts[1] + "=" * (-len(parts[1]) % 4)
+    payload = json.loads(base64.urlsafe_b64decode(padded))
+    if payload.get("aud") != client_id:
+        raise ValueError("audience mismatch")
+    if payload.get("iss") not in ("accounts.google.com", "https://accounts.google.com"):
+        raise ValueError("issuer mismatch")
+    exp = payload.get("exp")
+    if not exp or datetime.now(timezone.utc).timestamp() > exp:
+        raise ValueError("expired id_token")
+    if not payload.get("email"):
+        raise ValueError("missing email")
+    return payload
+
+
+# One-time codes handing off the tokens minted at the end of the Google OAuth
+# redirect dance to the SPA, so access/refresh tokens never sit in a URL
+# (browser history, referrer headers, server logs).
+_oauth_exchange_codes: dict[str, dict] = {}
+OAUTH_CODE_TTL_SECONDS = 120
+
+
+def store_oauth_exchange(payload: dict) -> str:
+    code = secrets.token_urlsafe(32)
+    _oauth_exchange_codes[code] = {
+        "payload": payload,
+        "expires": datetime.now(timezone.utc).timestamp() + OAUTH_CODE_TTL_SECONDS,
+    }
+    return code
+
+
+def pop_oauth_exchange(code: str) -> Optional[dict]:
+    entry = _oauth_exchange_codes.pop(code, None)
+    if not entry:
+        return None
+    if entry["expires"] < datetime.now(timezone.utc).timestamp():
+        return None
+    return entry["payload"]
 
 
 # ----------------------------- Auth dependency ------------------------------

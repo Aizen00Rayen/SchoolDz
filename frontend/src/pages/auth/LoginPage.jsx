@@ -8,8 +8,9 @@ import { AUTH } from "@/constants/testIds";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { extractError } from "@/lib/api";
+import { API_BASE, extractError } from "@/lib/api";
 import { Loader2 } from "lucide-react";
+import GoogleAuthButton from "./GoogleAuthButton";
 
 export default function LoginPage() {
   const { login, user } = useAuth();
@@ -57,6 +58,18 @@ export default function LoginPage() {
         </>
       }
     >
+      <GoogleAuthButton
+        href={`${API_BASE}/auth/google/start?intent=login`}
+        label={t("auth.continue_with_google")}
+        testId={AUTH.loginGoogle}
+      />
+
+      <div className="flex items-center gap-3 my-6">
+        <div className="h-px flex-1 bg-border" />
+        <span className="text-xs uppercase tracking-widest text-muted-foreground">{t("auth.or")}</span>
+        <div className="h-px flex-1 bg-border" />
+      </div>
+
       <form onSubmit={onSubmit} className="space-y-5">
         <div className="space-y-2">
           <Label htmlFor="email">{t("auth.email")}</Label>
@@ -103,7 +116,7 @@ export default function LoginPage() {
             onChange={(e) => setTenantSlug(e.target.value)}
             data-testid={AUTH.loginTenantSlug}
             className="h-11 font-mono"
-            placeholder="dteduc"
+            placeholder="my-school"
           />
         </div>
 

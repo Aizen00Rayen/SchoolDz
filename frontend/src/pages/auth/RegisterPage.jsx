@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import AuthLayout from "./AuthLayout";
 import { useAuth } from "@/lib/auth";
@@ -11,8 +11,9 @@ import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { extractError } from "@/lib/api";
+import { API_BASE, extractError } from "@/lib/api";
 import { Loader2 } from "lucide-react";
+import GoogleAuthButton from "./GoogleAuthButton";
 
 const CENTER_TYPES = [
   { value: "tutoring", label: "Tutoring center" },
@@ -40,8 +41,9 @@ export default function RegisterPage() {
   const { register, user } = useAuth();
   const { t } = useI18n();
   const nav = useNavigate();
+  const [params] = useSearchParams();
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(params.get("email") || "");
   const [password, setPassword] = useState("");
   const [workspaceName, setWorkspaceName] = useState("");
   const [slug, setSlug] = useState("");
@@ -61,6 +63,20 @@ export default function RegisterPage() {
     if (!slug || slug === slugify(workspaceName)) {
       setSlug(slugify(v));
     }
+  };
+
+  const onGoogleSignup = () => {
+    if (!workspaceName.trim() || !slug.trim()) {
+      toast.error("Enter your school name and workspace URL first");
+      return;
+    }
+    const q = new URLSearchParams({
+      intent: "register",
+      tenant_name: workspaceName.trim(),
+      tenant_slug: slug.trim(),
+      center_type: centerType,
+    });
+    window.location.href = `${API_BASE}/auth/google/start?${q.toString()}`;
   };
 
   const onSubmit = async (e) => {
@@ -144,6 +160,18 @@ export default function RegisterPage() {
           </Select>
         </div>
 
+        <GoogleAuthButton
+          onClick={onGoogleSignup}
+          label={t("auth.continue_with_google")}
+          testId={AUTH.registerGoogle}
+        />
+
+        <div className="flex items-center gap-3">
+          <div className="h-px flex-1 bg-border" />
+          <span className="text-xs uppercase tracking-widest text-muted-foreground">{t("auth.or")}</span>
+          <div className="h-px flex-1 bg-border" />
+        </div>
+
         <div className="border-t border-border pt-4 space-y-4">
           <div className="space-y-2">
             <Label htmlFor="name">{t("auth.your_name")}</Label>
@@ -180,10 +208,10 @@ export default function RegisterPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                minLength={6}
+                minLength={8}
                 data-testid={AUTH.registerPassword}
                 className="h-11"
-                placeholder="At least 6 characters"
+                placeholder="At least 8 characters"
               />
             </div>
           </div>

@@ -11,6 +11,7 @@ import PricingPage from "@/pages/marketing/PricingPage";
 import LoginPage from "@/pages/auth/LoginPage";
 import RegisterPage from "@/pages/auth/RegisterPage";
 import ForgotPasswordPage from "@/pages/auth/ForgotPasswordPage";
+import OAuthCallbackPage from "@/pages/auth/OAuthCallbackPage";
 import AdminLoginPage from "@/pages/admin/AdminLoginPage";
 import AdminDashboardPage from "@/pages/admin/AdminDashboardPage";
 import AppShell from "@/pages/app/AppShell";
@@ -56,6 +57,7 @@ function App() {
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/register" element={<RegisterPage />} />
                 <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+                <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
 
                 {/* Admin */}
                 <Route path="/admin/login" element={<AdminLoginPage />} />

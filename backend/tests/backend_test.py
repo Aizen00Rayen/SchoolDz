@@ -1,43 +1,65 @@
-"""SchoolDZ backend API tests (iteration 2 - alpha-demo)."""
+"""SchoolDZ backend API tests.
+
+No demo/seed data is created at startup, so every test provisions its own
+tenant via /auth/register and operates only on data it created.
+"""
 import os
 import uuid
 import pytest
 import requests
 
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://academy-dash-36.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:8001").rstrip("/")
 API = f"{BASE_URL}/api/v1"
 
-OWNER = {"email": "owner@alpha-demo.schooldz.com", "password": "Demo!2026"}
-TEACHER = {"email": "teacher@alpha-demo.schooldz.com", "password": "Teacher!2026"}
-SUPER = {"email": "admin@schooldz.com", "password": "adminSchool!2026"}
-
-OLD_SUPER = {"email": "admin@schooldz.com", "password": "admin123"}
-OLD_OWNER = {"email": "owner@dteduc.schooldz.com", "password": "owner123"}
-
-
-@pytest.fixture(scope="session")
-def owner_token():
-    r = requests.post(f"{API}/auth/login", json=OWNER, timeout=30)
-    assert r.status_code == 200, r.text
-    return r.json()["access_token"]
-
-
-@pytest.fixture(scope="session")
-def teacher_token():
-    r = requests.post(f"{API}/auth/login", json=TEACHER, timeout=30)
-    assert r.status_code == 200, r.text
-    return r.json()["access_token"]
-
-
-@pytest.fixture(scope="session")
-def super_token():
-    r = requests.post(f"{API}/auth/login", json=SUPER, timeout=30)
-    assert r.status_code == 200, r.text
-    return r.json()["access_token"]
+SUPER_ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@schooldz.com")
+SUPER_ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
 
 
 def h(tok):
     return {"Authorization": f"Bearer {tok}"}
+
+
+def new_tenant():
+    slug = f"testcorp-{uuid.uuid4().hex[:8]}"
+    payload = {
+        "tenant_name": "Test Corp", "tenant_slug": slug, "center_type": "tutoring",
+        "name": "T Owner", "email": f"owner-{slug}@example.com", "password": "password123",
+    }
+    r = requests.post(f"{API}/auth/register", json=payload, timeout=30)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+@pytest.fixture(scope="session")
+def tenant():
+    return new_tenant()
+
+
+@pytest.fixture(scope="session")
+def owner_token(tenant):
+    return tenant["access_token"]
+
+
+@pytest.fixture(scope="session")
+def teacher_token(owner_token):
+    email = f"teacher-{uuid.uuid4().hex[:8]}@example.com"
+    r = requests.post(f"{API}/users", json={
+        "name": "T Teacher", "email": email, "password": "password123", "role": "teacher",
+    }, headers=h(owner_token), timeout=15)
+    assert r.status_code == 200, r.text
+    r2 = requests.post(f"{API}/auth/login", json={"email": email, "password": "password123"}, timeout=15)
+    assert r2.status_code == 200
+    return r2.json()["access_token"]
+
+
+@pytest.fixture(scope="session")
+def super_token():
+    if not SUPER_ADMIN_PASSWORD:
+        pytest.skip("ADMIN_PASSWORD not set in environment")
+    r = requests.post(f"{API}/auth/login",
+                      json={"email": SUPER_ADMIN_EMAIL, "password": SUPER_ADMIN_PASSWORD}, timeout=30)
+    assert r.status_code == 200, r.text
+    return r.json()["access_token"]
 
 
 # ---------- Health ----------
@@ -47,40 +69,55 @@ def test_health():
     assert r.json()["status"] == "ok"
 
 
-# ---------- Auth: new credentials ----------
-def test_owner_login_returns_token_and_user():
-    r = requests.post(f"{API}/auth/login", json=OWNER, timeout=30)
-    assert r.status_code == 200
-    j = r.json()
-    assert "access_token" in j
-    assert j["user"]["role"] == "owner"
-    assert j["user"]["tenant_id"]
+# ---------- Auth ----------
+def test_owner_login_returns_token_and_user(tenant):
+    assert "access_token" in tenant
+    assert tenant["user"]["role"] == "owner"
+    assert tenant["user"]["tenant_id"]
 
 
-def test_me_returns_alpha_demo_tenant(owner_token):
+def test_me_returns_own_tenant(owner_token, tenant):
     r = requests.get(f"{API}/auth/me", headers=h(owner_token), timeout=15)
     assert r.status_code == 200
     j = r.json()
-    assert j["user"]["email"] == OWNER["email"]
-    assert j["tenant"]["slug"] == "alpha-demo"
+    assert j["user"]["email"] == tenant["user"]["email"]
+    assert j["tenant"]["id"] == tenant["user"]["tenant_id"]
 
 
-def test_super_admin_login_new_password():
-    r = requests.post(f"{API}/auth/login", json=SUPER, timeout=30)
-    assert r.status_code == 200
-    j = r.json()
-    assert j["user"]["role"] == "super_admin"
-    assert j["user"].get("tenant_id") in (None, "")
+def test_login_wrong_password_rejected(tenant):
+    r = requests.post(f"{API}/auth/login",
+                      json={"email": tenant["user"]["email"], "password": "wrong-password"}, timeout=15)
+    assert r.status_code == 401
 
 
-def test_super_admin_old_password_rejected():
-    r = requests.post(f"{API}/auth/login", json=OLD_SUPER, timeout=30)
-    assert r.status_code == 401, f"Old admin password must be rejected but got {r.status_code}"
+def test_register_weak_password_rejected():
+    r = requests.post(f"{API}/auth/register", json={
+        "tenant_name": "X", "tenant_slug": f"weak-{uuid.uuid4().hex[:8]}",
+        "name": "N", "email": f"a-{uuid.uuid4().hex[:6]}@e.com", "password": "short",
+    }, timeout=15)
+    assert r.status_code == 400
 
 
-def test_old_dteduc_owner_rejected():
-    r = requests.post(f"{API}/auth/login", json=OLD_OWNER, timeout=30)
-    assert r.status_code in (401, 404), f"Old owner must not exist, got {r.status_code}"
+def test_register_invalid_slug():
+    r = requests.post(f"{API}/auth/register", json={
+        "tenant_name": "X", "tenant_slug": "X X",
+        "name": "N", "email": f"a-{uuid.uuid4().hex[:6]}@e.com", "password": "password123",
+    }, timeout=15)
+    assert r.status_code == 400
+
+
+def test_register_duplicate_slug():
+    slug = f"dup-{uuid.uuid4().hex[:8]}"
+    first = requests.post(f"{API}/auth/register", json={
+        "tenant_name": "X", "tenant_slug": slug,
+        "name": "N", "email": f"a-{uuid.uuid4().hex[:6]}@e.com", "password": "password123",
+    }, timeout=15)
+    assert first.status_code == 200, first.text
+    r = requests.post(f"{API}/auth/register", json={
+        "tenant_name": "X", "tenant_slug": slug,
+        "name": "N", "email": f"a-{uuid.uuid4().hex[:6]}@e.com", "password": "password123",
+    }, timeout=15)
+    assert r.status_code == 409
 
 
 # ---------- Dashboard ----------
@@ -93,23 +130,6 @@ def test_dashboard_summary(owner_token):
     assert isinstance(j["today_sessions"], list)
     assert isinstance(j["upcoming_sessions"], list)
     assert len(j["revenue_trend"]) == 6
-
-
-# ---------- Seeded lists ----------
-@pytest.mark.parametrize("path,expected_min", [
-    ("/students", 15),
-    ("/teachers", 3),
-    ("/courses", 4),
-    ("/groups", 4),
-    ("/sessions", 1),
-    ("/payments", 20),
-])
-def test_seeded_lists(owner_token, path, expected_min):
-    r = requests.get(f"{API}{path}", headers=h(owner_token), timeout=30)
-    assert r.status_code == 200, r.text
-    j = r.json()
-    assert "items" in j and "total" in j
-    assert j["total"] >= expected_min, f"{path} total={j['total']} < {expected_min}"
 
 
 # ---------- Students CRUD ----------
@@ -134,15 +154,13 @@ def test_students_crud(owner_token):
 
 # ---------- Tenant isolation ----------
 def test_tenant_isolation():
-    slug = f"testcorp-{uuid.uuid4().hex[:8]}"
-    payload = {
-        "tenant_name": "Test Corp", "tenant_slug": slug, "center_type": "tutoring",
-        "name": "T Owner", "email": f"owner-{slug}@example.com", "password": "password123",
-    }
-    r = requests.post(f"{API}/auth/register", json=payload, timeout=30)
-    assert r.status_code == 200, r.text
-    tok = r.json()["access_token"]
-    rs = requests.get(f"{API}/students", headers=h(tok), timeout=15)
+    t1 = new_tenant()
+    r = requests.post(f"{API}/students", json={"first_name": "Iso", "last_name": "One"},
+                      headers=h(t1["access_token"]), timeout=15)
+    assert r.status_code == 200
+
+    t2 = new_tenant()
+    rs = requests.get(f"{API}/students", headers=h(t2["access_token"]), timeout=15)
     assert rs.status_code == 200
     assert rs.json()["total"] == 0
 
@@ -153,22 +171,49 @@ def test_teacher_cannot_create_user(teacher_token):
     assert r.status_code == 200
     r2 = requests.post(f"{API}/users", json={
         "name": "X", "email": f"x-{uuid.uuid4().hex[:6]}@ex.com",
-        "password": "pw12345", "role": "secretary"
+        "password": "password123", "role": "secretary",
     }, headers=h(teacher_token), timeout=15)
     assert r2.status_code == 403
 
 
-# ---------- Attendance ----------
-def test_bulk_attendance(owner_token):
-    sess = requests.get(f"{API}/sessions", headers=h(owner_token), timeout=15).json()
-    assert sess["total"] > 0
-    sid = sess["items"][0]["id"]
-    students = requests.get(f"{API}/students", headers=h(owner_token), timeout=15).json()["items"][:2]
-    marks = [{"student_id": s["id"], "status": "present"} for s in students]
-    r = requests.post(f"{API}/attendance/session/{sid}", json={"marks": marks},
-                     headers=h(owner_token), timeout=30)
+def test_cannot_create_super_admin_from_tenant(owner_token):
+    r = requests.post(f"{API}/users", json={
+        "name": "X", "email": f"x-{uuid.uuid4().hex[:6]}@ex.com",
+        "password": "password123", "role": "super_admin",
+    }, headers=h(owner_token), timeout=15)
+    assert r.status_code == 400
+
+
+# ---------- Courses, groups, sessions, attendance ----------
+def test_course_group_session_attendance_flow(owner_token):
+    c = requests.post(f"{API}/courses", json={"title": "Test Course", "price": 100},
+                      headers=h(owner_token), timeout=15)
+    assert c.status_code == 200, c.text
+    course_id = c.json()["id"]
+
+    g = requests.post(f"{API}/groups", json={"course_id": course_id, "name": "Group A"},
+                      headers=h(owner_token), timeout=15)
+    assert g.status_code == 200, g.text
+    group_id = g.json()["id"]
+
+    s1 = requests.post(f"{API}/students", json={"first_name": "A", "last_name": "One"},
+                       headers=h(owner_token), timeout=15).json()
+    s2 = requests.post(f"{API}/students", json={"first_name": "B", "last_name": "Two"},
+                       headers=h(owner_token), timeout=15).json()
+
+    sess = requests.post(f"{API}/sessions", json={
+        "group_id": group_id,
+        "start_at": "2026-01-01T10:00:00+00:00",
+        "end_at": "2026-01-01T11:00:00+00:00",
+    }, headers=h(owner_token), timeout=15)
+    assert sess.status_code == 200, sess.text
+    session_id = sess.json()["id"]
+
+    marks = [{"student_id": s1["id"], "status": "present"}, {"student_id": s2["id"], "status": "absent"}]
+    r = requests.post(f"{API}/attendance/session/{session_id}", json={"marks": marks},
+                      headers=h(owner_token), timeout=30)
     assert r.status_code == 200, r.text
-    r2 = requests.get(f"{API}/attendance/session/{sid}", headers=h(owner_token), timeout=15)
+    r2 = requests.get(f"{API}/attendance/session/{session_id}", headers=h(owner_token), timeout=15)
     assert r2.status_code == 200
     assert r2.json()["total"] >= len(marks)
 
@@ -181,24 +226,12 @@ def test_global_search(owner_token):
     assert "results" in j and isinstance(j["results"], list)
 
 
-# ---------- Register validation ----------
-def test_register_invalid_slug():
-    r = requests.post(f"{API}/auth/register", json={
-        "tenant_name": "X", "tenant_slug": "X X",
-        "name": "N", "email": f"a-{uuid.uuid4().hex[:6]}@e.com", "password": "pw12345"
-    }, timeout=15)
-    assert r.status_code == 400
+def test_search_query_is_escaped_not_treated_as_regex(owner_token):
+    r = requests.get(f"{API}/search", params={"q": "("}, headers=h(owner_token), timeout=15)
+    assert r.status_code == 200
 
 
-def test_register_duplicate_slug():
-    r = requests.post(f"{API}/auth/register", json={
-        "tenant_name": "X", "tenant_slug": "alpha-demo",
-        "name": "N", "email": f"a-{uuid.uuid4().hex[:6]}@e.com", "password": "pw12345"
-    }, timeout=15)
-    assert r.status_code == 409
-
-
-# ---------- NEW: Admin platform endpoints ----------
+# ---------- Admin platform endpoints ----------
 def test_admin_platform_summary_super(super_token):
     r = requests.get(f"{API}/admin/platform-summary", headers=h(super_token), timeout=30)
     assert r.status_code == 200, r.text
@@ -208,9 +241,6 @@ def test_admin_platform_summary_super(super_token):
               "users_total", "students_total", "payments_total", "platform_revenue"]:
         assert k in j["kpis"], f"Missing kpi {k}"
     assert isinstance(j["tenants"], list)
-    assert len(j["tenants"]) >= 1
-    t0 = j["tenants"][0]
-    assert "users_count" in t0 and "students_count" in t0
 
 
 def test_admin_platform_summary_owner_forbidden(owner_token):
@@ -218,41 +248,34 @@ def test_admin_platform_summary_owner_forbidden(owner_token):
     assert r.status_code == 403
 
 
-def test_admin_suspend_and_activate_alpha_demo(super_token):
-    r = requests.get(f"{API}/admin/platform-summary", headers=h(super_token), timeout=15)
-    tenants = r.json()["tenants"]
-    alpha = next((t for t in tenants if t.get("slug") == "alpha-demo"), None)
-    assert alpha is not None, "alpha-demo tenant not found"
-    tid = alpha["id"]
-    # Suspend
+def test_admin_suspend_and_activate_tenant(super_token):
+    t = new_tenant()
+    tid = t["user"]["tenant_id"]
     r2 = requests.patch(f"{API}/admin/tenants/{tid}/status", json={"status": "suspended"},
                        headers=h(super_token), timeout=15)
     assert r2.status_code == 200, r2.text
-    # Verify
     r3 = requests.get(f"{API}/admin/platform-summary", headers=h(super_token), timeout=15)
-    alpha2 = next(t for t in r3.json()["tenants"] if t["id"] == tid)
-    assert alpha2["status"] == "suspended"
-    # Reactivate
+    row = next(x for x in r3.json()["tenants"] if x["id"] == tid)
+    assert row["status"] == "suspended"
     r4 = requests.patch(f"{API}/admin/tenants/{tid}/status", json={"status": "active"},
                        headers=h(super_token), timeout=15)
     assert r4.status_code == 200
 
 
 def test_admin_delete_tenant(super_token):
-    slug = f"throwaway-{uuid.uuid4().hex[:8]}"
-    reg = requests.post(f"{API}/auth/register", json={
-        "tenant_name": "Throwaway", "tenant_slug": slug, "center_type": "tutoring",
-        "name": "TA", "email": f"ta-{slug}@example.com", "password": "password123",
-    }, timeout=30)
-    assert reg.status_code == 200, reg.text
-    # find id
-    summ = requests.get(f"{API}/admin/platform-summary", headers=h(super_token), timeout=15).json()
-    t = next((x for x in summ["tenants"] if x["slug"] == slug), None)
-    assert t is not None
-    tid = t["id"]
-    # delete
+    t = new_tenant()
+    tid = t["user"]["tenant_id"]
     d = requests.delete(f"{API}/admin/tenants/{tid}", headers=h(super_token), timeout=15)
     assert d.status_code in (200, 204), d.text
-    # confirm gone
-    summ2 = requests.get(f"{API}/admin/platform-summary", headers=h(super_token), timeout=15).json()
-    assert not any(x["id"] == tid for x in summ2["tenants"]), "tenant still present after delete"
+    summ = requests.get(f"{API}/admin/platform-summary", headers=h(super_token), timeout=15).json()
+    assert not any(x["id"] == tid for x in summ["tenants"]), "tenant still present after delete"
+
+
+def test_owner_cannot_edit_own_plan(owner_token, tenant):
+    tid = tenant["user"]["tenant_id"]
+    r = requests.patch(f"{API}/tenants/{tid}", json={"plan": "business", "max_users": 9999},
+                       headers=h(owner_token), timeout=15)
+    assert r.status_code in (200, 400)
+    me = requests.get(f"{API}/auth/me", headers=h(owner_token), timeout=15).json()
+    assert me["tenant"]["plan"] != "business"
+    assert me["tenant"]["max_users"] != 9999

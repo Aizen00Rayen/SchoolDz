@@ -4,6 +4,8 @@ export const AUTH = {
   loginPassword: "auth-login-password-input",
   loginSubmit: "auth-login-submit-button",
   loginTenantSlug: "auth-login-tenant-input",
+  loginGoogle: "auth-login-google-button",
+  registerGoogle: "auth-register-google-button",
   registerName: "auth-register-name-input",
   registerEmail: "auth-register-email-input",
   registerPassword: "auth-register-password-input",

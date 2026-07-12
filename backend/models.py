@@ -28,7 +28,7 @@ class Tenant(BaseModel):
     primary_color: str = "#0A0A0B"
     accent_color: str = "#E53935"
     language: Literal["en", "fr", "ar"] = "en"
-    currency: str = "USD"
+    currency: str = "DZD"
     timezone: str = "UTC"
     invoice_prefix: str = "INV-"
     student_prefix: str = "STU-"
@@ -75,6 +75,11 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 
+class GoogleExchangeRequest(BaseModel):
+    """Redeems the one-time code minted at the end of the Google OAuth redirect."""
+    code: str
+
+
 class User(BaseModel):
     id: str = Field(default_factory=new_id)
     tenant_id: Optional[str] = None  # None for super_admin
@@ -85,8 +90,19 @@ class User(BaseModel):
     avatar_url: Optional[str] = None
     is_active: bool = True
     email_verified: bool = False
+    auth_provider: Optional[str] = None  # "google" when created/linked via Google sign-in
+    google_sub: Optional[str] = None
     created_at: str = Field(default_factory=utcnow_iso)
     updated_at: str = Field(default_factory=utcnow_iso)
+
+
+class UserUpdate(BaseModel):
+    """Fields a tenant admin or super admin may change on another user's account."""
+    name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    role: Optional[str] = None
+    is_active: Optional[bool] = None
 
 
 # ----------------------------- Student ------------------------------
