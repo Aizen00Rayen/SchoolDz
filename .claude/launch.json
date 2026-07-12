@@ -10,7 +10,7 @@
     {
       "name": "frontend-debug",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "cd frontend && PORT=3002 BROWSER=none npx craco start"],
+      "runtimeArgs": ["-c", "cd frontend && PORT=3002 BROWSER=none REACT_APP_BACKEND_URL=http://localhost:8002 npx craco start"],
       "port": 3002
     }
   ]
