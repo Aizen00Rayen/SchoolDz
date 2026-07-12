@@ -1,0 +1,145 @@
+{
+  "project_name": "SchoolDZ",
+  "theme_strategy": "Dual-surface strategy: Swiss Brutalism/High-Contrast for Marketing (Surface A) + Tactile Minimalism (Linear/Stripe) for Dashboard (Surface B). System supports Light/Dark mode and LTR/RTL.",
+  "general_ui_ux_design_guidelines": "Avoid 'AI slop' aesthetics (generic centered layouts, uniform gradients). Implement heavy whitespace (2-3x typical), layered depths, glass-morphism (12-24px blur) where appropriate. CRITICAL: Never use a fully transparent background beneath text/content, such as in dropdowns or sticky headers. Ensure robust focus states. Do NOT apply universal 'transition: all' to prevent transform bugs. Do not center-align the main app container. Add rich micro-interactions on hover and click states.",
+  "typography": {
+    "strategy": "The Anti-Default Rule. Mixing distinctive editorial weights with highly legible dashboard sans.",
+    "fonts": {
+      "marketing_heading": "Cabinet Grotesk (High impact, wide, geometric, tight tracking)",
+      "dashboard_heading": "IBM Plex Sans (Precise, authoritative)",
+      "body": "IBM Plex Sans (Legible, neutral)",
+      "metrics_and_code": "JetBrains Mono (Clear tabular numbers, coding aesthetic)",
+      "rtl_arabic": "Cairo or Tajawal (Modern geometric Arabic support)"
+    },
+    "scales": {
+      "h1_hero": "text-5xl md:text-6xl lg:text-7xl font-black tracking-tighter leading-[1.1]",
+      "h2_section": "text-3xl md:text-4xl font-bold tracking-tight leading-tight",
+      "h3_card": "text-xl md:text-2xl font-semibold tracking-tight",
+      "body_large": "text-lg leading-relaxed text-muted-foreground",
+      "body_base": "text-base leading-relaxed text-foreground",
+      "body_small": "text-sm text-muted-foreground",
+      "overline_label": "text-xs font-bold uppercase tracking-[0.2em] text-muted-foreground"
+    }
+  },
+  "colors": {
+    "archetype": "Swiss & High-Contrast (Archetype 4) adapted for SaaS.",
+    "light_mode": {
+      "background": "#FAFAFA",
+      "foreground": "#0A0A0B",
+      "card": "#FFFFFF",
+      "card_foreground": "#0A0A0B",
+      "border": "#E4E4E7",
+      "primary": "#0A0A0B",
+      "primary_foreground": "#FFFFFF",
+      "accent": "#E53935",
+      "accent_foreground": "#FFFFFF",
+      "muted": "#F4F4F5",
+      "muted_foreground": "#71717A"
+    },
+    "dark_mode": {
+      "background": "#0A0A0B",
+      "foreground": "#FAFAFA",
+      "card": "#121214",
+      "card_foreground": "#FAFAFA",
+      "border": "#27272A",
+      "primary": "#FAFAFA",
+      "primary_foreground": "#0A0A0B",
+      "accent": "#EF5350",
+      "accent_foreground": "#FFFFFF",
+      "muted": "#27272A",
+      "muted_foreground": "#A1A1AA"
+    },
+    "status": {
+      "success": { "bg": "bg-emerald-50 dark:bg-emerald-500/10", "text": "text-emerald-700 dark:text-emerald-400" },
+      "warning": { "bg": "bg-amber-50 dark:bg-amber-500/10", "text": "text-amber-700 dark:text-amber-400" },
+      "danger": { "bg": "bg-red-50 dark:bg-red-500/10", "text": "text-red-700 dark:text-red-400" },
+      "info": { "bg": "bg-blue-50 dark:bg-blue-500/10", "text": "text-blue-700 dark:text-blue-400" }
+    }
+  },
+  "visual_enhancers": {
+    "shadows": {
+      "sm": "shadow-[0_1px_2px_rgba(0,0,0,0.04)]",
+      "md": "shadow-[0_4px_12px_rgba(0,0,0,0.06)]",
+      "lg": "shadow-[0_12px_32px_rgba(0,0,0,0.08)]",
+      "dark_mode": "shadow-[0_4px_12px_rgba(0,0,0,0.4)]"
+    },
+    "border_radius": {
+      "sm": "rounded",
+      "md": "rounded-md",
+      "lg": "rounded-lg",
+      "xl": "rounded-xl",
+      "2xl": "rounded-2xl",
+      "full": "rounded-full"
+    },
+    "surfaces": {
+      "glass": "backdrop-blur-xl bg-background/70 backdrop-saturate-150 border-b border-border/40",
+      "card": "bg-card border border-border shadow-sm hover:shadow-md transition-shadow duration-200"
+    }
+  },
+  "layouts_and_grids": {
+    "spacing_scale": "px-4 py-6 for cards (Stripe pattern); gap-8 to gap-12 between sections; py-20 to py-32 for marketing sections.",
+    "dashboard_layout": {
+      "sidebar": "Collapsible left-sidebar (240px expanded). Contains tenant workspace switcher at top.",
+      "topbar": "Minimalist (h-14). Breadcrumbs, Global Search (⌘K), Profile.",
+      "content": "Max-width 1280px (for data tables/charts) with px-6 py-8.",
+      "kpi_grid": "grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4"
+    },
+    "marketing_layout": {
+      "bento_grid": "grid-cols-1 md:grid-cols-8 lg:grid-cols-12 gap-8 with asymmetric spans (e.g., col-span-8 row-span-2 for hero feature, col-span-4 for secondary)."
+    },
+    "rtl_support": "Use logical CSS properties exclusively (e.g., ms-4 instead of ml-4, ps-6 instead of pl-6, start/end instead of left/right)."
+  },
+  "component_guidelines": {
+    "kpi_card": "Minimalist layout (200-280px wide). Icon (top-left) + Metric Value (text-3xl font-mono) + Sparkline (Recharts tiny line chart) + Subtext (text-sm text-muted-foreground).",
+    "data_table": "Stripe-inspired. No vertical borders. Subtle horizontal borders (border-b border-border). Hover state (hover:bg-muted/50). Compact row height (h-12). Avatar + Name side-by-side for users.",
+    "tenant_switcher": "Dropdown menu at the top of the sidebar. Shows active tenant logo, name, and 'Free/Pro' badge. Includes 'Create New Workspace' action.",
+    "command_palette": "Linear-style ⌘K. Centered modal, glassmorphism overlay. Quick actions for 'Go to Students', 'Mark Attendance', 'New Invoice'.",
+    "timetable_calendar": "CSS Grid based weekly view. Drag-and-drop slots. Use distinct pastel/soft colors for different course types to avoid visual fatigue.",
+    "attendance_ui": "Fast toggle UI for 'Present/Absent/Late/Excused' (Segmented Control style). Not dropdowns.",
+    "status_badges": "Pill-shaped, transparent background with 10% opacity, crisp text. (e.g., bg-emerald-500/10 text-emerald-600 font-medium text-xs px-2.5 py-0.5 rounded-full).",
+    "marketing_hero": "Text-heavy left side (Cabinet Grotesk H1, loose body text), bold Primary CTA + Secondary Outline CTA. Right side features an abstract 3D element or high-contrast app screenshot floating."
+  },
+  "motion": {
+    "hover_states": "-translate-y-[2px] shadow-md transition-all duration-200 ease-out",
+    "page_transitions": "opacity-0 to opacity-100, translate-y-4 to translate-y-0 duration-300",
+    "staggered_lists": "Use framer-motion variants to stagger data table rows or KPI cards (delay 0.05s per item).",
+    "reduced_motion": "Wrap animations in checks for prefers-reduced-motion media query."
+  },
+  "accessibility_and_testing": {
+    "data_testid": "MANDATORY: Add 'data-testid' to all interactive elements (buttons, inputs, links). Use kebab-case role-based names (e.g., 'login-submit-button', 'tenant-switcher-trigger', 'student-row-action').",
+    "contrast": "Maintain 4.5:1 ratio for standard text. Never use pure #000000, tint it slightly (#0A0A0B).",
+    "focus_states": "focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:outline-none",
+    "aria": "Use aria-hidden='true' for purely decorative icons. Ensure dialogs have aria-labelledby."
+  },
+  "media_and_3d": {
+    "icons": "lucide-react (default). For marketing, consider iconoir-react.",
+    "charts": "Recharts for dashboard metrics. Prioritize clear LineCharts for revenue trends and BarCharts for enrollments. No unnecessary animations on charts.",
+    "marketing_3d": "For the landing page hero, consider React Three Fiber (R3F) or Spline for an interactive, abstract educational globe or floating geometric shapes."
+  },
+  "image_urls": {
+    "landing_hero_bg": {
+      "url": "https://images.unsplash.com/photo-1483366774565-c783b9f70e2c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NzB8MHwxfHNlYXJjaHwzfHxhYnN0cmFjdCUyMHNjaG9vbCUyMGFyY2hpdGVjdHVyZSUyMG1vZGVybnxlbnwwfHx8fDE3ODM4Njk0MTV8MA&ixlib=rb-4.1.0&q=85",
+      "category": "Abstract School Architecture",
+      "description": "Minimalist architecture photography to use as an abstract background or hero visual."
+    },
+    "feature_collaboration": {
+      "url": "https://images.unsplash.com/photo-1758270705518-b61b40527e76?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzZ8MHwxfHNlYXJjaHwyfHxkaXZlcnNlJTIwc3R1ZGVudHMlMjBsZWFybmluZyUyMG1vZGVybnxlbnwwfHx8fDE3ODM4Njk0MTZ8MA&ixlib=rb-4.1.0&q=85",
+      "category": "Diverse Students",
+      "description": "Group of students collaborating. Great for the 'Student Management' feature block."
+    },
+    "testimonial_teacher": {
+      "url": "https://images.unsplash.com/photo-1573496800808-56566a492b63?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHw0fHxwcm9mZXNzaW9uYWwlMjB0ZWFjaGVyJTIwcG9ydHJhaXR8ZW58MHx8fHwxNzgzODY5NDE1fDA&ixlib=rb-4.1.0&q=85",
+      "category": "Teacher Portrait",
+      "description": "Professional smiling woman, use for testimonials or a generic teacher profile avatar."
+    }
+  },
+  "instructions_to_main_agent": [
+    "Prioritize building the UI using standard React (.js/.jsx) with Tailwind CSS and Framer Motion.",
+    "In the Tailwind config, include Cabinet Grotesk, IBM Plex Sans, and JetBrains Mono.",
+    "Implement the Dual-surface strategy: Make the marketing site look highly editorial and asymmetrical, while keeping the ERP dashboard heavily structured, dense, and grid-based (Linear/Stripe style).",
+    "Ensure RTL support by using logical CSS properties (ms-, me-, ps-, pe-) rather than physical ones (ml-, mr-, pl-, pr-).",
+    "Implement Sonner for toast notifications and customize Shadcn components to remove the 'default Vercel look'.",
+    "Ensure all interactive elements have data-testid attributes for testing.",
+    "Never place text over images without a sufficient overlay (e.g., bg-black/50), and never use transparent backgrounds on dropdowns or modals."
+  ]
+}
