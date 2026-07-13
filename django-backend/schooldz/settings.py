@@ -80,20 +80,32 @@ CACHES = {
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': os.environ.get('DB_DATABASE', 'schooldz'),
-        'USER': os.environ.get('DB_USERNAME', 'schooldz'),
-        'PASSWORD': os.environ.get('DB_PASSWORD', 'schooldzpass'),
-        'HOST': os.environ.get('DB_HOST', '127.0.0.1'),
-        'PORT': os.environ.get('DB_PORT', '3306'),
-        'OPTIONS': {
-            'charset': 'utf8mb4',
+#
+# DB_CONNECTION=sqlite (e.g. on a free PythonAnywhere account, which has no
+# free MySQL/Postgres) stores everything in a single file — no separate DB
+# service to set up. Local dev keeps using MySQL via Docker (DB_CONNECTION
+# is explicitly set to 'mysql' in launch.sh's generated .env), unaffected.
+if os.environ.get('DB_CONNECTION', 'mysql') == 'sqlite':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': os.environ.get('DB_DATABASE', str(BASE_DIR / 'db.sqlite3')),
         }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.mysql',
+            'NAME': os.environ.get('DB_DATABASE', 'schooldz'),
+            'USER': os.environ.get('DB_USERNAME', 'schooldz'),
+            'PASSWORD': os.environ.get('DB_PASSWORD', 'schooldzpass'),
+            'HOST': os.environ.get('DB_HOST', '127.0.0.1'),
+            'PORT': os.environ.get('DB_PORT', '3306'),
+            'OPTIONS': {
+                'charset': 'utf8mb4',
+            }
+        }
+    }
 
 
 # Password validation

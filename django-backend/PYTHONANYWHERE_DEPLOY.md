@@ -6,10 +6,31 @@ for every other route (see `serve_frontend` in `api/views.py` and the
 catch-all in `schooldz/urls.py`), so a single free PythonAnywhere web app is
 enough. No second host, no separate static site needed.
 
+## Database: SQLite, not MySQL
+
+As of January 2026, PythonAnywhere no longer gives **new** free accounts a
+MySQL database — that moved to the paid Developer tier ($10/mo). Postgres
+has always been paid-only. The free tier still gets SQLite (a single file,
+no separate DB service to run), which is what this guide uses.
+
+If your PythonAnywhere account predates January 2026, you're grandfathered
+in with free MySQL access — set `DB_CONNECTION=mysql` instead in step 5 and
+everything else in this guide is unchanged.
+
+An externally-hosted database (a free-tier MySQL/Postgres from some other
+provider) won't work on the free tier either: free accounts can only make
+*HTTP(S)* requests to a small domain allowlist, and a database connection
+isn't HTTP(S) at all — it's blocked regardless of whitelisting.
+
+SQLite is fine for an early-access launch at modest traffic — PythonAnywhere
+itself recommends it for exactly this. The free tier only runs one process
+anyway, so SQLite's single-writer model isn't a practical bottleneck yet. If
+you outgrow it, upgrading to the Developer tier and switching
+`DB_CONNECTION=mysql` needs no code changes (see the end of this doc).
+
 ## What works on the free tier
 - Django + the built React frontend, both from one web app
-- The free MySQL database (Databases tab → set a password, note the host,
-  e.g. `yourusername.mysql.pythonanywhere-services.com`)
+- SQLite (see above)
 - Email/password signup, the 14-day trial, and the full app once a workspace
   is on a trial or active plan
 
@@ -26,8 +47,8 @@ and `pay.chargily.net` are not on it.** Concretely:
   clear "payment provider unreachable" error instead of crashing.
 
 Both come back automatically the moment you upgrade to a paid PythonAnywhere
-plan (from $5/mo, removes the allowlist) and set the corresponding `.env`
-values — no code changes needed.
+plan (removes the allowlist) and set the corresponding `.env` values — no
+code changes needed.
 
 ## Steps
 
@@ -37,21 +58,17 @@ Open a **Bash console** (Dashboard → New console → Bash) and:
 git clone https://github.com/YOUR_USERNAME/SchoolDz.git ~/schooldz
 ```
 
-### 2. Create the MySQL database
-**Databases** tab → set a database password (top of the page, once) → under
-"Create a database", name it e.g. `schooldz` (PythonAnywhere prefixes it
-automatically, giving `yourusername$schooldz`) → Create.
-Note the host shown on that page — it's `yourusername.mysql.pythonanywhere-services.com`.
-
-### 3. Python environment
-In the Bash console:
+### 2. Python environment
 ```bash
 cd ~/schooldz/django-backend
 mkvirtualenv --python=/usr/bin/python3.11 schooldz-venv
-pip install -r requirements.txt
+# Skip mysqlclient here — it needs system headers this account may not have,
+# and SQLite (Python's built-in sqlite3 module) doesn't need it at all.
+pip install django djangorestframework django-cors-headers requests \
+  python-dotenv bcrypt gunicorn chargily-pay
 ```
 
-### 4. Build the frontend
+### 3. Build the frontend
 Also in the Bash console (PythonAnywhere has Node preinstalled):
 ```bash
 cd ~/schooldz/frontend
@@ -62,9 +79,8 @@ REACT_APP_BACKEND_URL="" npm run build
 as a relative path (`/api/v1/...`), so it works regardless of your actual
 `*.pythonanywhere.com` domain, with no hardcoded URL to update later.
 
-### 5. `django-backend/.env`
-Create it (copy your local `.env` as a starting point if you have one, then
-edit):
+### 4. `django-backend/.env`
+Create it:
 ```
 APP_NAME=SchoolDZ
 APP_ENV=production
@@ -72,12 +88,8 @@ APP_KEY=<run: python -c "import secrets; print(secrets.token_urlsafe(32))">
 APP_DEBUG=false
 APP_URL=https://yourusername.pythonanywhere.com
 
-DB_CONNECTION=mysql
-DB_HOST=yourusername.mysql.pythonanywhere-services.com
-DB_PORT=3306
-DB_DATABASE=yourusername$schooldz
-DB_USERNAME=yourusername
-DB_PASSWORD=<the database password you set in step 2>
+DB_CONNECTION=sqlite
+DB_DATABASE=/home/yourusername/schooldz/django-backend/db.sqlite3
 
 FRONTEND_URL=https://yourusername.pythonanywhere.com
 CORS_ORIGINS=https://yourusername.pythonanywhere.com
@@ -94,14 +106,14 @@ CHARGILY_SECRET_KEY=
 CHARGILY_PUBLIC_KEY=
 ```
 
-### 6. Migrate + seed the super admin
+### 5. Migrate + seed the super admin
 ```bash
 cd ~/schooldz/django-backend
 python manage.py migrate
 python manage.py seed_admin
 ```
 
-### 7. Web tab — create the web app
+### 6. Web tab — create the web app
 Dashboard → **Web** → Add a new web app → **Manual configuration** →
 Python 3.11.
 
@@ -134,7 +146,7 @@ Python 3.11.
 Visit `https://yourusername.pythonanywhere.com` — you should see the
 SchoolDZ landing page. Register a workspace at `/register`, or log in as
 the super admin at `/admin/login` with the `ADMIN_EMAIL`/`ADMIN_PASSWORD`
-from step 5.
+from step 4.
 
 ## Redeploying after a code change
 ```bash
@@ -144,7 +156,26 @@ cd ../django-backend && workon schooldz-venv && python manage.py migrate
 ```
 Then hit **Reload** on the Web tab.
 
+## Backing up your data
+SQLite is one file — back it up by just downloading it:
+```bash
+# from a Bash console, zip it up so you can download via the Files tab
+cd ~/schooldz/django-backend && gzip -k db.sqlite3
+```
+
 ## After you outgrow the free tier
-Upgrading removes the network allowlist — set `GOOGLE_CLIENT_ID` /
-`GOOGLE_CLIENT_SECRET` and `CHARGILY_SECRET_KEY` / `CHARGILY_PUBLIC_KEY` in
-`.env`, reload, and both features activate immediately — no code changes.
+Upgrading to the Developer tier ($10/mo) gets you MySQL:
+1. Create a MySQL database in the **Databases** tab, note the host shown
+   there (`yourusername.mysql.pythonanywhere-services.com`).
+2. `pip install mysqlclient` in your virtualenv.
+3. In `.env`, switch `DB_CONNECTION=mysql` and add `DB_HOST`/`DB_USERNAME`/
+   `DB_PASSWORD` (matching the values on the Databases page).
+4. `python manage.py migrate` to build the schema on the new database —
+   note this starts empty; there's no automatic SQLite → MySQL data copy,
+   so do this early rather than after you have real tenant data, or ask for
+   help migrating the data across if you're already live.
+5. Set `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` and
+   `CHARGILY_SECRET_KEY`/`CHARGILY_PUBLIC_KEY` to activate Google sign-in and
+   real payments — no code changes needed, both already degrade gracefully
+   when unset and activate the moment they're configured.
+6. Reload the web app.
