@@ -62,14 +62,42 @@ git clone https://github.com/YOUR_USERNAME/SchoolDz.git ~/schooldz
 ```bash
 cd ~/schooldz/django-backend
 mkvirtualenv --python=/usr/bin/python3.11 schooldz-venv
-# Skip mysqlclient here — it needs system headers this account may not have,
-# and SQLite (Python's built-in sqlite3 module) doesn't need it at all.
+```
+If `pip install` immediately fails with
+`ModuleNotFoundError: No module named '_posixsubprocess'`, that's a known
+PythonAnywhere issue with some Python 3.11 virtualenvs, not your setup —
+recreate it on a different version:
+```bash
+deactivate
+rmvirtualenv schooldz-venv
+ls /usr/bin/python3.*                          # see what's actually available
+mkvirtualenv --python=/usr/bin/python3.13 schooldz-venv   # or the highest listed
+python -c "import subprocess; print('ok')"     # confirm it's fixed before continuing
+```
+Then install the deps — skip `mysqlclient`, it needs system headers this
+account may not have, and SQLite (Python's built-in `sqlite3` module)
+doesn't need it at all:
+```bash
 pip install django djangorestframework django-cors-headers requests \
   python-dotenv bcrypt gunicorn chargily-pay
 ```
 
 ### 3. Build the frontend
-Also in the Bash console (PythonAnywhere has Node preinstalled):
+Node isn't preinstalled account-wide, and there's no root to `apt install`
+it — use PythonAnywhere's documented `nvm` setup instead (one-time, then
+`node`/`npm` are just always on your PATH):
+```bash
+cd ~
+git clone --depth 1 https://github.com/creationix/nvm.git
+source ~/nvm/nvm.sh
+echo 'source ~/nvm/nvm.sh' >> ~/.bashrc
+
+nvm install 20
+nvm use 20
+nvm alias default 20
+node -v && npm -v      # should print real version numbers, not "command not found"
+```
+Then build:
 ```bash
 cd ~/schooldz/frontend
 npm install --legacy-peer-deps
