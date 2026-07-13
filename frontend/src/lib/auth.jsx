@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { api, setAccessToken, extractError } from "@/lib/api";
+import { api, setAccessToken, getAccessToken, extractError } from "@/lib/api";
 
 const AuthContext = createContext(null);
 
@@ -14,8 +14,12 @@ export function AuthProvider({ children }) {
       setUser(data.user);
       setTenant(data.tenant);
     } catch (e) {
-      setUser(null);
-      setTenant(null);
+      // Only clear user state if we have no token stored — prevents a parallel
+      // un-authed loadMe from wiping a freshly stored Google OAuth token.
+      if (!getAccessToken()) {
+        setUser(null);
+        setTenant(null);
+      }
     } finally {
       setLoading(false);
     }
@@ -47,8 +51,11 @@ export function AuthProvider({ children }) {
 
   const loginWithGoogleCode = async (code) => {
     const { data } = await api.post("/auth/google/exchange", { code });
+    // Set the token FIRST before any other requests can fire
     if (data.access_token) setAccessToken(data.access_token);
-    setUser(data.user);
+    // Set user immediately from the exchange response — no need to race with /auth/me
+    if (data.user) setUser(data.user);
+    // Now fetch full profile (includes tenant) with the token already stored
     await loadMe();
     return data.user;
   };

@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ImagePlus, Loader2 } from "lucide-react";
+import { ImagePlus, Loader2, RefreshCw, ArrowUpCircle } from "lucide-react";
 import { PageHeader } from "./_shared";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
@@ -13,9 +14,18 @@ import { Button } from "@/components/ui/button";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+} from "@/components/ui/dialog";
 
 const MAX_LOGO_BYTES = 3 * 1024 * 1024;
 const ALLOWED_LOGO_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+const PLAN_ORDER = ["basic", "standard", "premium"];
+
+function formatMoney(amount, currency = "dzd") {
+  if (amount == null) return "—";
+  return `${amount.toLocaleString()} ${currency.toUpperCase()}`;
+}
 
 export default function SettingsPage() {
   const { tenant, user, refreshTenant } = useAuth();
@@ -23,6 +33,52 @@ export default function SettingsPage() {
   const qc = useQueryClient();
   const [form, setForm] = useState(tenant || {});
   const fileInputRef = useRef(null);
+
+  const [renewOpen, setRenewOpen] = useState(false);
+  const [renewCycle, setRenewCycle] = useState(tenant?.billing_cycle || "monthly");
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [upgradePlan, setUpgradePlan] = useState("");
+
+  const higherPlans = PLAN_ORDER.slice(PLAN_ORDER.indexOf(tenant?.plan) + 1);
+
+  const renewQuoteQuery = useQuery({
+    queryKey: ["billing-renew-quote", renewCycle],
+    queryFn: () => api.get(`/billing/renew/quote?billing_cycle=${renewCycle}`).then((r) => r.data),
+    enabled: renewOpen,
+  });
+
+  const upgradeQuoteQuery = useQuery({
+    queryKey: ["billing-upgrade-quote", upgradePlan],
+    queryFn: () => api.get(`/billing/upgrade/quote?plan=${upgradePlan}`).then((r) => r.data),
+    enabled: upgradeOpen && !!upgradePlan,
+  });
+
+  const renewMut = useMutation({
+    mutationFn: () => api.post("/billing/renew", { billing_cycle: renewCycle }).then((r) => r.data),
+    onSuccess: (data) => {
+      if (data.checkout_url) window.location.href = data.checkout_url;
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
+  const upgradeMut = useMutation({
+    mutationFn: () => api.post("/billing/upgrade", { plan: upgradePlan }).then((r) => r.data),
+    onSuccess: async (data) => {
+      if (data.checkout_url) {
+        window.location.href = data.checkout_url;
+      } else if (data.applied_immediately) {
+        toast.success("Plan upgraded");
+        await refreshTenant();
+        setUpgradeOpen(false);
+      }
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
+  const openUpgrade = () => {
+    setUpgradePlan(higherPlans[0] || "");
+    setUpgradeOpen(true);
+  };
 
   const saveMut = useMutation({
     mutationFn: async () => api.patch(`/tenants/${tenant.id}`, form).then((r) => r.data),
@@ -64,6 +120,9 @@ export default function SettingsPage() {
 
   if (!tenant) return null;
   const canEdit = user?.role === "owner" || user?.role === "director" || user?.role === "super_admin";
+  const trialDaysLeft = tenant.trial_ends_at
+    ? Math.max(0, Math.ceil((new Date(tenant.trial_ends_at) - new Date()) / 86400000))
+    : null;
 
   return (
     <div className="max-w-4xl">
@@ -154,14 +213,145 @@ export default function SettingsPage() {
 
       <div className="surface-card p-6">
         <h3 className="font-display font-semibold text-lg mb-2">Subscription</h3>
-        <p className="text-sm text-muted-foreground mb-4">
-          Plan: <span className="capitalize font-medium">{tenant.plan}</span> · Status:{" "}
+        <p className="text-sm text-muted-foreground mb-1">
+          Plan: <span className="capitalize font-medium">{tenant.plan || "Trial"}</span> · Status:{" "}
           <span className="capitalize font-medium">{tenant.status}</span>
         </p>
-        <div className="text-xs font-mono text-muted-foreground">
-          {tenant.max_students} students · {tenant.max_users} users
+        {tenant.plan_expires_at && (
+          <p className="text-sm text-muted-foreground mb-4">
+            {tenant.status === "active" ? "Renews / expires" : "Expired"} on{" "}
+            <span className="font-medium">{new Date(tenant.plan_expires_at).toLocaleDateString()}</span>
+            {tenant.billing_cycle && <span className="capitalize"> · {tenant.billing_cycle}</span>}
+          </p>
+        )}
+        <div className="text-xs font-mono text-muted-foreground mb-4">
+          {tenant.max_students ?? "Unlimited"} students · {tenant.max_users ?? "Unlimited"} users
         </div>
+
+        {tenant.status === "trial" && (
+          <div className="rounded-lg border border-accent/30 bg-accent/5 p-4 mb-4 flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <div className="text-sm font-semibold">
+                Free trial — {trialDaysLeft} day{trialDaysLeft === 1 ? "" : "s"} left
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Choose a plan any time to keep your workspace active after the trial ends.
+              </div>
+            </div>
+            {canEdit && (
+              <Link to="/billing" data-testid="settings-choose-plan-link">
+                <Button size="sm" className="bg-accent hover:bg-accent/90 text-accent-foreground">
+                  Choose a plan
+                </Button>
+              </Link>
+            )}
+          </div>
+        )}
+
+        {canEdit && tenant.status === "active" && (
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => setRenewOpen(true)} data-testid="settings-renew-button">
+              <RefreshCw className="w-3.5 h-3.5 me-2" />
+              Extend duration
+            </Button>
+            {higherPlans.length > 0 && (
+              <Button variant="outline" size="sm" onClick={openUpgrade} data-testid="settings-upgrade-button">
+                <ArrowUpCircle className="w-3.5 h-3.5 me-2" />
+                Upgrade plan
+              </Button>
+            )}
+          </div>
+        )}
       </div>
+
+      <Dialog open={renewOpen} onOpenChange={setRenewOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Extend your subscription</DialogTitle>
+            <DialogDescription>
+              Add another billing period to your <span className="capitalize font-medium">{tenant.plan}</span> plan.
+              If you renew before it expires, the new period is added on top of your current expiry — no time is lost.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <Field label="Billing cycle">
+              <Select value={renewCycle} onValueChange={setRenewCycle}>
+                <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+                <SelectContent className="bg-popover">
+                  <SelectItem value="monthly">Monthly</SelectItem>
+                  <SelectItem value="annual">Annual</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <div className="text-sm text-muted-foreground">
+              Amount due:{" "}
+              <span className="font-semibold text-foreground">
+                {renewQuoteQuery.isLoading
+                  ? "…"
+                  : formatMoney(renewQuoteQuery.data?.amount, renewQuoteQuery.data?.currency)}
+              </span>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenewOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => renewMut.mutate()}
+              disabled={renewMut.isPending || renewQuoteQuery.isLoading}
+              className="bg-accent hover:bg-accent/90 text-accent-foreground"
+              data-testid="settings-renew-confirm"
+            >
+              {renewMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Pay & extend"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={upgradeOpen} onOpenChange={setUpgradeOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Upgrade your plan</DialogTitle>
+            <DialogDescription>
+              You'll only pay the prorated difference for the time left in your current period — your renewal date
+              doesn't change.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <Field label="New plan">
+              <Select value={upgradePlan} onValueChange={setUpgradePlan}>
+                <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+                <SelectContent className="bg-popover">
+                  {higherPlans.map((p) => (
+                    <SelectItem key={p} value={p} className="capitalize">{p}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <div className="text-sm text-muted-foreground">
+              Amount due now:{" "}
+              <span className="font-semibold text-foreground">
+                {upgradeQuoteQuery.isLoading
+                  ? "…"
+                  : formatMoney(upgradeQuoteQuery.data?.amount, upgradeQuoteQuery.data?.currency)}
+              </span>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setUpgradeOpen(false)}>Cancel</Button>
+            <Button
+              onClick={() => upgradeMut.mutate()}
+              disabled={upgradeMut.isPending || upgradeQuoteQuery.isLoading || !upgradePlan}
+              className="bg-accent hover:bg-accent/90 text-accent-foreground"
+              data-testid="settings-upgrade-confirm"
+            >
+              {upgradeMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Pay & upgrade"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {canEdit && (
         <div className="flex justify-end pt-6">

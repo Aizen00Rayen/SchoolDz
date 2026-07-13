@@ -12,6 +12,7 @@ import { api, extractError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useTheme } from "@/lib/theme";
 import { useI18n } from "@/lib/i18n";
+import { useConfirm } from "@/lib/confirm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -39,6 +40,7 @@ export default function AdminDashboardPage() {
   const { t } = useI18n();
   const nav = useNavigate();
   const qc = useQueryClient();
+  const confirm = useConfirm();
 
   useEffect(() => {
     if (user && user.role !== "super_admin") {
@@ -153,11 +155,13 @@ export default function AdminDashboardPage() {
               variant="outline"
               size="sm"
               onClick={async () => {
-                await logout();
                 nav("/", { replace: true });
+                setTimeout(() => {
+                  logout();
+                }, 50);
               }}
               data-testid="admin-logout-button"
-              className="text-red-600 border-red-500/30 hover:bg-red-500/10"
+              className="text-red-600 border-red-500/30 hover:bg-red-500/10 whitespace-nowrap flex-shrink-0"
             >
               <LogOut className="w-3.5 h-3.5 me-2" />
               {t("common.logout")}
@@ -295,8 +299,12 @@ export default function AdminDashboardPage() {
                           )}
                           <Button
                             size="icon" variant="ghost"
-                            onClick={() => {
-                              if (window.confirm(t("admin.confirm.delete"))) {
+                            onClick={async () => {
+                              if (await confirm({
+                                title: t("admin.confirm.delete"),
+                                confirmLabel: t("admin.actions.delete") || "Delete",
+                                destructive: true,
+                              })) {
                                 deleteMut.mutate(tt.id);
                               }
                             }}
@@ -400,8 +408,12 @@ export default function AdminDashboardPage() {
                           </Button>
                           <Button
                             size="icon" variant="ghost"
-                            onClick={() => {
-                              if (window.confirm(t("admin.confirm.remove_user"))) {
+                            onClick={async () => {
+                              if (await confirm({
+                                title: t("admin.confirm.remove_user"),
+                                confirmLabel: t("admin.actions.delete") || "Delete",
+                                destructive: true,
+                              })) {
                                 deleteUserMut.mutate(u.id);
                               }
                             }}

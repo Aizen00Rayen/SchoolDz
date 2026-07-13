@@ -94,4 +94,4 @@ credentials.json
 .logs/
 
 # User-uploaded files (tenant logos, etc.)
-backend/uploads/
+laravel-backend/public/uploads/

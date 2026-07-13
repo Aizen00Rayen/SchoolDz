@@ -5,6 +5,7 @@ import { Plus, Search, Trash2, Pencil } from "lucide-react";
 
 import { api, extractError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { useConfirm } from "@/lib/confirm";
 import { APPUI } from "@/constants/testIds";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,6 +39,7 @@ export default function CrudPanel({
   emptyIcon: EmptyIcon, canEdit = true, canCreate = true, extraActions,
 }) {
   const { t } = useI18n();
+  const confirm = useConfirm();
   const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
@@ -192,8 +194,10 @@ export default function CrudPanel({
                           </Button>
                           <Button
                             size="icon" variant="ghost"
-                            onClick={() => {
-                              if (window.confirm("Delete this record?")) deleteMut.mutate(row.id);
+                            onClick={async () => {
+                              if (await confirm({ title: "Delete this record?", destructive: true })) {
+                                deleteMut.mutate(row.id);
+                              }
                             }}
                             data-testid={APPUI.rowAction(moduleKey, row.id, "delete")}
                             className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-500/10"

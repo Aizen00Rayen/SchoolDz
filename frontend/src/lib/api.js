@@ -40,14 +40,31 @@ api.interceptors.response.use(
   (r) => r,
   (err) => {
     if (err?.response?.status === 401) {
-      // don't clear on /auth/me since AuthProvider handles it
+      const url = err?.config?.url || "";
+      // Only clear the token if it came from an auth validation endpoint,
+      // not from every protected endpoint — prevents race conditions where
+      // a parallel un-authed request wipes a freshly stored token.
+      const isAuthCheck = url.includes("/auth/me") || url.includes("/auth/refresh");
+      // ...and only if THIS request actually sent a token that got rejected
+      // (a genuinely invalid/expired one) — not a request that went out
+      // anonymously before any token existed. Without this check, a slow
+      // /auth/me fired before login (e.g. AuthProvider's mount-time loadMe())
+      // can resolve *after* a fresh token was stored by a parallel login —
+      // notably the Google OAuth callback, where AuthProvider's mount effect
+      // and loginWithGoogleCode()'s own loadMe() both fire on the same page
+      // load — and wipe out the just-stored valid token even though it was
+      // never sent on the failing request.
+      const requestHadToken = !!err?.config?.headers?.Authorization;
+      if (isAuthCheck && requestHadToken) {
+        setAccessToken(null);
+      }
     }
     return Promise.reject(err);
   },
 );
 
 export function formatApiErrorDetail(detail) {
-  if (detail == null) return "Something went wrong. Please try again.";
+  if (detail == null) return null;
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail))
     return detail
@@ -59,5 +76,17 @@ export function formatApiErrorDetail(detail) {
 }
 
 export function extractError(err) {
-  return formatApiErrorDetail(err?.response?.data?.detail) || err?.message || "Unknown error";
+  const data = err?.response?.data;
+  // Backend returns either {detail: "..."} (DRF default) or {error: "..."} (our custom views).
+  // Check detail first since it can carry richer shapes (validation error lists),
+  // but fall through to error/message rather than a generic string the moment
+  // detail is merely absent — {error: "..."} responses are common (guard-rail
+  // 400s like "Cannot delete a super admin account") and were previously never
+  // shown because "Something went wrong" is truthy and always won the `||` chain.
+  const msg =
+    formatApiErrorDetail(data?.detail) ||
+    (data?.error && typeof data.error === "string" ? data.error : null) ||
+    err?.message ||
+    "Something went wrong. Please try again.";
+  return msg;
 }

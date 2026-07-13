@@ -2,7 +2,7 @@
 
 **Domain**: schooldz.com — multi-tenant SaaS ERP for private education centers  
 **Started**: Jan 2026  
-**Stack**: FastAPI + React (JS) + MongoDB + JWT (adapted from Laravel/PostgreSQL to fit Emergent env)
+**Stack**: Django + Django REST Framework + React (JS) + MySQL + DRF token auth (migrated from an earlier FastAPI/Mongo prototype and a since-abandoned Laravel port; Django is the sole backend, chosen for native PythonAnywhere hosting support)
 
 ---
 
@@ -18,7 +18,7 @@ Multi-tenant cloud ERP for tutoring centers, language schools, coding academies,
 - **Student** (scaffolded).
 
 ## Architecture
-- **Backend** `/app/backend/`: `server.py` (bootstrap, seed), `routes.py` (`/api/v1/*`), `core.py` (JWT + tenant scope + RBAC), `models.py` (Pydantic entities).
+- **Backend** `/django-backend/`: `api/views.py` (`/api/v1/*`), `api/models.py` (Django ORM entities), `api/serializers.py` (DRF), `api/services.py` (Google OAuth + Chargily), tenant scoping via `TenantScopedViewSet`.
 - **Frontend** `/app/frontend/`: React + Tailwind + shadcn/ui + TanStack Query + Recharts + Framer Motion + Sonner.
 - **Auth**: JWT HS256 access (12h) + refresh (14d). Frontend uses `Authorization: Bearer` from localStorage.
 - **Multi-tenant**: every non-super_admin user pinned to `tenant_id`; every scoped route filters by tenant.

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { API_BASE, extractError } from "@/lib/api";
+import { useServerConfig } from "@/lib/config";
 import { Loader2 } from "lucide-react";
 import GoogleAuthButton from "./GoogleAuthButton";
 
@@ -17,6 +18,8 @@ export default function LoginPage() {
   const { t } = useI18n();
   const nav = useNavigate();
   const loc = useLocation();
+  const { data: serverConfig } = useServerConfig();
+  const googleEnabled = !!serverConfig?.google_oauth_enabled;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [tenantSlug, setTenantSlug] = useState("");
@@ -58,17 +61,21 @@ export default function LoginPage() {
         </>
       }
     >
-      <GoogleAuthButton
-        href={`${API_BASE}/auth/google/start?intent=login`}
-        label={t("auth.continue_with_google")}
-        testId={AUTH.loginGoogle}
-      />
+      {googleEnabled && (
+        <>
+          <GoogleAuthButton
+            href={`${API_BASE}/auth/google/start?intent=login`}
+            label={t("auth.continue_with_google")}
+            testId={AUTH.loginGoogle}
+          />
 
-      <div className="flex items-center gap-3 my-6">
-        <div className="h-px flex-1 bg-border" />
-        <span className="text-xs uppercase tracking-widest text-muted-foreground">{t("auth.or")}</span>
-        <div className="h-px flex-1 bg-border" />
-      </div>
+          <div className="flex items-center gap-3 my-6">
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-xs uppercase tracking-widest text-muted-foreground">{t("auth.or")}</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+        </>
+      )}
 
       <form onSubmit={onSubmit} className="space-y-5">
         <div className="space-y-2">

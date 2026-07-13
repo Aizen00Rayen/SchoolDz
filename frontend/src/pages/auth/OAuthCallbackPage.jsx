@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import AuthLayout from "./AuthLayout";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
-import { extractError } from "@/lib/api";
+import { extractError, setAccessToken } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 
@@ -50,6 +50,10 @@ export default function OAuthCallbackPage() {
       setMessage("Missing sign-in code.");
       return;
     }
+
+    // Clear any stale token before the exchange — prevents old/wiped tokens
+    // from interfering with the fresh one we're about to receive
+    setAccessToken(null);
 
     loginWithGoogleCode(code)
       .then(() => nav("/app", { replace: true }))

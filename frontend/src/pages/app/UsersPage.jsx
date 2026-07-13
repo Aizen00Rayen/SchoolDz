@@ -5,6 +5,7 @@ import { Plus, Users, Trash2 } from "lucide-react";
 
 import { api, extractError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { useConfirm } from "@/lib/confirm";
 import { PageHeader, EmptyState } from "./_shared";
 import { Field } from "./StudentsPage";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ const ROLES = [
 
 export default function UsersPage() {
   const { t } = useI18n();
+  const confirm = useConfirm();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", password: "", role: "secretary", phone: "" });
@@ -99,8 +101,10 @@ export default function UsersPage() {
                     <Button
                       size="icon"
                       variant="ghost"
-                      onClick={() => {
-                        if (window.confirm("Delete this user?")) deleteMut.mutate(u.id);
+                      onClick={async () => {
+                        if (await confirm({ title: "Delete this user?", destructive: true })) {
+                          deleteMut.mutate(u.id);
+                        }
                       }}
                       className="h-8 w-8 text-red-600"
                       data-testid={`users-delete-${u.id}`}

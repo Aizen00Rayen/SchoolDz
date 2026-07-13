@@ -38,7 +38,7 @@ export default function AdminLoginPage() {
         toast.error("This login is reserved for platform administrators.");
         return;
       }
-      toast.success("Welcome, admin.");
+      toast.success("Welcome, admin.", { position: "bottom-right" });
       nav("/admin", { replace: true });
     } catch (err) {
       toast.error(extractError(err));

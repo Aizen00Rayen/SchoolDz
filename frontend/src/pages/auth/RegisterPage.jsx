@@ -12,6 +12,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { API_BASE, extractError } from "@/lib/api";
+import { useServerConfig } from "@/lib/config";
 import { Loader2 } from "lucide-react";
 import GoogleAuthButton from "./GoogleAuthButton";
 
@@ -49,6 +50,8 @@ export default function RegisterPage() {
   const [slug, setSlug] = useState("");
   const [centerType, setCenterType] = useState("tutoring");
   const [busy, setBusy] = useState(false);
+  const { data: serverConfig } = useServerConfig();
+  const googleEnabled = !!serverConfig?.google_oauth_enabled;
 
   useEffect(() => {
     if (user) nav("/app", { replace: true });
@@ -160,17 +163,21 @@ export default function RegisterPage() {
           </Select>
         </div>
 
-        <GoogleAuthButton
-          onClick={onGoogleSignup}
-          label={t("auth.continue_with_google")}
-          testId={AUTH.registerGoogle}
-        />
+        {googleEnabled && (
+          <>
+            <GoogleAuthButton
+              onClick={onGoogleSignup}
+              label={t("auth.continue_with_google")}
+              testId={AUTH.registerGoogle}
+            />
 
-        <div className="flex items-center gap-3">
-          <div className="h-px flex-1 bg-border" />
-          <span className="text-xs uppercase tracking-widest text-muted-foreground">{t("auth.or")}</span>
-          <div className="h-px flex-1 bg-border" />
-        </div>
+            <div className="flex items-center gap-3">
+              <div className="h-px flex-1 bg-border" />
+              <span className="text-xs uppercase tracking-widest text-muted-foreground">{t("auth.or")}</span>
+              <div className="h-px flex-1 bg-border" />
+            </div>
+          </>
+        )}
 
         <div className="border-t border-border pt-4 space-y-4">
           <div className="space-y-2">

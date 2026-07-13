@@ -6,7 +6,7 @@ import {
 } from "framer-motion";
 import {
   ArrowRight, Users, CalendarCheck2, Wallet, BookOpen,
-  BarChart3, Check, Star, Cpu, Rocket,
+  BarChart3, Check, Star, Cpu,
   Zap, Layers, GraduationCap,
 } from "lucide-react";
 
@@ -15,6 +15,7 @@ import { useI18n } from "@/lib/i18n";
 import { MARKETING } from "@/constants/testIds";
 import { Button } from "@/components/ui/button";
 import { StickyFeatureCards } from "@/components/ui/sticky-scroll-cards-section";
+import PlanCards from "@/components/PlanCards";
 
 /* -----------------------------------------------------------
  * Interactive mouse-follow spotlight background
@@ -614,68 +615,7 @@ export default function LandingPage() {
             <p className="text-lg text-muted-foreground">{t("pricing.subtitle")}</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {[
-              { name: "Basic", price: "2 499", features: ["50 students", "3 users", "Email support", "Core modules"] },
-              { name: "Standard", price: "6 799", features: ["500 students", "20 users", "Priority support", "Custom branding", "API access"], popular: true },
-              { name: "Premium", price: "14 900", features: ["Unlimited students", "Unlimited users", "24/7 support", "White-label", "SLA + SSO"] },
-            ].map((p, i) => (
-              <motion.div
-                key={p.name}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.5, delay: i * 0.08 }}
-                whileHover={{ y: -6 }}
-                className={`rounded-2xl p-8 border transition-shadow duration-300 hover:shadow-xl ${
-                  p.popular
-                    ? "bg-primary text-primary-foreground border-primary relative"
-                    : "bg-card border-border"
-                }`}
-              >
-                {p.popular && (
-                  <div className="absolute -top-3 start-6 text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 rounded-full bg-accent text-accent-foreground">
-                    {t("pricing.popular")}
-                  </div>
-                )}
-                <div className="flex items-center justify-between mb-6">
-                  <h3 className="font-display text-xl font-semibold">{p.name}</h3>
-                  {p.popular && <Rocket className="w-5 h-5 text-accent" />}
-                </div>
-                <div className="mb-6">
-                  <span className="font-display text-5xl font-black tracking-tighter">
-                    {p.price}
-                  </span>
-                  <span className={`ms-2 text-sm font-semibold ${p.popular ? "text-primary-foreground/80" : "text-foreground/80"}`}>
-                    DZD
-                  </span>
-                  <span className={`ms-1 text-sm ${p.popular ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
-                    {t("pricing.perMonth")}
-                  </span>
-                </div>
-                <ul className="space-y-3 mb-8">
-                  {p.features.map((f) => (
-                    <li key={f} className="flex items-center gap-2 text-sm">
-                      <Check className="w-4 h-4 text-accent flex-shrink-0" />
-                      <span className={p.popular ? "text-primary-foreground/90" : "text-foreground"}>{f}</span>
-                    </li>
-                  ))}
-                </ul>
-                <Link to="/register" data-testid={`pricing-plan-${p.name.toLowerCase()}`}>
-                  <Button
-                    className={`w-full h-11 font-semibold ${
-                      p.popular
-                        ? "bg-accent hover:bg-accent/90 text-accent-foreground"
-                        : ""
-                    }`}
-                    variant={p.popular ? "default" : "outline"}
-                  >
-                    {t("pricing.cta")}
-                  </Button>
-                </Link>
-              </motion.div>
-            ))}
-          </div>
+          <PlanCards mode="marketing" t={t} />
         </div>
       </section>
 

@@ -189,10 +189,11 @@ export default function AppShell() {
 
         <div className="p-3 border-t border-border">
           <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2 px-2">
-            {tenant?.plan === "free" ? t("common.trial_active") : t("common.plan_active")}
+            {tenant?.status === "trial" ? t("common.trial_active") : t("common.plan_active")}
           </div>
-          <div className="px-2 pb-3 text-xs text-muted-foreground">
-            {tenant?.plan === "pro" ? "Pro" : tenant?.plan === "business" ? "Business" : tenant?.plan === "starter" ? "Starter" : "Free"}
+          <div className="px-2 pb-3 text-xs text-muted-foreground capitalize">
+            {tenant?.plan || "Free"}
+            {tenant?.billing_cycle ? ` · ${tenant.billing_cycle}` : ""}
           </div>
           <Button
             variant="outline"
