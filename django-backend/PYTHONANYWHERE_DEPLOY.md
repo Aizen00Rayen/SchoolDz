@@ -82,30 +82,35 @@ pip install django djangorestframework django-cors-headers requests \
   python-dotenv bcrypt gunicorn chargily-pay
 ```
 
-### 3. Build the frontend
-Node isn't preinstalled account-wide, and there's no root to `apt install`
-it — use PythonAnywhere's documented `nvm` setup instead (one-time, then
-`node`/`npm` are just always on your PATH):
-```bash
-cd ~
-git clone --depth 1 https://github.com/creationix/nvm.git
-source ~/nvm/nvm.sh
-echo 'source ~/nvm/nvm.sh' >> ~/.bashrc
+### 3. The frontend build — do NOT build it on PythonAnywhere
 
-nvm install 20
-nvm use 20
-nvm alias default 20
-node -v && npm -v      # should print real version numbers, not "command not found"
-```
-Then build:
+Don't `npm install` on the server. This app's `node_modules` is ~765MB
+locally, but the PythonAnywhere **free tier's entire disk quota is 512MB**
+— `npm install` will run out of space partway through and fail with cryptic
+errors like `npm warn tar TAR_ENTRY_ERROR Unknown system error -122` (that's
+Linux `EDQUOT`, disk quota exceeded) and a subsequent `craco: not found`.
+There is no fix for this on the free tier short of not installing
+`node_modules` there at all — retrying, clearing npm's cache, etc. won't
+help, since the problem is disk space, not the install itself.
+
+Instead, **build the frontend on your own machine** (or anywhere with
+normal disk space — this Claude Code sandbox works fine too) and commit the
+compiled output. `frontend/.gitignore` has a `!/build` exception carved out
+specifically for this — the build directory is meant to be committed for
+this project, unlike a typical CRA app:
 ```bash
-cd ~/schooldz/frontend
+cd frontend
 npm install --legacy-peer-deps
 REACT_APP_BACKEND_URL="" npm run build
+git add build && git commit -m "Build frontend for deploy" && git push
 ```
 `REACT_APP_BACKEND_URL=""` is important — it makes the frontend call the API
 as a relative path (`/api/v1/...`), so it works regardless of your actual
 `*.pythonanywhere.com` domain, with no hardcoded URL to update later.
+
+Then on PythonAnywhere, `git pull` (step 1) already brought the built
+`frontend/build/` folder down with everything else — nothing else to do
+here, and Node.js never needs to exist on the server at all.
 
 ### 4. `django-backend/.env`
 Create it:
@@ -177,12 +182,19 @@ the super admin at `/admin/login` with the `ADMIN_EMAIL`/`ADMIN_PASSWORD`
 from step 4.
 
 ## Redeploying after a code change
+
+If you only changed backend code:
 ```bash
 cd ~/schooldz && git pull
-cd frontend && REACT_APP_BACKEND_URL="" npm run build
-cd ../django-backend && workon schooldz-venv && python manage.py migrate
+cd django-backend && workon schooldz-venv && python manage.py migrate
 ```
-Then hit **Reload** on the Web tab.
+
+If you also changed frontend code, build and commit it **locally first**
+(see step 3 — never `npm run build` on PythonAnywhere itself), push, then
+`git pull` on the server as above; the freshly built `frontend/build/`
+comes down with the rest of the repo, no separate build step needed there.
+
+Then hit **Reload** on the Web tab either way.
 
 ## Backing up your data
 SQLite is one file — back it up by just downloading it:

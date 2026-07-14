@@ -9,7 +9,11 @@
 /coverage
 
 # production
-/build
+# Committed on purpose: PythonAnywhere's free tier has a 512MB disk quota
+# that a full node_modules install blows through (~765MB locally), so
+# Node.js never runs there at all — the prebuilt output is committed here
+# and PythonAnywhere just `git pull`s it. See django-backend/PYTHONANYWHERE_DEPLOY.md.
+!/build
 
 # misc
 .DS_Store
