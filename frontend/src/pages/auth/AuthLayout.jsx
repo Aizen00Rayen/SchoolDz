@@ -6,6 +6,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
+import { Logo } from "@/components/Logo";
 
 export default function AuthLayout({ children, title, subtitle, footer }) {
   const { t, lang, setLang } = useI18n();
@@ -15,11 +16,8 @@ export default function AuthLayout({ children, title, subtitle, footer }) {
       {/* Left panel (branding) */}
       <div className="relative hidden lg:flex flex-col justify-between p-12 bg-primary text-primary-foreground overflow-hidden">
         <div className="absolute inset-0 grid-hero opacity-30 pointer-events-none" />
-        <Link to="/" className="relative flex items-center gap-2 z-10" data-testid="auth-brand-link">
-          <div className="w-8 h-8 bg-accent rounded-md grid place-items-center">
-            <span className="font-display font-black text-accent-foreground text-sm">S</span>
-          </div>
-          <span className="font-display font-bold text-lg tracking-tight">schooldz</span>
+        <Link to="/" className="relative z-10" data-testid="auth-brand-link">
+          <Logo size={28} textClassName="text-lg" />
         </Link>
 
         <div className="relative z-10">
@@ -35,19 +33,16 @@ export default function AuthLayout({ children, title, subtitle, footer }) {
         </div>
 
         <div className="relative z-10 font-mono text-xs text-primary-foreground/50">
-          <div className="mb-2">→ schooldz.com/&lt;yourschool&gt;</div>
-          <div>© {new Date().getFullYear()} SchoolDZ</div>
+          <div className="mb-2">→ scolaris.com/&lt;yourschool&gt;</div>
+          <div>© {new Date().getFullYear()} Scolaris</div>
         </div>
       </div>
 
       {/* Right panel (form) */}
       <div className="flex flex-col">
         <div className="flex items-center justify-between p-6">
-          <Link to="/" className="flex items-center gap-2 lg:hidden">
-            <div className="w-7 h-7 bg-primary rounded-md grid place-items-center">
-              <span className="font-display font-black text-primary-foreground text-xs">S</span>
-            </div>
-            <span className="font-display font-bold tracking-tight">schooldz</span>
+          <Link to="/" className="lg:hidden">
+            <Logo size={24} textClassName="text-base" />
           </Link>
           <div className="ms-auto flex items-center gap-2">
             <DropdownMenu>

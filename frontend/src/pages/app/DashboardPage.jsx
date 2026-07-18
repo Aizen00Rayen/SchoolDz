@@ -91,7 +91,7 @@ export default function DashboardPage() {
               <h3 className="font-display font-semibold text-lg">{t("dashboard.revenue_trend")}</h3>
               <p className="text-xs text-muted-foreground">{t("dashboard.last6m")}</p>
             </div>
-            <div className="text-xs font-mono px-2 py-1 rounded-full bg-emerald-500/10 text-emerald-600">
+            <div className="text-xs font-mono px-2 py-1 rounded-full bg-success/10 text-success">
               +12.4%
             </div>
           </div>

@@ -96,3 +96,4 @@ credentials.json
 
 # User-uploaded files (tenant logos, etc.)
 laravel-backend/public/uploads/
+django-backend/uploads/

@@ -80,7 +80,7 @@ export default function OAuthCallbackPage() {
   return (
     <AuthLayout title={t("auth.submit.login")}>
       <div className="flex flex-col items-center gap-4 py-10 text-center">
-        <p className="text-sm text-red-600" data-testid="oauth-callback-error">{message}</p>
+        <p className="text-sm text-destructive" data-testid="oauth-callback-error">{message}</p>
         <Link to="/login">
           <Button variant="outline">{t("auth.submit.login")}</Button>
         </Link>

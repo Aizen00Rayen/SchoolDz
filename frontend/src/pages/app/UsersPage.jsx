@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Users, Trash2 } from "lucide-react";
+import { Plus, Users, Trash2, Search } from "lucide-react";
 
 import { api, extractError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -29,11 +29,12 @@ export default function UsersPage() {
   const confirm = useConfirm();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
   const [form, setForm] = useState({ name: "", email: "", password: "", role: "secretary", phone: "" });
 
   const { data, isLoading } = useQuery({
-    queryKey: ["users-list"],
-    queryFn: async () => (await api.get("/users")).data,
+    queryKey: ["users-list", q],
+    queryFn: async () => (await api.get("/users", { params: q ? { q } : {} })).data,
   });
 
   const createMut = useMutation({
@@ -74,6 +75,22 @@ export default function UsersPage() {
         }
       />
 
+      <div className="flex items-center gap-2 mb-4">
+        <div className="relative flex-1 max-w-xs">
+          <Search className="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder={t("actions.search")}
+            className="ps-9 h-9"
+            data-testid="users-search-input"
+          />
+        </div>
+        <div className="text-xs text-muted-foreground font-mono">
+          {data?.total ?? 0} users
+        </div>
+      </div>
+
       {items.length === 0 && !isLoading ? (
         <EmptyState icon={Users} title="No team members yet" description="Invite colleagues to help run your center." />
       ) : (
@@ -106,7 +123,7 @@ export default function UsersPage() {
                           deleteMut.mutate(u.id);
                         }
                       }}
-                      className="h-8 w-8 text-red-600"
+                      className="h-8 w-8 text-destructive"
                       data-testid={`users-delete-${u.id}`}
                     >
                       <Trash2 className="w-3.5 h-3.5" />

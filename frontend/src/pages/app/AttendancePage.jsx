@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ClipboardCheck, Save } from "lucide-react";
+import { ClipboardCheck, Save, Search } from "lucide-react";
 
 import { api, extractError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -15,10 +15,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 const STATUSES = [
-  { key: "present", label: "Present", cls: "bg-emerald-500 text-white" },
-  { key: "late", label: "Late", cls: "bg-amber-500 text-white" },
-  { key: "excused", label: "Excused", cls: "bg-blue-500 text-white" },
-  { key: "absent", label: "Absent", cls: "bg-red-500 text-white" },
+  { key: "present", label: "Present", cls: "bg-success text-success-foreground" },
+  { key: "late", label: "Late", cls: "bg-warning text-warning-foreground" },
+  { key: "excused", label: "Excused", cls: "bg-info text-info-foreground" },
+  { key: "absent", label: "Absent", cls: "bg-destructive text-destructive-foreground" },
 ];
 
 export default function AttendancePage() {
@@ -26,6 +26,7 @@ export default function AttendancePage() {
   const qc = useQueryClient();
   const [sessionId, setSessionId] = useState("");
   const [marks, setMarks] = useState({}); // student_id -> status
+  const [q, setQ] = useState("");
 
   const { data: sessions } = useQuery({
     queryKey: ["sessions-list-attendance"],
@@ -85,6 +86,14 @@ export default function AttendancePage() {
   });
 
   const enrolled = (selectedGroup?.student_ids || []).map((id) => studentMap[id]).filter(Boolean);
+  const visibleEnrolled = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return enrolled;
+    return enrolled.filter((s) =>
+      `${s.first_name} ${s.last_name}`.toLowerCase().includes(needle) ||
+      (s.student_code || "").toLowerCase().includes(needle)
+    );
+  }, [enrolled, q]);
 
   return (
     <div>
@@ -136,7 +145,23 @@ export default function AttendancePage() {
           description="Add students to this group first."
         />
       ) : (
-        <div className="surface-card overflow-hidden">
+        <div>
+          <div className="flex items-center gap-2 mb-4">
+            <div className="relative flex-1 max-w-xs">
+              <Search className="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder={t("actions.search")}
+                className="ps-9 h-9"
+                data-testid="attendance-search-input"
+              />
+            </div>
+            <div className="text-xs text-muted-foreground font-mono">
+              {visibleEnrolled.length} / {enrolled.length} students
+            </div>
+          </div>
+          <div className="surface-card overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-muted/40 border-b border-border">
               <tr>
@@ -146,7 +171,7 @@ export default function AttendancePage() {
               </tr>
             </thead>
             <tbody>
-              {enrolled.map((s) => (
+              {visibleEnrolled.map((s) => (
                 <tr key={s.id} className="border-b border-border last:border-0 hover:bg-muted/40">
                   <td className="px-4 py-3 font-medium">{s.first_name} {s.last_name}</td>
                   <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{s.student_code}</td>
@@ -174,6 +199,7 @@ export default function AttendancePage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>

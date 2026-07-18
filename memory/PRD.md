@@ -1,6 +1,6 @@
-# SchoolDZ — Product Requirements Document
+# Scolaris — Product Requirements Document
 
-**Domain**: schooldz.com — multi-tenant SaaS ERP for private education centers  
+**Domain**: scolaris.com — multi-tenant SaaS ERP for private education centers  
 **Started**: Jan 2026  
 **Stack**: Django + Django REST Framework + React (JS) + MySQL + DRF token auth (migrated from an earlier FastAPI/Mongo prototype and a since-abandoned Laravel port; Django is the sole backend, chosen for native PythonAnywhere hosting support)
 
@@ -22,7 +22,7 @@ Multi-tenant cloud ERP for tutoring centers, language schools, coding academies,
 - **Frontend** `/app/frontend/`: React + Tailwind + shadcn/ui + TanStack Query + Recharts + Framer Motion + Sonner.
 - **Auth**: JWT HS256 access (12h) + refresh (14d). Frontend uses `Authorization: Bearer` from localStorage.
 - **Multi-tenant**: every non-super_admin user pinned to `tenant_id`; every scoped route filters by tenant.
-- **Preview subdomain**: path-based `/app/*` (docs for real `slug.schooldz.com` provided).
+- **Preview subdomain**: path-based `/app/*` (docs for real `slug.scolaris.com` provided).
 
 ## MVP — implemented (Jan 2026)
 - ✅ Landing marketing page — completely rebuilt (Jan 2026, v2): mouse-follow spotlight, aurora orbs, word-by-word hero reveal, 3D tilt interactive dashboard preview with rotating live sessions and floating cards, animated count-up stats, bento feature grid with hover lift, marquee of center types, pricing with rocket icon. FR/EN/AR + RTL.
@@ -59,7 +59,7 @@ Multi-tenant cloud ERP for tutoring centers, language schools, coding academies,
 - Real Stripe / local gateway payments.
 - Mobile apps (React Native).
 - AI teaching assistant (using Emergent LLM key).
-- Real subdomain routing (`slug.schooldz.com`) via nginx.
+- Real subdomain routing (`slug.scolaris.com`) via nginx.
 
 ## Test credentials
 See `/app/memory/test_credentials.md`.

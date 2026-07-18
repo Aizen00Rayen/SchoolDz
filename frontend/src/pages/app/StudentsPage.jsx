@@ -1,11 +1,19 @@
+import { useRef, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import CrudPanel, { StatusPill } from "./CrudPanel";
-import { GraduationCap } from "lucide-react";
+import { GraduationCap, Upload } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+import { Field } from "./_shared";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { api, extractError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
 const DEFAULT_FORM = {
@@ -22,6 +30,85 @@ const DEFAULT_FORM = {
   notes: "",
 };
 
+const MAX_CSV_BYTES = 2 * 1024 * 1024;
+
+function ImportCsvDialog() {
+  const qc = useQueryClient();
+  const fileInputRef = useRef(null);
+  const [open, setOpen] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const importMut = useMutation({
+    mutationFn: (file) => {
+      const body = new FormData();
+      body.append("file", file);
+      return api.post("/students/import", body).then((r) => r.data);
+    },
+    onSuccess: (data) => {
+      setResult(data);
+      qc.invalidateQueries({ queryKey: ["students"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
+  const onFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > MAX_CSV_BYTES) {
+      toast.error("CSV must be under 2MB");
+      return;
+    }
+    setResult(null);
+    importMut.mutate(file);
+  };
+
+  return (
+    <>
+      <Button variant="outline" onClick={() => setOpen(true)}>
+        <Upload className="w-4 h-4 me-2" /> Import CSV
+      </Button>
+      <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setResult(null); }}>
+        <DialogContent className="bg-card max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl">Import students from CSV</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Columns: first_name, last_name (required), email, phone, gender, birth_date,
+              address, emergency_contact, parent_name, parent_email, parent_phone (optional).
+            </DialogDescription>
+          </DialogHeader>
+
+          <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={onFileSelect} />
+          <Button type="button" variant="outline" disabled={importMut.isPending} onClick={() => fileInputRef.current?.click()}>
+            {importMut.isPending ? "Importing…" : "Choose CSV file"}
+          </Button>
+
+          {result && (
+            <div className="text-sm space-y-2">
+              <div className="text-success font-medium">{result.created} of {result.total} students created</div>
+              {result.failed?.length > 0 && (
+                <div className="max-h-48 overflow-y-auto border border-border rounded-lg">
+                  <table className="w-full text-xs">
+                    <tbody>
+                      {result.failed.map((f) => (
+                        <tr key={f.row} className="border-b border-border last:border-0">
+                          <td className="px-3 py-1.5 font-mono text-muted-foreground">Row {f.row}</td>
+                          <td className="px-3 py-1.5 text-destructive">{f.error}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 export default function StudentsPage() {
   const { t } = useI18n();
   return (
@@ -32,6 +119,7 @@ export default function StudentsPage() {
       subtitle="Manage learners, profiles, and enrollment status."
       emptyIcon={GraduationCap}
       defaultForm={DEFAULT_FORM}
+      extraActions={<ImportCsvDialog />}
       columns={[
         {
           key: "name", label: "Name",
@@ -104,14 +192,4 @@ export default function StudentsPage() {
   );
 }
 
-function Field({ label, required, children }) {
-  return (
-    <div className="space-y-1.5">
-      <Label className="text-xs font-medium">
-        {label} {required && <span className="text-red-500">*</span>}
-      </Label>
-      {children}
-    </div>
-  );
-}
 export { Field };

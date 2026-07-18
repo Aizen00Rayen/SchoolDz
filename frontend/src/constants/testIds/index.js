@@ -1,4 +1,4 @@
-// Centralised test-id constants for SchoolDZ.
+// Centralised test-id constants for Scolaris.
 export const AUTH = {
   loginEmail: "auth-login-email-input",
   loginPassword: "auth-login-password-input",

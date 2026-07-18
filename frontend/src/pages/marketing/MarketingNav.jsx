@@ -4,6 +4,7 @@ import { useTheme } from "@/lib/theme";
 import { MARKETING } from "@/constants/testIds";
 import { Moon, Sun, Languages } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Logo } from "@/components/Logo";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,23 +19,20 @@ export default function MarketingNav() {
   return (
     <header className="sticky top-0 z-40 glass-nav">
       <div className="max-w-7xl mx-auto flex items-center justify-between px-6 py-4">
-        <Link to="/" className="flex items-center gap-2 group" data-testid="marketing-logo-link">
-          <div className="w-8 h-8 bg-primary rounded-md grid place-items-center">
-            <span className="font-display font-black text-primary-foreground text-sm">S</span>
-          </div>
-          <span className="font-display font-bold text-lg tracking-tight">schooldz</span>
+        <Link to="/" className="group" data-testid="marketing-logo-link">
+          <Logo size={28} textClassName="text-lg" />
         </Link>
 
         <nav className="hidden md:flex items-center gap-8 text-sm font-medium">
-          <a href="#features" className="text-muted-foreground hover:text-foreground transition-colors">
+          <Link to="/#features" className="text-muted-foreground hover:text-foreground transition-colors">
             {t("nav.features")}
-          </a>
+          </Link>
           <Link to="/pricing" className="text-muted-foreground hover:text-foreground transition-colors">
             {t("nav.pricing")}
           </Link>
-          <a href="#about" className="text-muted-foreground hover:text-foreground transition-colors">
+          <Link to="/about" className="text-muted-foreground hover:text-foreground transition-colors">
             {t("nav.about")}
-          </a>
+          </Link>
         </nav>
 
         <div className="flex items-center gap-2">
@@ -73,19 +71,20 @@ export default function MarketingNav() {
             {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </Button>
 
-          <Link to="/login" data-testid={MARKETING.navLogin}>
-            <Button variant="ghost" size="sm" className="text-sm font-medium">
+          <Button variant="ghost" size="sm" className="text-sm font-medium" asChild>
+            <Link to="/login" data-testid={MARKETING.navLogin}>
               {t("nav.login")}
-            </Button>
-          </Link>
-          <Link to="/register" data-testid={MARKETING.navSignup}>
-            <Button
-              size="sm"
-              className="text-sm font-medium bg-accent hover:bg-accent/90 text-accent-foreground"
-            >
+            </Link>
+          </Button>
+          <Button
+            size="sm"
+            className="text-sm font-medium bg-accent hover:bg-accent/90 text-accent-foreground"
+            asChild
+          >
+            <Link to="/register" data-testid={MARKETING.navSignup}>
               {t("nav.signup")}
-            </Button>
-          </Link>
+            </Link>
+          </Button>
         </div>
       </div>
     </header>

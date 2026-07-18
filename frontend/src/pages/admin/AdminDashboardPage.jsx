@@ -135,7 +135,7 @@ export default function AdminDashboardPage() {
             </div>
             <div>
               <div className="font-display font-bold text-sm leading-tight">
-                schooldz <span className="text-accent">/ admin</span>
+                scolaris <span className="text-accent">/ admin</span>
               </div>
               <div className="text-[10px] font-mono text-muted-foreground leading-tight">
                 platform console
@@ -148,7 +148,7 @@ export default function AdminDashboardPage() {
               {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
             <span className="hidden md:inline-flex items-center gap-2 text-xs font-mono text-muted-foreground border border-border rounded-full px-3 py-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              <span className="w-1.5 h-1.5 rounded-full bg-success" />
               {user.email}
             </span>
             <Button
@@ -161,7 +161,7 @@ export default function AdminDashboardPage() {
                 }, 50);
               }}
               data-testid="admin-logout-button"
-              className="text-red-600 border-red-500/30 hover:bg-red-500/10 whitespace-nowrap flex-shrink-0"
+              className="text-destructive border-destructive/30 hover:bg-destructive/10 whitespace-nowrap flex-shrink-0"
             >
               <LogOut className="w-3.5 h-3.5 me-2" />
               {t("common.logout")}
@@ -190,7 +190,7 @@ export default function AdminDashboardPage() {
             icon={Building2}
             label={t("admin.tenants.total")}
             value={kpis.tenants_total ?? 0}
-            sub={`${kpis.tenants_active ?? 0} ${t("admin.tenants.active")} · ${kpis.tenants_trial ?? 0} ${t("admin.tenants.trial")}`}
+            sub={`${kpis.tenants_active ?? 0} ${t("admin.tenants.active")} · ${kpis.tenants_pending_payment ?? 0} ${t("admin.tenants.pending")}`}
             accent
             testid="admin-kpi-tenants"
           />
@@ -281,7 +281,7 @@ export default function AdminDashboardPage() {
                               size="sm" variant="outline"
                               onClick={() => statusMut.mutate({ id: tt.id, status: "suspended" })}
                               data-testid={`admin-suspend-${tt.id}`}
-                              className="h-8 text-xs text-amber-600 border-amber-500/30 hover:bg-amber-500/10"
+                              className="h-8 text-xs text-warning border-warning/30 hover:bg-warning/10"
                             >
                               <PowerOff className="w-3 h-3 me-1" />
                               {t("admin.actions.suspend")}
@@ -291,7 +291,7 @@ export default function AdminDashboardPage() {
                               size="sm" variant="outline"
                               onClick={() => statusMut.mutate({ id: tt.id, status: "active" })}
                               data-testid={`admin-activate-${tt.id}`}
-                              className="h-8 text-xs text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10"
+                              className="h-8 text-xs text-success border-success/30 hover:bg-success/10"
                             >
                               <Power className="w-3 h-3 me-1" />
                               {t("admin.actions.activate")}
@@ -309,7 +309,7 @@ export default function AdminDashboardPage() {
                               }
                             }}
                             data-testid={`admin-delete-${tt.id}`}
-                            className="h-8 w-8 text-red-600 hover:bg-red-500/10"
+                            className="h-8 w-8 text-destructive hover:bg-destructive/10"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </Button>
@@ -382,7 +382,7 @@ export default function AdminDashboardPage() {
                               size="sm" variant="outline"
                               onClick={() => toggleActiveMut.mutate({ id: u.id, is_active: true })}
                               data-testid={`admin-user-activate-${u.id}`}
-                              className="h-8 text-xs text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/10"
+                              className="h-8 text-xs text-success border-success/30 hover:bg-success/10"
                             >
                               <Power className="w-3 h-3 me-1" />
                               {t("admin.actions.activate")}
@@ -392,7 +392,7 @@ export default function AdminDashboardPage() {
                               size="sm" variant="outline"
                               onClick={() => toggleActiveMut.mutate({ id: u.id, is_active: false })}
                               data-testid={`admin-user-pause-${u.id}`}
-                              className="h-8 text-xs text-amber-600 border-amber-500/30 hover:bg-amber-500/10"
+                              className="h-8 text-xs text-warning border-warning/30 hover:bg-warning/10"
                             >
                               <PowerOff className="w-3 h-3 me-1" />
                               {t("admin.actions.pause")}
@@ -418,7 +418,7 @@ export default function AdminDashboardPage() {
                               }
                             }}
                             data-testid={`admin-user-delete-${u.id}`}
-                            className="h-8 w-8 text-red-600 hover:bg-red-500/10"
+                            className="h-8 w-8 text-destructive hover:bg-destructive/10"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </Button>

@@ -11,7 +11,7 @@ import { useAuth } from "@/lib/auth";
 
 const DEFAULT_FORM = {
   title: "", description: "", category: "", duration_weeks: 12, price: 0,
-  max_students: 20, color: "#E53935", status: "active",
+  max_students: 20, color: "#0A0A0B", status: "active",
 };
 
 export default function CoursesPage() {
@@ -30,7 +30,7 @@ export default function CoursesPage() {
           key: "title", label: "Course",
           render: (r) => (
             <div className="flex items-center gap-2.5">
-              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: r.color || "#E53935" }} />
+              <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: r.color || "#0A0A0B" }} />
               <div>
                 <div className="font-medium">{r.title}</div>
                 <div className="text-[11px] text-muted-foreground">{r.category || "—"}</div>
@@ -80,7 +80,7 @@ export default function CoursesPage() {
             <Input type="number" value={form.max_students || 20} onChange={(e) => setForm({ ...form, max_students: parseInt(e.target.value) || 0 })} />
           </Field>
           <Field label="Color">
-            <Input type="color" value={form.color || "#E53935"} onChange={(e) => setForm({ ...form, color: e.target.value })} className="h-10" />
+            <Input type="color" value={form.color || "#0A0A0B"} onChange={(e) => setForm({ ...form, color: e.target.value })} className="h-10" />
           </Field>
           <div className="md:col-span-2">
             <Field label="Description">

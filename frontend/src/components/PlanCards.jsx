@@ -8,8 +8,8 @@ import { Switch } from "@/components/ui/switch";
 
 const FEATURES = {
   basic: ["50 students", "3 users", "Email support", "Core modules"],
-  standard: ["500 students", "20 users", "Priority support", "Custom branding", "API access"],
-  premium: ["Unlimited students", "Unlimited users", "24/7 support", "White-label", "SLA + SSO"],
+  standard: ["500 students", "20 users", "Priority support", "Custom branding", "API access", "Parent portal"],
+  premium: ["Unlimited students", "Unlimited users", "24/7 support", "White-label", "SLA + SSO", "Parent portal", "Calendar & planner"],
 };
 const POPULAR_KEY = "standard";
 
@@ -32,7 +32,7 @@ export default function PlanCards({ mode = "marketing", onSelectPlan, busyPlan, 
   }, []);
 
   if (error) {
-    return <p className="text-center text-sm text-red-600">{error}</p>;
+    return <p className="text-center text-sm text-destructive">{error}</p>;
   }
   if (!plans) {
     return <p className="text-center text-sm text-muted-foreground">Loading plans…</p>;

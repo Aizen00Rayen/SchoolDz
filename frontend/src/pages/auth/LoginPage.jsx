@@ -26,7 +26,7 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (user) nav("/app", { replace: true });
+    if (user) nav(user.role === "parent" ? "/portal" : "/app", { replace: true });
   }, [user, nav]);
 
   if (user) {
@@ -37,9 +37,9 @@ export default function LoginPage() {
     e.preventDefault();
     setBusy(true);
     try {
-      await login(email.trim(), password, tenantSlug.trim() || null);
+      const loggedInUser = await login(email.trim(), password, tenantSlug.trim() || null);
       toast.success("Welcome back!");
-      const dest = loc.state?.from || "/app";
+      const dest = loc.state?.from || (loggedInUser?.role === "parent" ? "/portal" : "/app");
       nav(dest, { replace: true });
     } catch (err) {
       toast.error(extractError(err));

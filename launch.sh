@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-# SchoolDZ — local launcher (Django Backend Edition)
+# Scolaris — local launcher (Django Backend Edition)
 #
 # Stack:
 #   - django-backend/   Python + Django + MySQL
@@ -46,7 +46,7 @@ free_port() { fuser -k "$1"/tcp >/dev/null 2>&1 || true; }
 
 # ----------------------------------------------------------------- stop mode
 if [[ "${1:-}" == "stop" ]]; then
-  info "Stopping SchoolDZ…"
+  info "Stopping Scolaris…"
   docker rm -f "$BACKEND_CONTAINER" >/dev/null 2>&1 || true
   pkill -f "$FRONTEND_DIR/node_modules/.bin/craco" 2>/dev/null || true
   free_port "$FRONTEND_PORT"
@@ -73,7 +73,7 @@ if [[ ! -f "$BACKEND_DIR/.env" ]]; then
   info "Creating django-backend/.env (first run)…"
   ADMIN_PASSWORD="$(gen_secret | cut -c1-16)"
   cat > "$BACKEND_DIR/.env" <<EOF
-APP_NAME=SchoolDZ
+APP_NAME=Scolaris
 APP_ENV=local
 APP_KEY=
 APP_DEBUG=true
@@ -86,7 +86,7 @@ DB_DATABASE=$MYSQL_DATABASE
 DB_USERNAME=$MYSQL_USER
 DB_PASSWORD=$MYSQL_PASSWORD
 
-# ----------------------------- SchoolDZ -----------------------------
+# ----------------------------- Scolaris -----------------------------
 FRONTEND_URL=http://localhost:$FRONTEND_PORT
 CORS_ORIGINS=http://localhost:$FRONTEND_PORT,http://127.0.0.1:$FRONTEND_PORT
 
@@ -254,14 +254,15 @@ ok "Frontend ready"
 
 echo
 bold "════════════════════════════════════════════════════════════"
-bold "  SchoolDZ is running (Django Backend)"
+bold "  Scolaris is running (Django Backend)"
 bold "════════════════════════════════════════════════════════════"
 echo "  App:            http://localhost:$FRONTEND_PORT"
 echo "  API:            http://localhost:$BACKEND_PORT/api/v1"
 echo
-echo "  No demo data is seeded. Register a new workspace at /register — every"
-echo "  new workspace gets a 14-day free trial, no payment required. Or log in"
-echo "  as the platform super admin (http://localhost:$FRONTEND_PORT/admin/login):"
+echo "  No demo data is seeded. Register a new workspace at /register — new"
+echo "  workspaces land on the billing gate and need a Chargily checkout (test"
+echo "  mode) to activate. Or log in as the platform super admin"
+echo "  (http://localhost:$FRONTEND_PORT/admin/login):"
 echo "      admin@schooldz.com / <ADMIN_PASSWORD in $BACKEND_DIR/.env>"
 echo
 echo "  Logs:           docker logs -f $BACKEND_CONTAINER   |   .logs/frontend.log"

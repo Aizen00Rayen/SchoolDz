@@ -54,13 +54,13 @@ export default function AdminLoginPage() {
       <div className="absolute -top-32 -left-32 w-96 h-96 rounded-full blur-3xl opacity-30"
            style={{ background: "radial-gradient(circle, hsl(var(--accent)) 0%, transparent 70%)" }} />
       <div className="absolute -bottom-32 -right-32 w-96 h-96 rounded-full blur-3xl opacity-20"
-           style={{ background: "radial-gradient(circle, #3B82F6 0%, transparent 70%)" }} />
+           style={{ background: "radial-gradient(circle, hsl(var(--primary-foreground)) 0%, transparent 70%)" }} />
 
       <div className="relative min-h-screen flex flex-col">
         <div className="p-6">
           <Link to="/" className="inline-flex items-center gap-2 text-xs text-primary-foreground/70 hover:text-primary-foreground transition-colors" data-testid="admin-back-home">
             <ArrowLeft className="w-3.5 h-3.5" />
-            Back to schooldz.com
+            Back to scolaris.com
           </Link>
         </div>
 
@@ -91,7 +91,7 @@ export default function AdminLoginPage() {
                     required
                     data-testid={ADMIN_TESTIDS.email}
                     className="h-11 bg-primary-foreground/5 border-primary-foreground/20 text-primary-foreground placeholder:text-primary-foreground/40"
-                    placeholder="admin@schooldz.com"
+                    placeholder="admin@scolaris.com"
                   />
                 </div>
 

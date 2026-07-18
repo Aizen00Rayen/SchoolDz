@@ -31,24 +31,26 @@ you outgrow it, upgrading to the Developer tier and switching
 ## What works on the free tier
 - Django + the built React frontend, both from one web app
 - SQLite (see above)
-- Email/password signup, the 14-day trial, and the full app once a workspace
-  is on a trial or active plan
+- Everything that doesn't need Google or Chargily (see below)
 
-## What does NOT work on the free tier
+## What does NOT work on the free tier — this one blocks signups entirely
 Free PythonAnywhere accounts can only make outbound HTTPS requests to a
 small allowlist of domains. **`accounts.google.com`, `oauth2.googleapis.com`,
 and `pay.chargily.net` are not on it.** Concretely:
 - Google sign-in/sign-up will fail — leave `GOOGLE_CLIENT_ID` unset in `.env`
   and the frontend automatically hides the "Continue with Google" button
   (see `GET /api/v1/config`).
-- Chargily checkout will fail — a trial tenant can use the whole product for
-  14 days without hitting this; only the actual "Choose a plan" payment step
-  needs it. Leave `CHARGILY_SECRET_KEY` unset and that step will show a
-  clear "payment provider unreachable" error instead of crashing.
+- **Chargily checkout will fail.** There is no free trial — every new
+  registration lands on the billing gate and must complete a Chargily
+  checkout before the workspace activates. On the free tier that checkout
+  call can never reach `pay.chargily.net`, so **no new tenant can ever
+  activate** — registration effectively dead-ends. This is a hard blocker,
+  not a degraded-but-usable feature like Google sign-in is.
 
 Both come back automatically the moment you upgrade to a paid PythonAnywhere
 plan (removes the allowlist) and set the corresponding `.env` values — no
-code changes needed.
+code changes needed. Until then, the free tier is only useful for demoing
+the marketing site and admin login, not for real signups.
 
 ## Steps
 
@@ -115,7 +117,7 @@ here, and Node.js never needs to exist on the server at all.
 ### 4. `django-backend/.env`
 Create it:
 ```
-APP_NAME=SchoolDZ
+APP_NAME=Scolaris
 APP_ENV=production
 APP_KEY=<run: python -c "import secrets; print(secrets.token_urlsafe(32))">
 APP_DEBUG=false
@@ -177,7 +179,7 @@ Python 3.11.
 - Hit the big green **Reload** button.
 
 Visit `https://yourusername.pythonanywhere.com` — you should see the
-SchoolDZ landing page. Register a workspace at `/register`, or log in as
+Scolaris landing page. Register a workspace at `/register`, or log in as
 the super admin at `/admin/login` with the `ADMIN_EMAIL`/`ADMIN_PASSWORD`
 from step 4.
 

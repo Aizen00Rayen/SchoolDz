@@ -1,5 +1,5 @@
 {
-  "project_name": "SchoolDZ",
+  "project_name": "Scolaris",
   "theme_strategy": "Dual-surface strategy: Swiss Brutalism/High-Contrast for Marketing (Surface A) + Tactile Minimalism (Linear/Stripe) for Dashboard (Surface B). System supports Light/Dark mode and LTR/RTL.",
   "general_ui_ux_design_guidelines": "Avoid 'AI slop' aesthetics (generic centered layouts, uniform gradients). Implement heavy whitespace (2-3x typical), layered depths, glass-morphism (12-24px blur) where appropriate. CRITICAL: Never use a fully transparent background beneath text/content, such as in dropdowns or sticky headers. Ensure robust focus states. Do NOT apply universal 'transition: all' to prevent transform bugs. Do not center-align the main app container. Add rich micro-interactions on hover and click states.",
   "typography": {

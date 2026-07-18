@@ -2,14 +2,14 @@ import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
-  BarChart3, BookOpen, Building2, CalendarClock, ChevronsUpDown, ClipboardCheck,
-  FileBarChart2, GraduationCap, Languages, LogOut, Moon, Search, Settings,
+  Award, BarChart3, BookOpen, Building2, CalendarClock, CalendarDays, ChevronsUpDown, ClipboardCheck,
+  FileBarChart2, GraduationCap, Languages, LogOut, MessageSquare, Moon, Search, Settings,
   Sun, Users, UserRound, Wallet, Layers,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
-import { useTheme } from "@/lib/theme";
+import { useTheme, useTenantBranding } from "@/lib/theme";
 import { APPUI, AUTH } from "@/constants/testIds";
 import { api, resolveFileUrl } from "@/lib/api";
 
@@ -31,9 +31,12 @@ const NAV = [
   { key: "courses", to: "/app/courses", icon: BookOpen },
   { key: "groups", to: "/app/groups", icon: Layers },
   { key: "sessions", to: "/app/sessions", icon: CalendarClock },
+  { key: "calendar", to: "/app/calendar", icon: CalendarDays, premiumOnly: true },
   { key: "attendance", to: "/app/attendance", icon: ClipboardCheck },
   { key: "payments", to: "/app/payments", icon: Wallet },
+  { key: "grades", to: "/app/grades", icon: Award },
   { key: "reports", to: "/app/reports", icon: FileBarChart2 },
+  { key: "messages", to: "/app/messages", icon: MessageSquare, standardPlusOnly: true },
   { key: "users", to: "/app/users", icon: Users, adminOnly: true },
   { key: "settings", to: "/app/settings", icon: Settings },
 ];
@@ -42,6 +45,7 @@ export default function AppShell() {
   const { user, tenant, logout } = useAuth();
   const { t, lang, setLang } = useI18n();
   const { theme, toggle } = useTheme();
+  useTenantBranding(tenant);
   const nav = useNavigate();
 
   const [cmdOpen, setCmdOpen] = useState(false);
@@ -88,6 +92,8 @@ export default function AppShell() {
   }, [cmdQuery]);
 
   const isAdmin = user && (user.role === "owner" || user.role === "director" || user.role === "super_admin");
+  const isPremium = tenant?.plan === "premium";
+  const isStandardPlus = tenant?.plan && tenant.plan !== "basic";
 
   const initials = useMemo(() => {
     const n = user?.name || user?.email || "?";
@@ -103,6 +109,9 @@ export default function AppShell() {
       course: `/app/courses`,
       group: `/app/groups`,
       payment: `/app/payments`,
+      session: `/app/sessions`,
+      grade: `/app/grades`,
+      user: `/app/users`,
     };
     nav(map[r.type] || "/app/dashboard");
   };
@@ -136,10 +145,10 @@ export default function AppShell() {
                 </div>
                 <div className="min-w-0 flex-1 text-start">
                   <div className="text-sm font-semibold truncate">
-                    {tenant?.name || "SchoolDZ"}
+                    {tenant?.name || "Scolaris"}
                   </div>
                   <div className="text-[10px] font-mono text-muted-foreground truncate">
-                    {tenant?.slug ? `${tenant.slug}.schooldz.com` : "workspace"}
+                    {tenant?.slug ? `${tenant.slug}.scolaris.com` : "workspace"}
                   </div>
                 </div>
                 <ChevronsUpDown className="w-4 h-4 text-muted-foreground flex-shrink-0" />
@@ -168,7 +177,7 @@ export default function AppShell() {
         </div>
 
         <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
-          {NAV.filter((n) => !n.adminOnly || isAdmin).map((item) => (
+          {NAV.filter((n) => (!n.adminOnly || isAdmin) && (!n.premiumOnly || isPremium) && (!n.standardPlusOnly || isStandardPlus)).map((item) => (
             <NavLink
               key={item.key}
               to={item.to}
@@ -189,7 +198,7 @@ export default function AppShell() {
 
         <div className="p-3 border-t border-border">
           <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2 px-2">
-            {tenant?.status === "trial" ? t("common.trial_active") : t("common.plan_active")}
+            {t("common.plan_active")}
           </div>
           <div className="px-2 pb-3 text-xs text-muted-foreground capitalize">
             {tenant?.plan || "Free"}
@@ -281,7 +290,7 @@ export default function AppShell() {
                     nav("/", { replace: true });
                   }}
                   data-testid={AUTH.logout}
-                  className="text-red-600 focus:text-red-600"
+                  className="text-destructive focus:text-destructive"
                 >
                   <LogOut className="w-4 h-4 me-2" /> {t("common.logout")}
                 </DropdownMenuItem>

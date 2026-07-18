@@ -34,7 +34,7 @@ export default function BillingGatePage() {
         <div className="max-w-7xl mx-auto flex items-center justify-between px-6 h-14">
           <div>
             <div className="font-display font-bold text-sm leading-tight">
-              schooldz <span className="text-accent">/ billing</span>
+              scolaris <span className="text-accent">/ billing</span>
             </div>
             <div className="text-[10px] font-mono text-muted-foreground leading-tight">
               {tenant?.name}
@@ -46,7 +46,7 @@ export default function BillingGatePage() {
             onClick={async () => {
               await logout();
             }}
-            className="text-red-600 border-red-500/30 hover:bg-red-500/10"
+            className="text-destructive border-destructive/30 hover:bg-destructive/10"
             data-testid="billing-gate-logout"
           >
             <LogOut className="w-3.5 h-3.5 me-2" />

@@ -94,7 +94,7 @@ export default function RegisterPage() {
         email: email.trim(),
         password,
       });
-      toast.success("Workspace created! Welcome to SchoolDZ.");
+      toast.success("Workspace created! Welcome to Scolaris.");
       nav("/app", { replace: true });
     } catch (err) {
       toast.error(extractError(err));
@@ -143,7 +143,7 @@ export default function RegisterPage() {
                 placeholder="my-academy"
               />
               <span className="px-3 text-xs font-mono text-muted-foreground border-s border-border h-full grid place-items-center whitespace-nowrap">
-                .schooldz.com
+                .scolaris.com
               </span>
             </div>
           </div>

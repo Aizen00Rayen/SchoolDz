@@ -200,7 +200,7 @@ export default function CrudPanel({
                               }
                             }}
                             data-testid={APPUI.rowAction(moduleKey, row.id, "delete")}
-                            className="h-8 w-8 text-red-600 hover:text-red-700 hover:bg-red-500/10"
+                            className="h-8 w-8 text-destructive hover:bg-destructive/10"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </Button>

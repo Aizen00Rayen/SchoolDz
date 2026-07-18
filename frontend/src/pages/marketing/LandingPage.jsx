@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import {
   motion, useMotionValue, useSpring, useTransform, useScroll, animate,
   useMotionValueEvent, useInView,
@@ -16,6 +16,7 @@ import { MARKETING } from "@/constants/testIds";
 import { Button } from "@/components/ui/button";
 import { StickyFeatureCards } from "@/components/ui/sticky-scroll-cards-section";
 import PlanCards from "@/components/PlanCards";
+import { Logo } from "@/components/Logo";
 
 /* -----------------------------------------------------------
  * Interactive mouse-follow spotlight background
@@ -57,7 +58,7 @@ function SpotlightBackground() {
       />
       <motion.div
         className="absolute bottom-0 right-0 w-[520px] h-[520px] rounded-full blur-3xl opacity-25"
-        style={{ background: "radial-gradient(circle, #3B82F6 0%, transparent 70%)" }}
+        style={{ background: "radial-gradient(circle, hsl(var(--primary)) 0%, transparent 70%)" }}
         animate={{ x: [0, -30, 0], y: [0, 30, 0] }}
         transition={{ duration: 18, repeat: Infinity, ease: "easeInOut", delay: 2 }}
       />
@@ -135,14 +136,223 @@ function CountUp({ to, suffix = "", duration = 1.6 }) {
 }
 
 /* -----------------------------------------------------------
+ * Animated brand logo reveal (used in hero)
+ * ----------------------------------------------------------- */
+const HERO_CYCLE_MS = 4400; // reveal (~1.6s) + hold + a quick fade, then loops
+
+function HeroLogoAnimation() {
+  // Stagger index per node, in the order they appear in the SVG below.
+  const nodeDelay = (i) => `${0.05 + i * 0.05}s`;
+
+  const [cycle, setCycle] = useState(0);
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    const id = setInterval(() => setCycle((c) => c + 1), HERO_CYCLE_MS);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div className="w-full max-w-2xl mx-auto aspect-[3/2] bg-transparent relative flex justify-center items-center logo-animation-box p-6 select-none group">
+      {/* Dynamic ambient background glow */}
+      <div className="absolute -inset-10 bg-gradient-to-tr from-accent/10 via-transparent to-transparent rounded-full blur-3xl opacity-40 pointer-events-none group-hover:opacity-75 transition-opacity duration-700" />
+
+      <style>{`
+        .logo-animation-box {
+          perspective: 1000px;
+        }
+
+        /* Shifts the icon left, in sync with the wordmark reveal, so the
+           mark and "scolaris" don't sit on top of each other at rest. */
+        .hero-logo-mark {
+          animation: heroShiftLeft 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) 1s forwards;
+        }
+
+        /* Holds the fully-revealed mark, then fades out right before the
+           whole sequence remounts and replays — the loop that keeps this
+           animation going instead of settling into a static end state. */
+        .hero-cycle-fade {
+          animation: heroCycleFade 0.5s ease-in 3.6s forwards;
+        }
+
+        /* Standard Nodes (Circles & Square) */
+        .hero-node {
+          fill: currentColor;
+          opacity: 0;
+          transform-origin: center;
+          transform-box: fill-box;
+          animation: heroPopIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+          transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), fill 0.3s ease;
+        }
+        .logo-animation-box:hover .hero-node {
+          fill: hsl(var(--foreground) / 0.8);
+          transform: scale(1.08);
+        }
+
+        /* Top Right Accent Node */
+        .hero-accent-node {
+          fill: currentColor;
+          opacity: 0;
+          transform-origin: center;
+          transform-box: fill-box;
+          filter: url(#accent-glow);
+          animation:
+            heroPopIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards,
+            heroTurnAccent 0.4s ease 0.65s forwards;
+          transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), filter 0.3s ease;
+        }
+        .logo-animation-box:hover .hero-accent-node {
+          transform: scale(1.22);
+          filter: url(#accent-glow-intense);
+        }
+
+        /* Idle "live" pulse ring — starts once the reveal settles */
+        .hero-accent-ping {
+          fill: none;
+          stroke: hsl(var(--accent));
+          stroke-width: 2;
+          opacity: 0;
+          transform-origin: center;
+          transform-box: fill-box;
+          animation: heroLivePulse 2.4s cubic-bezier(0.2, 0.8, 0.2, 1) 1.8s infinite;
+        }
+
+        /* Connecting Lines */
+        .hero-line {
+          stroke: currentColor;
+          stroke-opacity: 0.18;
+          stroke-width: 6;
+          stroke-linecap: round;
+          stroke-linejoin: round;
+          fill: none;
+          stroke-dasharray: 100;
+          stroke-dashoffset: 100;
+          opacity: 0;
+          animation:
+            heroShowLine 0.01s linear forwards,
+            heroDrawLine 0.5s ease-in-out forwards,
+            heroHighlightLine 0.4s ease 1s forwards;
+          transition: stroke-opacity 0.3s ease, stroke-width 0.3s ease;
+        }
+        .logo-animation-box:hover .hero-line {
+          stroke-opacity: 0.38;
+          stroke-width: 7;
+        }
+
+        /* Typography */
+        .hero-logo-text {
+          fill: currentColor;
+          font-family: "Cabinet Grotesk", "IBM Plex Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          font-size: 88px;
+          font-weight: 800;
+          letter-spacing: -3px;
+          opacity: 0;
+          animation: heroRevealText 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) 1s forwards;
+          transition: fill 0.3s ease, transform 0.3s ease;
+        }
+        .logo-animation-box:hover .hero-logo-text {
+          fill: hsl(var(--accent));
+          transform: scale(1.02);
+        }
+
+        /* --- Keyframes --- */
+        @keyframes heroPopIn {
+          0% { opacity: 0; transform: scale(0); }
+          100% { opacity: 1; transform: scale(1); }
+        }
+        @keyframes heroShowLine {
+          to { opacity: 1; }
+        }
+        @keyframes heroDrawLine {
+          to { stroke-dashoffset: 0; }
+        }
+        @keyframes heroTurnAccent {
+          to { fill: hsl(var(--accent)); }
+        }
+        @keyframes heroHighlightLine {
+          to { stroke-opacity: 0.35; }
+        }
+        @keyframes heroRevealText {
+          0% { opacity: 0; transform: translateX(16px); }
+          100% { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes heroShiftLeft {
+          to { transform: translateX(-160px); }
+        }
+        @keyframes heroCycleFade {
+          to { opacity: 0; }
+        }
+        @keyframes heroLivePulse {
+          0% { opacity: 0.6; transform: scale(1); }
+          100% { opacity: 0; transform: scale(2.2); }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .hero-node, .hero-accent-node, .hero-line, .hero-logo-text {
+            animation: none !important;
+            opacity: 1 !important;
+            stroke-dashoffset: 0 !important;
+            stroke-opacity: 0.35 !important;
+          }
+          .hero-accent-node { fill: hsl(var(--accent)) !important; }
+          .hero-accent-ping { animation: none !important; opacity: 0 !important; }
+          .hero-logo-mark { animation: none !important; transform: translateX(-160px) !important; }
+          .hero-cycle-fade { animation: none !important; }
+        }
+      `}</style>
+      <div key={cycle} className="hero-cycle-fade w-full max-w-[800px] pointer-events-none">
+        <svg viewBox="0 0 600 200" xmlns="http://www.w3.org/2000/svg" className="w-full h-auto text-foreground">
+          <defs>
+            <filter id="accent-glow" x="-50%" y="-50%" width="200%" height="200%">
+              <feDropShadow dx="0" dy="2" stdDeviation="4" floodColor="hsl(var(--accent))" floodOpacity="0.35" />
+            </filter>
+            <filter id="accent-glow-intense" x="-50%" y="-50%" width="200%" height="200%">
+              <feDropShadow dx="0" dy="4" stdDeviation="8" floodColor="hsl(var(--accent))" floodOpacity="0.7" />
+            </filter>
+          </defs>
+          {/* Logo Mark Elements */}
+          <g className="hero-logo-mark">
+            {/* Lines (drawn behind the nodes), staggered */}
+            <path className="hero-line" pathLength="100" style={{ animationDelay: "0.3s" }} d="M240 40 L360 40 L360 160 L240 160 Z" />
+            <path className="hero-line" pathLength="100" style={{ animationDelay: "0.35s" }} d="M300 40 L300 160" />
+            <path className="hero-line" pathLength="100" style={{ animationDelay: "0.4s" }} d="M240 100 L360 100" />
+            <path className="hero-line" pathLength="100" style={{ animationDelay: "0.45s" }} d="M240 40 L360 160" />
+            <path className="hero-line" pathLength="100" style={{ animationDelay: "0.5s" }} d="M240 160 L360 40" />
+
+            {/* Nodes, staggered pop-in */}
+            <rect className="hero-node" style={{ animationDelay: nodeDelay(0) }} x="282" y="82" width="36" height="36" />
+
+            <circle className="hero-node" style={{ animationDelay: nodeDelay(1) }} cx="240" cy="40" r="14" /> {/* Top Left */}
+            <circle className="hero-node" style={{ animationDelay: nodeDelay(2) }} cx="300" cy="40" r="14" /> {/* Top Center */}
+            <circle className="hero-accent-node" style={{ animationDelay: `${nodeDelay(3)}, 0.65s` }} cx="360" cy="40" r="14" /> {/* Top Right (Accent) */}
+
+            <circle className="hero-node" style={{ animationDelay: nodeDelay(4) }} cx="240" cy="100" r="14" /> {/* Middle Left */}
+            <circle className="hero-node" style={{ animationDelay: nodeDelay(5) }} cx="360" cy="100" r="14" /> {/* Middle Right */}
+
+            <circle className="hero-node" style={{ animationDelay: nodeDelay(6) }} cx="240" cy="160" r="14" /> {/* Bottom Left */}
+            <circle className="hero-node" style={{ animationDelay: nodeDelay(7) }} cx="300" cy="160" r="14" /> {/* Bottom Center */}
+            <circle className="hero-node" style={{ animationDelay: nodeDelay(8) }} cx="360" cy="160" r="14" /> {/* Bottom Right */}
+
+            {/* Idle "live" ping ring around the accent node */}
+            <circle className="hero-accent-ping" cx="360" cy="40" r="14" />
+          </g>
+
+          {/* Brand Name Typography */}
+          <text className="hero-logo-text" x="250" y="130">scolaris</text>
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+/* -----------------------------------------------------------
  * Live-feeling dashboard preview card (used in hero)
  * ----------------------------------------------------------- */
 function DashboardPreview({ lang }) {
   const [activeIdx, setActiveIdx] = useState(0);
   const sessions = [
-    { k: "en", name: "Python for Beginners · Group A", time: "18:00 → 20:00", tag: "Live", color: "bg-emerald-500" },
-    { k: "fr", name: "Anglais A2 · Groupe B", time: "17:00 → 19:00", tag: "Next", color: "bg-blue-500" },
-    { k: "ar", name: "Advanced Math · Group C", time: "19:00 → 21:00", tag: "Soon", color: "bg-amber-500" },
+    { k: "en", name: "Python for Beginners · Group A", time: "18:00 → 20:00", tag: "Live", color: "bg-success" },
+    { k: "fr", name: "Anglais A2 · Groupe B", time: "17:00 → 19:00", tag: "Next", color: "bg-info" },
+    { k: "ar", name: "Advanced Math · Group C", time: "19:00 → 21:00", tag: "Soon", color: "bg-warning" },
   ];
   useEffect(() => {
     const t = setInterval(() => setActiveIdx((i) => (i + 1) % sessions.length), 2200);
@@ -153,7 +363,7 @@ function DashboardPreview({ lang }) {
     <TiltCard>
       <div className="relative">
         {/* Reflection glow */}
-        <div className="absolute -inset-6 bg-gradient-to-tr from-accent/20 via-blue-500/10 to-purple-500/10 rounded-[2rem] blur-2xl -z-10" />
+        <div className="absolute -inset-6 bg-gradient-to-tr from-accent/20 via-primary/10 to-primary/5 rounded-[2rem] blur-2xl -z-10" />
 
         <div
           className="relative rounded-2xl border border-border bg-card shadow-[0_30px_60px_-20px_rgba(0,0,0,0.3)] overflow-hidden"
@@ -165,7 +375,7 @@ function DashboardPreview({ lang }) {
             <div className="w-2.5 h-2.5 rounded-full bg-yellow-400" />
             <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
             <div className="ms-3 text-[11px] font-mono text-muted-foreground truncate">
-              https://myschool.schooldz.com
+              https://myschool.scolaris.com
             </div>
             <div className="ms-auto flex items-center gap-1">
               <span className="kbd">⌘</span>
@@ -233,7 +443,7 @@ function DashboardPreview({ lang }) {
                     <div className="text-[10px] uppercase tracking-widest font-bold text-muted-foreground">
                       Revenue trend
                     </div>
-                    <div className="text-[10px] font-mono text-emerald-600 bg-emerald-500/10 px-1.5 py-0.5 rounded-full">
+                    <div className="text-[10px] font-mono text-success bg-success/10 px-1.5 py-0.5 rounded-full">
                       +12.4%
                     </div>
                   </div>
@@ -284,10 +494,10 @@ function DashboardPreview({ lang }) {
                         animate={{ opacity: activeIdx === i ? 1 : 0.5 }}
                         className={`px-1.5 py-0.5 rounded-full text-[9px] font-medium ${
                           s.tag === "Live"
-                            ? "bg-emerald-500/10 text-emerald-600"
+                            ? "bg-success/10 text-success"
                             : s.tag === "Next"
-                            ? "bg-blue-500/10 text-blue-600"
-                            : "bg-amber-500/10 text-amber-600"
+                            ? "bg-info/10 text-info"
+                            : "bg-warning/10 text-warning"
                         }`}
                       >
                         {s.tag}
@@ -309,8 +519,8 @@ function DashboardPreview({ lang }) {
           style={{ transform: "translateZ(50px)" }}
         >
           <div className="flex items-center gap-2 mb-1.5">
-            <div className="w-7 h-7 rounded-full bg-emerald-500/20 grid place-items-center">
-              <Wallet className="w-3.5 h-3.5 text-emerald-600" />
+            <div className="w-7 h-7 rounded-full bg-success/20 grid place-items-center">
+              <Wallet className="w-3.5 h-3.5 text-success" />
             </div>
             <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
               Paid
@@ -328,7 +538,7 @@ function DashboardPreview({ lang }) {
           style={{ transform: "translateZ(50px)" }}
         >
           <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <div className="w-2 h-2 rounded-full bg-success animate-pulse" />
             <div className="text-[10px] font-mono">3 sessions live</div>
           </div>
         </motion.div>
@@ -365,14 +575,14 @@ function stickyFeatureItems(t) {
       description: t("feature.students.desc"),
       icon: GraduationCap,
       imageUrl: "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?q=80&w=1200&auto=format&fit=crop",
-      className: "bg-blue-500/10 border-blue-500/20",
+      className: "bg-primary/10 border-primary/20",
     },
     {
       title: t("feature.attendance.title"),
       description: t("feature.attendance.desc"),
       icon: CalendarCheck2,
       imageUrl: "https://images.unsplash.com/photo-1503676260728-1c00da094a0b?q=80&w=1200&auto=format&fit=crop",
-      className: "bg-emerald-500/10 border-emerald-500/20",
+      className: "bg-info/10 border-info/20",
     },
     {
       title: t("feature.payments.title"),
@@ -386,7 +596,7 @@ function stickyFeatureItems(t) {
       description: t("feature.analytics.desc"),
       icon: BarChart3,
       imageUrl: "https://images.unsplash.com/photo-1551288049-bebda4e38f71?q=80&w=1200&auto=format&fit=crop",
-      className: "bg-amber-500/10 border-amber-500/20",
+      className: "bg-warning/10 border-warning/20",
     },
   ];
 }
@@ -396,11 +606,21 @@ function stickyFeatureItems(t) {
  * ----------------------------------------------------------- */
 export default function LandingPage() {
   const { t, lang } = useI18n();
+  const location = useLocation();
   const heroFont = lang === "ar" ? "font-arabic" : "font-display";
   const centerTypes = [
     t("type.tutoring"), t("type.language"), t("type.coding"), t("type.robotics"),
     t("type.music"), t("type.art"), t("type.camp"), t("type.pro"),
   ];
+
+  // Nav links to in-page sections (e.g. "Features") arrive as /#features from
+  // other routes — the browser only auto-scrolls a #hash on same-document
+  // navigation, not on a route change into this page, so it needs a nudge.
+  useEffect(() => {
+    if (!location.hash) return;
+    const el = document.querySelector(location.hash);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [location.hash]);
 
   return (
     <div className="min-h-screen bg-background overflow-x-hidden">
@@ -414,21 +634,8 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
             {/* Left */}
             <div className="lg:col-span-6">
-              <motion.div
-                initial={{ opacity: 0, y: 14 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-                className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground mb-6"
-              >
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-accent" />
-                </span>
-                {t("hero.badge")}
-              </motion.div>
-
               {/* Word-by-word reveal */}
-              <h1 className={`${heroFont} text-5xl md:text-7xl lg:text-[5.5rem] font-black tracking-tighter leading-[0.95] mb-6`}>
+              <h1 className={`${heroFont} text-4xl md:text-6xl lg:text-[4.75rem] font-black tracking-tighter leading-[0.95] mb-6`}>
                 <WordReveal text={t("hero.title.1")} />
                 <br />
                 <WordReveal text={t("hero.title.2")} className="text-accent" delay={0.15} />
@@ -459,24 +666,26 @@ export default function LandingPage() {
                 transition={{ delay: 0.7, duration: 0.4 }}
                 className="flex flex-wrap items-center gap-3 mb-8"
               >
-                <Link to="/register" data-testid={MARKETING.heroCtaPrimary}>
-                  <Button
-                    size="lg"
-                    className="bg-accent hover:bg-accent/90 text-accent-foreground text-base font-semibold h-12 px-6 rounded-lg shadow-[0_10px_30px_-10px_hsl(var(--accent))] group"
-                  >
+                <Button
+                  size="lg"
+                  className="bg-accent hover:bg-accent/90 text-accent-foreground text-base font-semibold h-12 px-6 rounded-lg shadow-[0_10px_30px_-10px_hsl(var(--accent))] group"
+                  asChild
+                >
+                  <Link to="/register" data-testid={MARKETING.heroCtaPrimary}>
                     {t("hero.cta.primary")}
                     <ArrowRight className="ms-2 h-4 w-4 group-hover:translate-x-1 transition-transform" />
-                  </Button>
-                </Link>
-                <Link to="/login" data-testid={MARKETING.heroCtaSecondary}>
-                  <Button
-                    size="lg"
-                    variant="outline"
-                    className="text-base font-semibold h-12 px-6 rounded-lg backdrop-blur bg-background/60"
-                  >
+                  </Link>
+                </Button>
+                <Button
+                  size="lg"
+                  variant="outline"
+                  className="text-base font-semibold h-12 px-6 rounded-lg backdrop-blur bg-background/60"
+                  asChild
+                >
+                  <Link to="/login" data-testid={MARKETING.heroCtaSecondary}>
                     {t("hero.cta.secondary")}
-                  </Button>
-                </Link>
+                  </Link>
+                </Button>
               </motion.div>
 
               <motion.div
@@ -490,16 +699,26 @@ export default function LandingPage() {
               </motion.div>
             </div>
 
-            {/* Right — 3D dashboard preview */}
+            {/* Right — Animated brand logo */}
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 0.3, duration: 0.6, ease: "easeOut" }}
-              className="lg:col-span-6 relative"
+              className="lg:col-span-6 relative flex justify-center items-center"
             >
-              <DashboardPreview lang={lang} />
+              <HeroLogoAnimation />
             </motion.div>
           </div>
+
+          {/* Centered Dashboard Preview below the hero grid */}
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5, duration: 0.8, ease: "easeOut" }}
+            className="mt-16 flex justify-center max-w-4xl mx-auto w-full relative px-6 md:px-0"
+          >
+            <DashboardPreview lang={lang} />
+          </motion.div>
         </div>
       </section>
 
@@ -640,15 +859,16 @@ export default function LandingPage() {
               </p>
             </div>
             <div className="lg:col-span-4 flex lg:justify-end">
-              <Link to="/register" data-testid="marketing-cta-bottom">
-                <Button
-                  size="lg"
-                  className="bg-accent hover:bg-accent/90 text-accent-foreground h-14 px-8 text-base font-semibold rounded-lg shadow-[0_20px_50px_-10px_hsl(var(--accent))]"
-                >
+              <Button
+                size="lg"
+                className="bg-accent hover:bg-accent/90 text-accent-foreground h-14 px-8 text-base font-semibold rounded-lg shadow-[0_20px_50px_-10px_hsl(var(--accent))]"
+                asChild
+              >
+                <Link to="/register" data-testid="marketing-cta-bottom">
                   {t("hero.cta.primary")}
                   <ArrowRight className="ms-2 h-5 w-5" />
-                </Button>
-              </Link>
+                </Link>
+              </Button>
             </div>
           </div>
         </div>
@@ -658,11 +878,8 @@ export default function LandingPage() {
       <footer className="border-t border-border">
         <div className="max-w-7xl mx-auto px-6 py-12 grid grid-cols-2 md:grid-cols-4 gap-8">
           <div className="col-span-2 md:col-span-1">
-            <Link to="/" className="flex items-center gap-2 mb-3">
-              <div className="w-7 h-7 bg-primary rounded grid place-items-center">
-                <span className="font-display font-black text-primary-foreground text-[10px]">S</span>
-              </div>
-              <span className="font-display font-bold">schooldz</span>
+            <Link to="/" className="inline-flex mb-3">
+              <Logo size={22} textClassName="text-base" />
             </Link>
             <p className="text-xs text-muted-foreground max-w-[220px]">
               Multi-tenant cloud ERP for modern education centers.
@@ -670,9 +887,25 @@ export default function LandingPage() {
           </div>
 
           {[
-            { title: t("footer.product"), links: [t("nav.features"), t("nav.pricing"), "Changelog", "Roadmap"] },
-            { title: t("footer.company"), links: [t("nav.about"), "Blog", t("nav.contact"), "Careers"] },
-            { title: t("footer.resources"), links: ["Docs", "API", "Status", "Community"] },
+            {
+              title: t("footer.product"),
+              links: [
+                { label: t("nav.features"), to: "/#features" },
+                { label: t("nav.pricing"), to: "/pricing" },
+                { label: "Changelog" },
+                { label: "Roadmap" },
+              ],
+            },
+            {
+              title: t("footer.company"),
+              links: [
+                { label: t("nav.about"), to: "/about" },
+                { label: "Blog" },
+                { label: t("nav.contact") },
+                { label: "Careers" },
+              ],
+            },
+            { title: t("footer.resources"), links: [{ label: "Docs", to: "/about" }, { label: "API" }, { label: "Status" }, { label: "Community" }] },
           ].map((col) => (
             <div key={col.title}>
               <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-3">
@@ -680,10 +913,16 @@ export default function LandingPage() {
               </div>
               <ul className="space-y-2 text-sm">
                 {col.links.map((l) => (
-                  <li key={l}>
-                    <a href="#" className="text-foreground/80 hover:text-foreground transition-colors">
-                      {l}
-                    </a>
+                  <li key={l.label}>
+                    {l.to ? (
+                      <Link to={l.to} className="text-foreground/80 hover:text-foreground transition-colors">
+                        {l.label}
+                      </Link>
+                    ) : (
+                      <a href="#" className="text-foreground/80 hover:text-foreground transition-colors">
+                        {l.label}
+                      </a>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -692,7 +931,7 @@ export default function LandingPage() {
         </div>
         <div className="border-t border-border">
           <div className="max-w-7xl mx-auto px-6 py-6 flex flex-col md:flex-row items-center justify-between gap-3 text-xs text-muted-foreground">
-            <div>© {new Date().getFullYear()} SchoolDZ — {t("footer.rights")}</div>
+            <div>© {new Date().getFullYear()} Scolaris — {t("footer.rights")}</div>
             <div className="flex items-center gap-4">
               <a href="#" className="hover:text-foreground transition-colors">Privacy</a>
               <a href="#" className="hover:text-foreground transition-colors">Terms</a>

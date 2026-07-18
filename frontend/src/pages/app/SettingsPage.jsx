@@ -1,5 +1,4 @@
 import { useRef, useState } from "react";
-import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ImagePlus, Loader2, RefreshCw, ArrowUpCircle } from "lucide-react";
@@ -120,9 +119,6 @@ export default function SettingsPage() {
 
   if (!tenant) return null;
   const canEdit = user?.role === "owner" || user?.role === "director" || user?.role === "super_admin";
-  const trialDaysLeft = tenant.trial_ends_at
-    ? Math.max(0, Math.ceil((new Date(tenant.trial_ends_at) - new Date()) / 86400000))
-    : null;
 
   return (
     <div className="max-w-4xl">
@@ -214,7 +210,7 @@ export default function SettingsPage() {
       <div className="surface-card p-6">
         <h3 className="font-display font-semibold text-lg mb-2">Subscription</h3>
         <p className="text-sm text-muted-foreground mb-1">
-          Plan: <span className="capitalize font-medium">{tenant.plan || "Trial"}</span> · Status:{" "}
+          Plan: <span className="capitalize font-medium">{tenant.plan || "—"}</span> · Status:{" "}
           <span className="capitalize font-medium">{tenant.status}</span>
         </p>
         {tenant.plan_expires_at && (
@@ -227,26 +223,6 @@ export default function SettingsPage() {
         <div className="text-xs font-mono text-muted-foreground mb-4">
           {tenant.max_students ?? "Unlimited"} students · {tenant.max_users ?? "Unlimited"} users
         </div>
-
-        {tenant.status === "trial" && (
-          <div className="rounded-lg border border-accent/30 bg-accent/5 p-4 mb-4 flex items-center justify-between gap-4 flex-wrap">
-            <div>
-              <div className="text-sm font-semibold">
-                Free trial — {trialDaysLeft} day{trialDaysLeft === 1 ? "" : "s"} left
-              </div>
-              <div className="text-xs text-muted-foreground">
-                Choose a plan any time to keep your workspace active after the trial ends.
-              </div>
-            </div>
-            {canEdit && (
-              <Link to="/billing" data-testid="settings-choose-plan-link">
-                <Button size="sm" className="bg-accent hover:bg-accent/90 text-accent-foreground">
-                  Choose a plan
-                </Button>
-              </Link>
-            )}
-          </div>
-        )}
 
         {canEdit && tenant.status === "active" && (
           <div className="flex flex-wrap gap-2">

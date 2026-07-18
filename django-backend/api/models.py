@@ -14,7 +14,6 @@ class Tenant(models.Model):
         ('pending_payment', 'pending_payment'),
         ('active', 'active'),
         ('suspended', 'suspended'),
-        ('trial', 'trial'),
     ]
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='pending_payment')
     PLAN_CHOICES = [
@@ -136,6 +135,7 @@ class Guardian(models.Model):
     ]
     relationship = models.CharField(max_length=50, choices=RELATIONSHIP_CHOICES, default='guardian')
     emergency_contact = models.CharField(max_length=255, null=True, blank=True)
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, db_column='user_id', related_name='guardians')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -273,6 +273,7 @@ class ClassSession(models.Model):
         ('cancelled', 'cancelled'),
     ]
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='scheduled')
+    series_id = models.CharField(max_length=36, null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -345,6 +346,23 @@ class Payment(models.Model):
         db_table = 'payments'
 
 
+class Grade(models.Model):
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='grades')
+    student = models.ForeignKey(Student, on_delete=models.CASCADE, db_column='student_id', related_name='grades')
+    course = models.ForeignKey(Course, on_delete=models.SET_NULL, null=True, blank=True, db_column='course_id', related_name='grades')
+    title = models.CharField(max_length=255)
+    score = models.DecimalField(max_digits=6, decimal_places=2)
+    max_score = models.DecimalField(max_digits=6, decimal_places=2, default=100)
+    date = models.DateField()
+    notes = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'grades'
+
+
 class ChargilyCheckout(models.Model):
     id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='chargily_checkouts')
@@ -392,3 +410,34 @@ class PasswordResetToken(models.Model):
 
     class Meta:
         db_table = 'password_reset_tokens'
+
+
+class Conversation(models.Model):
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='conversations')
+    guardian = models.OneToOneField(Guardian, on_delete=models.CASCADE, db_column='guardian_id', related_name='conversation')
+    last_message_at = models.DateTimeField(null=True, blank=True)
+    last_read_by_guardian_at = models.DateTimeField(null=True, blank=True)
+    last_read_by_staff_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'conversations'
+
+
+class Message(models.Model):
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='messages')
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, db_column='conversation_id', related_name='messages')
+    sender_user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, db_column='sender_user_id', related_name='sent_messages')
+    SENDER_ROLE_CHOICES = [
+        ('staff', 'staff'),
+        ('parent', 'parent'),
+    ]
+    sender_role = models.CharField(max_length=20, choices=SENDER_ROLE_CHOICES)
+    body = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'messages'

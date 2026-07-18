@@ -38,7 +38,7 @@ export function StickyFeatureCards({ features, stickyTop = 96 }) {
               className="w-full h-56 md:h-80 object-cover"
               onError={(e) => {
                 e.currentTarget.onerror = null;
-                e.currentTarget.src = "https://placehold.co/800x600/e5e5e5/999999?text=SchoolDZ";
+                e.currentTarget.src = "https://placehold.co/800x600/e5e5e5/999999?text=Scolaris";
               }}
             />
           </div>

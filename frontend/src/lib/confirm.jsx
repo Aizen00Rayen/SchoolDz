@@ -47,7 +47,7 @@ export function ConfirmProvider({ children }) {
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={() => close(true)}
-              className={state?.destructive ? "bg-red-600 hover:bg-red-600/90 text-white focus:ring-red-600" : undefined}
+              className={state?.destructive ? "bg-destructive hover:bg-destructive/90 text-destructive-foreground focus:ring-destructive" : undefined}
               data-testid="confirm-dialog-action"
             >
               {state?.confirmLabel || "Continue"}

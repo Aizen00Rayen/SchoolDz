@@ -127,6 +127,17 @@ frontend:
       - working: true
         agent: "main"
         comment: "React frontend verified to be running on port 3000 and correctly routing API calls to the Django backend on port 8002."
+  - task: "Modify Hero section layout and logo animation"
+    implemented: true
+    working: true
+    file: "frontend/src/pages/marketing/LandingPage.jsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Removed multi-tenant badge, replaced dashboard preview in grid with animated logo, and centered dashboard preview below."
 metadata:
   created_by: "main_agent"
   version: "1.0"

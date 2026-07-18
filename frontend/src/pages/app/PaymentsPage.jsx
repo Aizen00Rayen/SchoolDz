@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import CrudPanel, { StatusPill } from "./CrudPanel";
-import { Wallet } from "lucide-react";
+import { AlertTriangle, Wallet } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Field } from "./StudentsPage";
 import {
@@ -26,11 +26,31 @@ export default function PaymentsPage() {
     queryKey: ["courses-list"],
     queryFn: async () => (await api.get("/courses")).data,
   });
+  const { data: overdue } = useQuery({
+    queryKey: ["payments-overdue"],
+    queryFn: async () => (await api.get("/payments/overdue")).data,
+  });
   const stuMap = Object.fromEntries((students?.items || []).map((s) => [s.id, s]));
   const courseMap = Object.fromEntries((courses?.items || []).map((c) => [c.id, c]));
 
   return (
-    <CrudPanel
+    <div>
+      {overdue?.total > 0 && (
+        <div className="surface-card p-4 mb-4 flex items-center gap-3 border-warning/30 bg-warning/5">
+          <div className="w-9 h-9 rounded-lg bg-warning/10 grid place-items-center flex-shrink-0">
+            <AlertTriangle className="w-4 h-4 text-warning" />
+          </div>
+          <div>
+            <div className="text-sm font-medium">
+              {overdue.total} overdue payment{overdue.total > 1 ? "s" : ""}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {Math.round(overdue.total_owed).toLocaleString()} {tenant?.currency || "DZD"} outstanding past due date
+            </div>
+          </div>
+        </div>
+      )}
+      <CrudPanel
       moduleKey="payments"
       endpoint="/payments"
       title={t("menu.payments")}
@@ -138,6 +158,7 @@ export default function PaymentsPage() {
           </Field>
         </div>
       )}
-    />
+      />
+    </div>
   );
 }

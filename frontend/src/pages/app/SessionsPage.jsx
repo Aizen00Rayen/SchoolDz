@@ -1,12 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import CrudPanel, { StatusPill } from "./CrudPanel";
-import { CalendarClock } from "lucide-react";
+import { CalendarClock, Repeat } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Field } from "./StudentsPage";
+import { Field, RecurringDialog } from "./_shared";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 
 const nowLocalIso = () => {
@@ -22,6 +23,7 @@ const DEFAULT_FORM = {
 
 export default function SessionsPage() {
   const { t } = useI18n();
+  const { tenant } = useAuth();
   const { data: groups } = useQuery({
     queryKey: ["groups-list"],
     queryFn: async () => (await api.get("/groups")).data,
@@ -41,7 +43,12 @@ export default function SessionsPage() {
       subtitle="Individual class meetings — with topic and status."
       emptyIcon={CalendarClock}
       defaultForm={DEFAULT_FORM}
+      extraActions={tenant?.plan === "premium" ? <RecurringDialog groups={groups} /> : null}
       columns={[
+        {
+          key: "series", label: "",
+          render: (r) => r.series_id ? <Repeat className="w-3.5 h-3.5 text-muted-foreground" title="Part of a recurring series" /> : null,
+        },
         {
           key: "when", label: "When",
           render: (r) => (

@@ -74,14 +74,14 @@ export default function BillingSuccessPage() {
         )}
         {status === "paid" && (
           <>
-            <CheckCircle2 className="w-10 h-10 mx-auto mb-4 text-emerald-500" />
+            <CheckCircle2 className="w-10 h-10 mx-auto mb-4 text-success" />
             <p className="font-semibold mb-1">Payment confirmed</p>
             <p className="text-sm text-muted-foreground">Taking you to your dashboard…</p>
           </>
         )}
         {status === "pending" && (
           <>
-            <Loader2 className="w-8 h-8 mx-auto mb-4 text-amber-500" />
+            <Loader2 className="w-8 h-8 mx-auto mb-4 text-warning" />
             <p className="font-semibold mb-1">Still processing</p>
             <p className="text-sm text-muted-foreground mb-4">
               Your payment is taking longer than expected to confirm. Refresh this page in a moment, or contact support if this persists.
@@ -91,7 +91,7 @@ export default function BillingSuccessPage() {
         )}
         {status === "error" && (
           <>
-            <AlertTriangle className="w-10 h-10 mx-auto mb-4 text-red-500" />
+            <AlertTriangle className="w-10 h-10 mx-auto mb-4 text-destructive" />
             <p className="font-semibold mb-1">Something went wrong</p>
             <p className="text-sm text-muted-foreground mb-4">{message}</p>
             <Link to="/billing">

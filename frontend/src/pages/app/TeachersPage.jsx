@@ -1,16 +1,60 @@
+import { useQuery } from "@tanstack/react-query";
 import CrudPanel, { StatusPill } from "./CrudPanel";
 import { Users } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Field } from "./StudentsPage";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
 const DEFAULT_FORM = {
   first_name: "", last_name: "", email: "", phone: "", subjects: [],
   hourly_rate: 0, monthly_salary: 0, status: "active",
 };
+
+/** Multi-select for a teacher's subjects, sourced from the center's courses.
+ * Any legacy free-form subjects not matching a course are still shown (and
+ * kept checked) so editing an existing teacher never silently drops them. */
+function SubjectPicker({ selected, onChange }) {
+  const { data: courses, isLoading } = useQuery({
+    queryKey: ["courses-list"],
+    queryFn: async () => (await api.get("/courses")).data,
+  });
+  const selectedSubjects = selected || [];
+
+  // Union of course titles + any already-selected subjects that aren't courses.
+  const courseTitles = (courses?.items || []).map((c) => c.title).filter(Boolean);
+  const options = Array.from(new Set([...courseTitles, ...selectedSubjects]));
+
+  const toggle = (subject, checked) => {
+    onChange(checked
+      ? [...selectedSubjects, subject]
+      : selectedSubjects.filter((s) => s !== subject));
+  };
+
+  return (
+    <div className="border border-border rounded-lg max-h-48 overflow-y-auto p-2 space-y-1 bg-background">
+      {isLoading ? (
+        <div className="text-xs text-muted-foreground p-2">Loading subjects…</div>
+      ) : options.length === 0 ? (
+        <div className="text-xs text-muted-foreground p-2">No courses yet — add courses first to pick subjects.</div>
+      ) : (
+        options.map((subject) => (
+          <label key={subject} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted/60 cursor-pointer text-sm">
+            <Checkbox
+              checked={selectedSubjects.includes(subject)}
+              onCheckedChange={(checked) => toggle(subject, !!checked)}
+            />
+            <span>{subject}</span>
+          </label>
+        ))
+      )}
+    </div>
+  );
+}
 
 export default function TeachersPage() {
   const { t } = useI18n();
@@ -51,13 +95,14 @@ export default function TeachersPage() {
           <Field label="Phone">
             <Input value={form.phone || ""} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
           </Field>
-          <Field label="Subjects (comma separated)">
-            <Input
-              value={(form.subjects || []).join(", ")}
-              onChange={(e) => setForm({ ...form, subjects: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })}
-              placeholder="Math, Physics"
-            />
-          </Field>
+          <div className="md:col-span-2">
+            <Field label="Subjects">
+              <SubjectPicker
+                selected={form.subjects}
+                onChange={(subjects) => setForm({ ...form, subjects })}
+              />
+            </Field>
+          </div>
           <Field label="Status">
             <Select value={form.status || "active"} onValueChange={(v) => setForm({ ...form, status: v })}>
               <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>

@@ -20,6 +20,8 @@ router.register('courses', views.CourseViewSet, basename='course')
 router.register('groups', views.GroupViewSet, basename='group')
 router.register('sessions', views.ClassSessionViewSet, basename='session')
 router.register('payments', views.PaymentViewSet, basename='payment')
+router.register('grades', views.GradeViewSet, basename='grade')
+router.register('conversations', views.ConversationViewSet, basename='conversation')
 
 def _both(route, view, name):
     """Return URL patterns for route both with and without trailing slash."""
@@ -41,6 +43,9 @@ urlpatterns = [
     *_both('auth/refresh', views.auth_refresh, 'auth_refresh'),
     *_both('auth/forgot-password', views.auth_forgot_password, 'auth_forgot_password'),
     *_both('auth/reset-password', views.auth_reset_password, 'auth_reset_password'),
+
+    # Public student-badge lookup (student mobile app — no login, see docstring)
+    *_both('public/student-lookup', views.public_student_lookup, 'public_student_lookup'),
 
     # Google OAuth
     *_both('auth/google/start', views.google_start, 'google_start'),
@@ -67,6 +72,24 @@ urlpatterns = [
     path('attendance/session/<str:session_id>', views.attendance_for_session, name='attendance_for_session_noslash'),
     path('attendance/student/<str:student_id>/', views.attendance_for_student, name='attendance_for_student'),
     path('attendance/student/<str:student_id>', views.attendance_for_student, name='attendance_for_student_noslash'),
+
+    # Payments
+    *_both('payments/overdue', views.payments_overdue, 'payments_overdue'),
+
+    # Parent portal
+    *_both('portal/children', views.portal_children, 'portal_children'),
+    path('portal/children/<str:student_id>/attendance/', views.portal_child_attendance, name='portal_child_attendance'),
+    path('portal/children/<str:student_id>/attendance', views.portal_child_attendance, name='portal_child_attendance_noslash'),
+    path('portal/children/<str:student_id>/sessions/', views.portal_child_sessions, name='portal_child_sessions'),
+    path('portal/children/<str:student_id>/sessions', views.portal_child_sessions, name='portal_child_sessions_noslash'),
+    path('portal/children/<str:student_id>/payments/', views.portal_child_payments, name='portal_child_payments'),
+    path('portal/children/<str:student_id>/payments', views.portal_child_payments, name='portal_child_payments_noslash'),
+    path('portal/children/<str:student_id>/grades/', views.portal_child_grades, name='portal_child_grades'),
+    path('portal/children/<str:student_id>/grades', views.portal_child_grades, name='portal_child_grades_noslash'),
+    path('portal/children/<str:student_id>/teachers/', views.portal_child_teachers, name='portal_child_teachers'),
+    path('portal/children/<str:student_id>/teachers', views.portal_child_teachers, name='portal_child_teachers_noslash'),
+    *_both('portal/conversation', views.portal_conversation, 'portal_conversation'),
+    *_both('portal/conversation/messages', views.portal_conversation_messages, 'portal_conversation_messages'),
 
     # Super Admin Platform
     *_both('admin/platform-summary', views.admin_platform_summary, 'admin_platform_summary'),

@@ -1,14 +1,17 @@
+import csv
+import io
 import json
 import math
 import os
 import time
 import secrets
+import uuid
 import mimetypes
 import requests
 from datetime import datetime, timedelta
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Q, Sum, F
+from django.db.models import Q, Sum, F, Count
 from django.http import FileResponse, Http404, HttpResponse
 from django.utils import timezone
 from django.shortcuts import redirect
@@ -19,8 +22,8 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, PermissionDenied, NotFound, APIException
 from rest_framework.authtoken.models import Token
 
-from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Attendance, Payment, ChargilyCheckout, PasswordResetToken
-from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, AttendanceSerializer, PaymentSerializer, ChargilyCheckoutSerializer
+from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Attendance, Payment, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message
+from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, AttendanceSerializer, PaymentSerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer
 from .services import GoogleOAuthService, ChargilyClient
 
 # Single source of truth for pricing:
@@ -34,6 +37,8 @@ PLANS_CONFIG = {
             'max_students': 50,
             'max_users': 3,
             'custom_branding': False,
+            'parent_portal': False,
+            'calendar_planner': False,
         },
         'standard': {
             'name': 'Standard',
@@ -42,6 +47,8 @@ PLANS_CONFIG = {
             'max_students': 500,
             'max_users': 20,
             'custom_branding': True,
+            'parent_portal': True,
+            'calendar_planner': False,
         },
         'premium': {
             'name': 'Premium',
@@ -50,6 +57,8 @@ PLANS_CONFIG = {
             'max_students': None,
             'max_users': None,
             'custom_branding': True,
+            'parent_portal': True,
+            'calendar_planner': True,
         },
     }
 }
@@ -89,34 +98,38 @@ def prorate_upgrade_amount(tenant, new_plan):
     return max(0, int(round(new_remaining_cost - unused_credit)))
 
 
-def maybe_expire_trial(tenant):
-    """Lazily flips an expired trial to pending_payment. Called wherever the
-    frontend fetches tenant status, so no cron job is needed to enforce it."""
-    if tenant and tenant.status == 'trial' and tenant.trial_ends_at and timezone.now() >= tenant.trial_ends_at:
-        tenant.status = 'pending_payment'
-        tenant.save(update_fields=['status', 'updated_at'])
-    return tenant
-
-
 # Base Tenant-Scoped ViewSet
 class TenantScopedViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         queryset = super().get_queryset()
-        
+
+        # Parents only ever get read access to their own linked children via
+        # the dedicated /portal/* endpoints (see _portal_guardian/_portal_child
+        # below) — the general CRUD list/retrieve routes here have no
+        # per-row filtering beyond tenant_id, so without this a parent login
+        # could list every student/payment/guardian in the whole tenant.
+        if user.role == 'parent':
+            raise PermissionDenied('Forbidden')
+
         if user.is_super_admin():
             if user.tenant_id:
                 return queryset.filter(tenant_id=user.tenant_id)
             return queryset
-            
+
         if not user.tenant_id:
             raise PermissionDenied('User has no tenant')
-            
+
+        if user.tenant.status != 'active':
+            raise PermissionDenied('This workspace is not active yet — complete billing to continue.')
+
         return queryset.filter(tenant_id=user.tenant_id)
 
     def perform_create(self, serializer):
         user = self.request.user
         if user.tenant_id:
+            if not user.is_super_admin() and user.tenant.status != 'active':
+                raise PermissionDenied('This workspace is not active yet — complete billing to continue.')
             serializer.save(tenant_id=user.tenant_id)
         else:
             serializer.save()
@@ -155,7 +168,7 @@ class TenantScopedViewSet(viewsets.ModelViewSet):
 def health(request):
     return Response({
         'status': 'ok',
-        'service': 'schooldz',
+        'service': 'scolaris',
         'time': timezone.now().isoformat()
     })
 
@@ -203,8 +216,7 @@ def auth_register(request):
             name=request.data['tenant_name'].strip(),
             slug=slug,
             center_type=request.data.get('center_type', 'tutoring') or 'tutoring',
-            status='trial',
-            trial_ends_at=timezone.now() + timedelta(days=14),
+            status='pending_payment',
             max_students=basic_tier['max_students'],
             max_users=basic_tier['max_users'],
         )
@@ -250,12 +262,42 @@ def auth_login(request):
         
     if not user.is_active:
         return Response({'error': 'Account disabled'}, status=status.HTTP_403_FORBIDDEN)
-        
+
     token, _ = Token.objects.get_or_create(user=user)
     return Response({
         'access_token': token.key,
         'refresh_token': token.key,
         'user': UserSerializer(user).data
+    })
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def public_student_lookup(request):
+    """No-login lookup for the student mobile app: a student punches in their
+    workspace slug + student code and gets back just enough to render their
+    own QR badge. No password — this is a digital ID card, not an account."""
+    tenant_slug = (request.GET.get('tenant_slug') or '').strip().lower()
+    student_code = (request.GET.get('student_code') or '').strip()
+
+    if not tenant_slug or not student_code:
+        return Response({'error': 'tenant_slug and student_code are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    tenant = Tenant.objects.filter(slug=tenant_slug).first()
+    if not tenant:
+        return Response({'error': 'Workspace not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    student = Student.objects.filter(tenant=tenant, student_code__iexact=student_code).first()
+    if not student:
+        return Response({'error': 'Student not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    return Response({
+        'id': student.id,
+        'first_name': student.first_name,
+        'last_name': student.last_name,
+        'student_code': student.student_code,
+        'photo_url': student.photo_url,
+        'tenant_name': tenant.name,
     })
 
 
@@ -270,7 +312,7 @@ def auth_logout(request):
 @permission_classes([IsAuthenticated])
 def auth_me(request):
     user = request.user
-    tenant = maybe_expire_trial(user.tenant) if user.tenant else None
+    tenant = user.tenant
     tenant_data = TenantSerializer(tenant).data if tenant else None
     return Response({
         'user': UserSerializer(user).data,
@@ -471,8 +513,7 @@ def google_callback(request):
                 name=state_payload['tenant_name'],
                 slug=slug,
                 center_type=state_payload.get('center_type') or 'tutoring',
-                status='trial',
-                trial_ends_at=timezone.now() + timedelta(days=14),
+                status='pending_payment',
                 max_students=basic_tier['max_students'],
                 max_users=basic_tier['max_users'],
             )
@@ -532,6 +573,9 @@ def billing_plans(request):
             'annual': resolve_amount(key, 'annual'),
             'annual_discount_pct': tier['annual_discount_pct'],
             'currency': currency,
+            'custom_branding': tier['custom_branding'],
+            'parent_portal': tier['parent_portal'],
+            'calendar_planner': tier['calendar_planner'],
         })
     return Response({'plans': plans})
 
@@ -551,7 +595,7 @@ def get_billable_tenant(user):
 @permission_classes([IsAuthenticated])
 def billing_checkout(request):
     tenant = get_billable_tenant(request.user)
-    if tenant.status not in ('pending_payment', 'trial'):
+    if tenant.status != 'pending_payment':
         return Response({'error': 'This workspace is already active. Use renew or upgrade instead.'}, status=status.HTTP_400_BAD_REQUEST)
 
     plan = request.data.get('plan')
@@ -561,7 +605,7 @@ def billing_checkout(request):
         
     amount = resolve_amount(plan, billing_cycle)
     plan_name = PLANS_CONFIG['tiers'][plan]['name']
-    description = f"SchoolDZ {plan_name} plan ({billing_cycle}) — {tenant.name}"
+    description = f"Scolaris {plan_name} plan ({billing_cycle}) — {tenant.name}"
     
     return start_chargily_checkout(tenant, plan, billing_cycle, amount, 'signup', description)
 
@@ -598,7 +642,7 @@ def billing_renew(request):
         
     amount = resolve_amount(tenant.plan, cycle)
     plan_name = PLANS_CONFIG['tiers'][tenant.plan]['name']
-    description = f"SchoolDZ {plan_name} plan renewal ({cycle}) — {tenant.name}"
+    description = f"Scolaris {plan_name} plan renewal ({cycle}) — {tenant.name}"
     
     return start_chargily_checkout(tenant, tenant.plan, cycle, amount, 'renew', description)
 
@@ -644,7 +688,7 @@ def billing_upgrade(request):
             'tenant': TenantSerializer(tenant).data
         })
         
-    description = f"SchoolDZ upgrade to {plan_name} (prorated) — {tenant.name}"
+    description = f"Scolaris upgrade to {plan_name} (prorated) — {tenant.name}"
     return start_chargily_checkout(tenant, new_plan, cycle, amount, 'upgrade', description)
 
 
@@ -999,7 +1043,9 @@ def global_search(request):
         })
         
     # Payments
-    payments = Payment.objects.filter(tenant_id=tid, invoice_number__icontains=q)[:5]
+    payments = Payment.objects.filter(tenant_id=tid).filter(
+        Q(invoice_number__icontains=q) | Q(reference__icontains=q)
+    )[:5]
     for p in payments:
         results.append({
             'type': 'payment',
@@ -1007,7 +1053,41 @@ def global_search(request):
             'label': f"{p.invoice_number} — {p.amount}",
             'data': PaymentSerializer(p).data
         })
-        
+
+    # Sessions
+    sessions = ClassSession.objects.filter(tenant_id=tid).filter(
+        Q(topic__icontains=q) | Q(room__icontains=q)
+    )[:5]
+    for sess in sessions:
+        results.append({
+            'type': 'session',
+            'id': sess.id,
+            'label': sess.topic or f"Session — {sess.start_at.strftime('%Y-%m-%d %H:%M')}",
+            'data': ClassSessionSerializer(sess).data
+        })
+
+    # Grades
+    grades = Grade.objects.filter(tenant_id=tid, title__icontains=q)[:5]
+    for gr in grades:
+        results.append({
+            'type': 'grade',
+            'id': gr.id,
+            'label': f"{gr.title} — {gr.score}/{gr.max_score}",
+            'data': GradeSerializer(gr).data
+        })
+
+    # Users
+    users = User.objects.filter(tenant_id=tid).filter(
+        Q(name__icontains=q) | Q(email__icontains=q)
+    )[:5]
+    for u in users:
+        results.append({
+            'type': 'user',
+            'id': u.id,
+            'label': u.name or u.email,
+            'data': UserSerializer(u).data
+        })
+
     return Response({'results': results, 'query': q})
 
 
@@ -1072,6 +1152,135 @@ def attendance_for_student(request, student_id):
         
     items = Attendance.objects.filter(tenant_id=tid, student_id=student_id).order_by('-marked_at')[:500]
     return Response({'items': AttendanceSerializer(items, many=True).data, 'total': len(items)})
+
+
+# Parent Portal — read-only endpoints for role='parent' users, scoped to only
+# the children linked to their own Guardian record. Gated on the tenant's
+# parent_portal plan flag so a downgrade after a parent already has a login
+# revokes access immediately rather than just hiding the invite button.
+def _portal_guardian(request):
+    user = request.user
+    if user.role != 'parent' or not user.tenant_id:
+        raise PermissionDenied('Forbidden')
+
+    tenant = Tenant.objects.filter(id=user.tenant_id).first()
+    parent_portal = bool(tenant and tenant.plan and PLANS_CONFIG['tiers'][tenant.plan].get('parent_portal', False))
+    if not parent_portal:
+        raise PermissionDenied('The parent portal is not available on this workspace\'s current plan')
+
+    guardian = Guardian.objects.filter(user_id=user.id, tenant_id=user.tenant_id).first()
+    if not guardian:
+        raise PermissionDenied('No parent profile linked to this account')
+    return guardian
+
+
+def _portal_child(request, student_id):
+    guardian = _portal_guardian(request)
+    student = Student.objects.filter(id=student_id, tenant_id=request.user.tenant_id, parent_id=guardian.id).first()
+    if not student:
+        raise NotFound('Student not found')
+    return student
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def portal_children(request):
+    guardian = _portal_guardian(request)
+    children = list(Student.objects.filter(tenant_id=request.user.tenant_id, parent_id=guardian.id).order_by('first_name'))
+    overdue_ids = set(Payment.objects.filter(
+        tenant_id=request.user.tenant_id,
+        student_id__in=[c.id for c in children],
+        status__in=['pending', 'partial'],
+        due_date__lt=timezone.now().date(),
+    ).values_list('student_id', flat=True))
+    data = StudentSerializer(children, many=True).data
+    for row in data:
+        row['has_overdue_payment'] = row['id'] in overdue_ids
+    return Response({'items': data, 'total': len(children)})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def portal_child_attendance(request, student_id):
+    student = _portal_child(request, student_id)
+    items = Attendance.objects.filter(tenant_id=request.user.tenant_id, student_id=student.id).order_by('-marked_at')[:200]
+    return Response({'items': AttendanceSerializer(items, many=True).data, 'total': len(items)})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def portal_child_sessions(request, student_id):
+    student = _portal_child(request, student_id)
+    qs = ClassSession.objects.filter(tenant_id=request.user.tenant_id, group__students=student)
+    from_date = request.GET.get('from_date')
+    if from_date:
+        qs = qs.filter(start_at__gte=from_date)
+    to_date = request.GET.get('to_date')
+    if to_date:
+        qs = qs.filter(start_at__lte=to_date)
+    items = qs.order_by('-start_at')[:300]
+    return Response({'items': ClassSessionSerializer(items, many=True).data, 'total': len(items)})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def portal_child_teachers(request, student_id):
+    student = _portal_child(request, student_id)
+    teacher_ids = Group.objects.filter(
+        tenant_id=request.user.tenant_id, students=student, teacher__isnull=False,
+    ).values_list('teacher_id', flat=True).distinct()
+    items = Teacher.objects.filter(tenant_id=request.user.tenant_id, id__in=teacher_ids)
+    return Response({'items': TeacherSerializer(items, many=True).data, 'total': items.count()})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def portal_conversation(request):
+    guardian = _portal_guardian(request)
+    convo, _ = Conversation.objects.get_or_create(tenant_id=request.user.tenant_id, guardian=guardian)
+    return Response(ConversationSerializer(convo).data)
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def portal_conversation_messages(request):
+    guardian = _portal_guardian(request)
+    convo, _ = Conversation.objects.get_or_create(tenant_id=request.user.tenant_id, guardian=guardian)
+
+    if request.method == 'POST':
+        body = (request.data.get('body') or '').strip()
+        if not body:
+            return Response({'error': 'Message body is required'}, status=status.HTTP_400_BAD_REQUEST)
+        now = timezone.now()
+        Message.objects.create(
+            tenant_id=request.user.tenant_id, conversation=convo,
+            sender_user=request.user, sender_role='parent', body=body,
+        )
+        convo.last_message_at = now
+        convo.last_read_by_guardian_at = now
+        convo.save(update_fields=['last_message_at', 'last_read_by_guardian_at', 'updated_at'])
+    else:
+        convo.last_read_by_guardian_at = timezone.now()
+        convo.save(update_fields=['last_read_by_guardian_at', 'updated_at'])
+
+    items = convo.messages.select_related('sender_user').order_by('created_at')[:500]
+    return Response({'items': MessageSerializer(items, many=True).data, 'total': len(items)})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def portal_child_payments(request, student_id):
+    student = _portal_child(request, student_id)
+    items = Payment.objects.filter(tenant_id=request.user.tenant_id, student_id=student.id).order_by('-created_at')[:200]
+    return Response({'items': PaymentSerializer(items, many=True).data, 'total': len(items)})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def portal_child_grades(request, student_id):
+    student = _portal_child(request, student_id)
+    items = Grade.objects.filter(tenant_id=request.user.tenant_id, student_id=student.id).order_by('-date')[:200]
+    return Response({'items': GradeSerializer(items, many=True).data, 'total': len(items)})
 
 
 # ViewSets implementing standard CRUD
@@ -1165,7 +1374,7 @@ class TenantViewSet(viewsets.ModelViewSet):
 
     def update(self, request, *args, **kwargs):
         user = request.user
-        if not user.is_super_admin() and user.role != 'owner':
+        if not user.is_super_admin() and user.role not in ['owner', 'director']:
             raise PermissionDenied('Forbidden')
             
         tenant_id = kwargs.get('pk')
@@ -1276,6 +1485,11 @@ class UserViewSet(TenantScopedViewSet):
         role = request.GET.get('role')
         if role:
             queryset = queryset.filter(role=role)
+        q = request.GET.get('q')
+        if q:
+            queryset = queryset.filter(
+                Q(name__icontains=q) | Q(email__icontains=q) | Q(phone__icontains=q)
+            )
         queryset = queryset.order_by('-created_at')[:500]
         serializer = self.get_serializer(queryset, many=True)
         return Response({'items': serializer.data, 'total': len(serializer.data)})
@@ -1405,15 +1619,87 @@ class GuardianViewSet(TenantScopedViewSet):
             queryset = queryset.filter(
                 Q(name__icontains=q) | Q(email__icontains=q) | Q(phone__icontains=q)
             )
-        queryset = queryset.order_by('-created_at')[:500]
+        queryset = queryset.prefetch_related('students').order_by('-created_at')[:500]
         serializer = self.get_serializer(queryset, many=True)
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
     def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
+        user = request.user
+        data = request.data.copy()
+        student_ids = data.pop('student_ids', None)
+
+        serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        guardian = serializer.instance
+
+        if student_ids:
+            Student.objects.filter(id__in=student_ids, tenant_id=guardian.tenant_id).update(parent=guardian)
+
+        return Response(self.get_serializer(guardian).data, status=status.HTTP_200_OK)
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        data = request.data.copy()
+        student_ids = data.pop('student_ids', None)
+
+        serializer = self.get_serializer(instance, data=data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        if student_ids is not None:
+            Student.objects.filter(parent=instance, tenant_id=instance.tenant_id).exclude(id__in=student_ids).update(parent=None)
+            Student.objects.filter(id__in=student_ids, tenant_id=instance.tenant_id).update(parent=instance)
+
+        return Response(self.get_serializer(instance).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'])
+    def invite(self, request, pk=None):
+        user = request.user
+        if not user.is_super_admin() and user.role not in ['owner', 'director', 'secretary']:
+            raise PermissionDenied('Forbidden')
+
+        tenant = Tenant.objects.filter(id=user.tenant_id).first()
+        if not tenant:
+            raise ValidationError('Tenant not found')
+
+        parent_portal = bool(tenant.plan) and PLANS_CONFIG['tiers'][tenant.plan].get('parent_portal', False)
+        if not user.is_super_admin() and not parent_portal:
+            raise PermissionDenied('The parent portal is available on the Standard and Premium plans. Upgrade your plan to invite parents.')
+
+        guardian = self.get_object()
+        if not guardian.email:
+            return Response({'error': 'Add an email to this parent before inviting them'}, status=status.HTTP_400_BAD_REQUEST)
+
+        email = guardian.email.strip().lower()
+        existing = User.objects.filter(email=email).first()
+        if existing and existing.id != (guardian.user_id or ''):
+            return Response({'error': 'This email is already registered to a different account'}, status=status.HTTP_409_CONFLICT)
+
+        if guardian.user_id:
+            invited_user = guardian.user
+        else:
+            invited_user = User.objects.create_user(
+                email=email,
+                name=guardian.name,
+                tenant=tenant,
+                role='parent',
+                email_verified=False,
+            )
+            invited_user.set_unusable_password()
+            invited_user.save()
+            guardian.user = invited_user
+            guardian.save(update_fields=['user', 'updated_at'])
+
+        token = secrets.token_urlsafe(32)
+        PasswordResetToken.objects.create(
+            token=token,
+            user=invited_user,
+            expires_at=timezone.now() + timedelta(days=7),
+            used=False,
+        )
+        invite_url = f"{settings.FRONTEND_URL}/reset-password?token={token}"
+        return Response({'guardian': GuardianSerializer(guardian).data, 'invite_url': invite_url})
 
 
 class TeacherViewSet(TenantScopedViewSet):
@@ -1488,6 +1774,104 @@ class StudentViewSet(TenantScopedViewSet):
         self.perform_create(serializer)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=['post'], url_path='import')
+    def import_csv(self, request):
+        user = request.user
+        if not user.is_super_admin() and user.role not in ['owner', 'director', 'secretary', 'accountant', 'teacher']:
+            raise PermissionDenied('Forbidden')
+
+        tenant = Tenant.objects.filter(id=user.tenant_id).first()
+        if not tenant:
+            raise ValidationError('Tenant not found')
+
+        upload = request.FILES.get('file')
+        if not upload:
+            return Response({'error': 'file is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if upload.size > 2 * 1024 * 1024:
+            return Response({'error': 'CSV must be under 2MB'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            reader = csv.DictReader(io.TextIOWrapper(upload.file, encoding='utf-8-sig'))
+            rows = list(reader)
+        except (UnicodeDecodeError, csv.Error):
+            return Response({'error': 'Could not parse file as CSV (UTF-8 expected)'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if len(rows) > 1000:
+            return Response({'error': 'CSV cannot have more than 1000 rows'}, status=status.HTTP_400_BAD_REQUEST)
+
+        existing_count = Student.objects.filter(tenant_id=tenant.id).count()
+        max_students = tenant.max_students
+        created_count = 0
+        failed = []
+
+        for i, row in enumerate(rows, start=2):  # row 1 is the header
+            first_name = (row.get('first_name') or '').strip()
+            last_name = (row.get('last_name') or '').strip()
+            if not first_name or not last_name:
+                failed.append({'row': i, 'error': 'first_name and last_name are required'})
+                continue
+
+            if max_students is not None and existing_count + created_count >= max_students:
+                failed.append({'row': i, 'error': f'Your {tenant.plan} plan allows up to {max_students} students'})
+                continue
+
+            try:
+                with transaction.atomic():
+                    guardian = None
+                    parent_email = (row.get('parent_email') or '').strip().lower()
+                    if parent_email:
+                        guardian, _ = Guardian.objects.get_or_create(
+                            tenant=tenant, email=parent_email,
+                            defaults={'name': (row.get('parent_name') or parent_email).strip(), 'phone': (row.get('parent_phone') or '').strip()},
+                        )
+
+                    student_code = f"{tenant.student_prefix or 'STU-'}{str(existing_count + created_count + 1).zfill(5)}"
+                    Student.objects.create(
+                        tenant=tenant,
+                        parent=guardian,
+                        first_name=first_name,
+                        last_name=last_name,
+                        email=(row.get('email') or '').strip() or None,
+                        phone=(row.get('phone') or '').strip() or None,
+                        gender=(row.get('gender') or '').strip() or None,
+                        birth_date=(row.get('birth_date') or '').strip() or None,
+                        address=(row.get('address') or '').strip() or None,
+                        emergency_contact=(row.get('emergency_contact') or '').strip() or None,
+                        student_code=student_code,
+                        enrollment_date=timezone.now(),
+                    )
+                    created_count += 1
+            except Exception as e:
+                failed.append({'row': i, 'error': str(e)})
+
+        return Response({'created': created_count, 'failed': failed, 'total': len(rows)})
+
+    @action(detail=True, methods=['get'])
+    def verify(self, request, pk=None):
+        """Scanned-QR lookup for the teacher app: is this student enrolled
+        here, and are they clear of overdue payments right now?"""
+        student = self.get_object()
+
+        has_overdue = Payment.objects.filter(
+            tenant_id=student.tenant_id,
+            student_id=student.id,
+            status__in=['pending', 'partial'],
+            due_date__lt=timezone.now().date(),
+        ).exists()
+
+        groups = Group.objects.filter(tenant_id=student.tenant_id, students=student, status='active')
+
+        return Response({
+            'id': student.id,
+            'first_name': student.first_name,
+            'last_name': student.last_name,
+            'student_code': student.student_code,
+            'photo_url': student.photo_url,
+            'status': student.status,
+            'paid': not has_overdue,
+            'groups': [g.name for g in groups],
+        })
+
 
 class CourseViewSet(TenantScopedViewSet):
     queryset = Course.objects.all()
@@ -1524,6 +1908,11 @@ class GroupViewSet(TenantScopedViewSet):
         course_id = request.GET.get('course_id')
         if course_id:
             queryset = queryset.filter(course_id=course_id)
+        q = request.GET.get('q')
+        if q:
+            queryset = queryset.filter(
+                Q(name__icontains=q) | Q(room__icontains=q) | Q(schedule__icontains=q)
+            )
         # Prefetch students for efficient SerializerMethodField
         queryset = queryset.prefetch_related('students').order_by('-created_at')[:500]
         serializer = self.get_serializer(queryset, many=True)
@@ -1585,7 +1974,13 @@ class ClassSessionViewSet(TenantScopedViewSet):
         to_date = request.GET.get('to_date')
         if to_date:
             queryset = queryset.filter(start_at__lte=to_date)
-            
+
+        q = request.GET.get('q')
+        if q:
+            queryset = queryset.filter(
+                Q(topic__icontains=q) | Q(room__icontains=q)
+            )
+
         queryset = queryset.order_by('start_at')[:1000]
         serializer = self.get_serializer(queryset, many=True)
         return Response({'items': serializer.data, 'total': len(serializer.data)})
@@ -1605,11 +2000,70 @@ class ClassSessionViewSet(TenantScopedViewSet):
             
         data = request.data.copy()
         data['course_id'] = group.course_id
-        
+
         serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='generate-recurring')
+    def generate_recurring(self, request):
+        user = request.user
+        if not user.is_super_admin() and user.role not in ['owner', 'director', 'secretary', 'accountant', 'teacher']:
+            raise PermissionDenied('Forbidden')
+
+        tenant = Tenant.objects.filter(id=user.tenant_id).first()
+        if not tenant:
+            raise ValidationError('Tenant not found')
+
+        calendar_planner = bool(tenant.plan) and PLANS_CONFIG['tiers'][tenant.plan].get('calendar_planner', False)
+        if not user.is_super_admin() and not calendar_planner:
+            raise PermissionDenied('Recurring sessions are available on the Premium plan. Upgrade your plan to use them.')
+
+        group_id = request.data.get('group_id')
+        if not group_id:
+            return Response({'error': 'group_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        group = Group.objects.filter(id=group_id, tenant_id=user.tenant_id).first()
+        if not group:
+            raise NotFound('Group not found')
+
+        start_at = request.data.get('start_at')
+        end_at = request.data.get('end_at')
+        if not start_at or not end_at:
+            return Response({'error': 'start_at and end_at are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            weeks = int(request.data.get('weeks', 8))
+        except (TypeError, ValueError):
+            return Response({'error': 'weeks must be an integer'}, status=status.HTTP_400_BAD_REQUEST)
+        if weeks < 1 or weeks > 12:
+            return Response({'error': 'weeks must be between 1 and 12'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            start_dt = datetime.fromisoformat(start_at)
+            end_dt = datetime.fromisoformat(end_at)
+        except ValueError:
+            return Response({'error': 'start_at/end_at must be ISO datetimes'}, status=status.HTTP_400_BAD_REQUEST)
+
+        series_id = str(uuid.uuid4())
+        created = []
+        with transaction.atomic():
+            for i in range(weeks):
+                delta = timedelta(weeks=i)
+                session = ClassSession.objects.create(
+                    tenant_id=user.tenant_id,
+                    group=group,
+                    teacher_id=request.data.get('teacher_id'),
+                    course_id=group.course_id,
+                    room=request.data.get('room'),
+                    start_at=start_dt + delta,
+                    end_at=end_dt + delta,
+                    topic=request.data.get('topic'),
+                    series_id=series_id,
+                )
+                created.append(session)
+
+        return Response({'items': ClassSessionSerializer(created, many=True).data, 'series_id': series_id})
 
 
 class PaymentViewSet(TenantScopedViewSet):
@@ -1624,6 +2078,11 @@ class PaymentViewSet(TenantScopedViewSet):
         status_val = request.GET.get('status')
         if status_val:
             queryset = queryset.filter(status=status_val)
+        q = request.GET.get('q')
+        if q:
+            queryset = queryset.filter(
+                Q(invoice_number__icontains=q) | Q(reference__icontains=q) | Q(notes__icontains=q)
+            )
         queryset = queryset.order_by('-created_at')[:500]
         serializer = self.get_serializer(queryset, many=True)
         return Response({'items': serializer.data, 'total': len(serializer.data)})
@@ -1632,11 +2091,11 @@ class PaymentViewSet(TenantScopedViewSet):
         user = request.user
         if not user.is_super_admin() and user.role not in ['owner', 'director', 'secretary', 'accountant', 'teacher']:
             raise PermissionDenied('Forbidden')
-            
+
         tenant = Tenant.objects.filter(id=user.tenant_id).first()
         if not tenant:
             raise ValidationError('Tenant not found')
-            
+
         count = Payment.objects.filter(tenant_id=user.tenant_id).count()
         invoice_number = f"{tenant.invoice_prefix or 'INV-'}{str(count + 1).zfill(6)}"
         
@@ -1653,6 +2112,113 @@ class PaymentViewSet(TenantScopedViewSet):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def payments_overdue(request):
+    tid = request.user.tenant_id
+    if not tid:
+        raise PermissionDenied('User has no tenant')
+
+    items = Payment.objects.filter(
+        tenant_id=tid,
+        status__in=['pending', 'partial'],
+        due_date__lt=timezone.now().date(),
+    ).order_by('due_date')[:500]
+
+    total_data = Payment.objects.filter(
+        tenant_id=tid,
+        status__in=['pending', 'partial'],
+        due_date__lt=timezone.now().date(),
+    ).aggregate(total=Sum(F('amount') - F('discount')))
+
+    return Response({
+        'items': PaymentSerializer(items, many=True).data,
+        'total': len(items),
+        'total_owed': float(total_data['total'] or 0),
+    })
+
+
+class GradeViewSet(TenantScopedViewSet):
+    queryset = Grade.objects.all()
+    serializer_class = GradeSerializer
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        student_id = request.GET.get('student_id')
+        if student_id:
+            queryset = queryset.filter(student_id=student_id)
+        course_id = request.GET.get('course_id')
+        if course_id:
+            queryset = queryset.filter(course_id=course_id)
+        q = request.GET.get('q')
+        if q:
+            queryset = queryset.filter(title__icontains=q)
+        queryset = queryset.order_by('-date')[:500]
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({'items': serializer.data, 'total': len(serializer.data)})
+
+    def create(self, request, *args, **kwargs):
+        user = request.user
+        if not user.is_super_admin() and user.role not in ['owner', 'director', 'secretary', 'accountant', 'teacher']:
+            raise PermissionDenied('Forbidden')
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class ConversationViewSet(TenantScopedViewSet):
+    queryset = Conversation.objects.all()
+    serializer_class = ConversationSerializer
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset()).select_related('guardian')
+        q = request.GET.get('q')
+        if q:
+            queryset = queryset.filter(
+                Q(guardian__name__icontains=q) | Q(guardian__email__icontains=q)
+            )
+        queryset = queryset.order_by('-last_message_at', '-created_at')[:200]
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({'items': serializer.data, 'total': len(serializer.data)})
+
+    def create(self, request, *args, **kwargs):
+        user = request.user
+        if not user.is_super_admin() and user.role not in ['owner', 'director', 'secretary', 'teacher']:
+            raise PermissionDenied('Forbidden')
+
+        guardian = Guardian.objects.filter(id=request.data.get('guardian_id'), tenant_id=user.tenant_id).first()
+        if not guardian:
+            raise NotFound('Parent not found')
+
+        convo, _ = Conversation.objects.get_or_create(tenant_id=user.tenant_id, guardian=guardian)
+        return Response(self.get_serializer(convo).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get', 'post'])
+    def messages(self, request, pk=None):
+        convo = self.get_object()
+
+        if request.method == 'POST':
+            body = (request.data.get('body') or '').strip()
+            if not body:
+                return Response({'error': 'Message body is required'}, status=status.HTTP_400_BAD_REQUEST)
+            now = timezone.now()
+            Message.objects.create(
+                tenant_id=request.user.tenant_id, conversation=convo,
+                sender_user=request.user, sender_role='staff', body=body,
+            )
+            convo.last_message_at = now
+            convo.last_read_by_staff_at = now
+            convo.save(update_fields=['last_message_at', 'last_read_by_staff_at', 'updated_at'])
+        else:
+            convo.last_read_by_staff_at = timezone.now()
+            convo.save(update_fields=['last_read_by_staff_at', 'updated_at'])
+
+        items = convo.messages.select_related('sender_user').order_by('created_at')[:500]
+        return Response({'items': MessageSerializer(items, many=True).data, 'total': len(items)})
+
+
 # Super Admin Platform Views
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -1664,18 +2230,21 @@ def admin_platform_summary(request):
     revenue = float(revenue_data['total'] or 0)
     
     tenants = Tenant.objects.order_by('-created_at')[:200]
+    tenant_ids = [t.id for t in tenants]
+    users_counts = dict(User.objects.filter(tenant_id__in=tenant_ids).values('tenant_id').annotate(c=Count('id')).values_list('tenant_id', 'c'))
+    students_counts = dict(Student.objects.filter(tenant_id__in=tenant_ids).values('tenant_id').annotate(c=Count('id')).values_list('tenant_id', 'c'))
+
     tenants_list = []
     for t in tenants:
         t_data = TenantSerializer(t).data
-        t_data['users_count'] = User.objects.filter(tenant_id=t.id).count()
-        t_data['students_count'] = Student.objects.filter(tenant_id=t.id).count()
+        t_data['users_count'] = users_counts.get(t.id, 0)
+        t_data['students_count'] = students_counts.get(t.id, 0)
         tenants_list.append(t_data)
         
     return Response({
         'kpis': {
             'tenants_total': Tenant.objects.count(),
             'tenants_active': Tenant.objects.filter(status='active').count(),
-            'tenants_trial': Tenant.objects.filter(status='trial').count(),
             'tenants_pending_payment': Tenant.objects.filter(status='pending_payment').count(),
             'tenants_suspended': Tenant.objects.filter(status='suspended').count(),
             'users_total': User.objects.count(),
@@ -1694,7 +2263,7 @@ def admin_set_tenant_status(request, tenant_id):
         raise PermissionDenied('Forbidden')
         
     status_val = request.data.get('status')
-    if status_val not in ['active', 'pending_payment', 'trial', 'suspended']:
+    if status_val not in ['active', 'pending_payment', 'suspended']:
         return Response({'error': 'Invalid status'}, status=status.HTTP_400_BAD_REQUEST)
         
     tenant = Tenant.objects.filter(id=tenant_id).first()
