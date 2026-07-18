@@ -14,7 +14,10 @@ SECRET_KEY = os.environ.get('APP_KEY', 'django-insecure-%q(fy0te%gstq%wv2pevrtwm
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('APP_DEBUG', 'true').lower() == 'true'
 
-ALLOWED_HOSTS = ['*']
+# Comma-separated in production (e.g. ALLOWED_HOSTS=scolarisdz.duckdns.org);
+# defaults to '*' only for local dev, where the host is never attacker-controlled.
+_allowed_hosts = os.environ.get('ALLOWED_HOSTS', '')
+ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts.split(',') if h.strip()] or ['*']
 
 
 # Application definition
