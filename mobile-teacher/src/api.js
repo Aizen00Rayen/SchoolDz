@@ -1,11 +1,9 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// Points at the Django backend's /api/v1 root. `localhost` only resolves to
-// the phone/simulator itself, not your dev machine — on a physical device or
-// most emulators you must change this to your machine's LAN IP
-// (e.g. http://192.168.1.20:8002/api/v1). Editable at runtime in Settings so
-// testers don't need to rebuild the app for this.
-export const DEFAULT_API_BASE = "http://localhost:8002/api/v1";
+// Points at the live Scolaris backend (Hostinger VPS, behind nginx + Let's
+// Encrypt). Override via setApiBase() if you ever need to point a build at a
+// local dev backend instead (e.g. http://192.168.1.20:8002/api/v1).
+export const DEFAULT_API_BASE = "https://scolarisdz.duckdns.org/api/v1";
 
 const API_BASE_KEY = "scolaris_teacher_api_base";
 
