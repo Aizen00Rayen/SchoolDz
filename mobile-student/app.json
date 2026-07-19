@@ -8,9 +8,11 @@
     "userInterfaceStyle": "light",
     "backgroundColor": "#FAFAFA",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.scolarisdz.student"
     },
     "android": {
+      "package": "com.scolarisdz.student",
       "adaptiveIcon": {
         "backgroundColor": "#FAFAFA",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -20,6 +22,12 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "0c9fb829-06d3-45d4-86b0-447c6e3118f4"
+      }
+    },
+    "owner": "rayenaizens-org"
   }
 }

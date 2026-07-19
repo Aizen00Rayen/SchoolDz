@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Scolaris Teacher",
-    "slug": "scolaris-teacher",
+    "name": "Scolaris Parent",
+    "slug": "scolaris-parent",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -9,37 +9,26 @@
     "backgroundColor": "#FAFAFA",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.scolarisdz.teacher"
+      "bundleIdentifier": "com.scolarisdz.parent"
     },
     "android": {
-      "package": "com.scolarisdz.teacher",
+      "package": "com.scolarisdz.parent",
       "adaptiveIcon": {
         "backgroundColor": "#FAFAFA",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
-      },
-      "permissions": [
-        "android.permission.CAMERA"
-      ]
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-secure-store",
-      [
-        "expo-camera",
-        {
-          "cameraPermission": "Scolaris Teacher needs camera access to scan student QR badges.",
-          "microphonePermission": false,
-          "recordAudioAndroid": false
-        }
-      ]
+      "expo-secure-store"
     ],
     "extra": {
       "eas": {
-        "projectId": "ec875dd4-24e4-485b-9deb-eb199cd2f9dd"
+        "projectId": "1bb3ca94-be2a-4a01-ad4f-fa8c06369704"
       }
     },
     "owner": "rayenaizens-org"
