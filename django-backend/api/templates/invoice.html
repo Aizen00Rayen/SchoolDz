@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @page {
+    size: A4;
+    margin: 20mm 18mm;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    color: #1c1b19;
+    font-family: "DejaVu Sans", sans-serif;
+    font-size: 11pt;
+  }
+  .band {
+    height: 5mm;
+    background: {{ primary_color }};
+    margin: -20mm -18mm 14mm;
+  }
+
+  .head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16pt;
+    padding-bottom: 16pt;
+    margin-bottom: 16pt;
+    border-bottom: 1pt solid #dedad2;
+  }
+  .brand { display: flex; align-items: center; gap: 10pt; }
+  .brand-mark {
+    width: 34pt; height: 34pt; border-radius: 6pt;
+    background: {{ primary_color }};
+    color: #ffffff;
+    text-align: center;
+    line-height: 34pt;
+    font-family: "DejaVu Serif", serif;
+    font-weight: bold;
+    font-size: 15pt;
+  }
+  .brand-mark img { width: 34pt; height: 34pt; border-radius: 6pt; object-fit: cover; display: block; }
+  .brand-name {
+    font-family: "DejaVu Serif", serif;
+    font-size: 15pt;
+    font-weight: bold;
+  }
+  .brand-sub { font-size: 8.5pt; color: #8a8478; margin-top: 2pt; }
+
+  .doc-meta { text-align: right; }
+  .doc-eyebrow {
+    font-size: 8pt; font-weight: bold; letter-spacing: 1.5pt; text-transform: uppercase;
+    color: {{ accent_color }}; margin-bottom: 4pt;
+  }
+  .doc-number { font-family: "DejaVu Sans Mono", monospace; font-size: 11pt; font-weight: bold; }
+  .doc-date { font-family: "DejaVu Sans Mono", monospace; font-size: 9pt; color: #8a8478; margin-top: 3pt; }
+
+  .grid-meta {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 22pt;
+  }
+  .grid-meta > div { width: 32%; }
+  .meta-label {
+    font-size: 7.5pt; font-weight: bold; letter-spacing: 1pt; text-transform: uppercase; color: #8a8478;
+    margin-bottom: 5pt;
+  }
+  .meta-value { font-size: 10.5pt; font-weight: bold; }
+  .meta-sub { font-size: 9pt; color: #55504a; margin-top: 2pt; font-family: "DejaVu Sans Mono", monospace; }
+
+  table.items { width: 100%; border-collapse: collapse; margin-bottom: 4pt; }
+  table.items thead th {
+    text-align: left; font-size: 7.5pt; font-weight: bold; letter-spacing: 1pt; text-transform: uppercase;
+    color: #8a8478; padding: 0 0 8pt; border-bottom: 1.2pt solid #c7c1b6;
+  }
+  table.items thead th.num { text-align: right; }
+  table.items tbody td { padding: 10pt 0; border-bottom: 1pt solid #dedad2; font-size: 10.5pt; vertical-align: top; }
+  table.items tbody td.num {
+    text-align: right; font-family: "DejaVu Sans Mono", monospace; white-space: nowrap;
+  }
+  .item-title { font-weight: bold; }
+  .item-sub { font-size: 8.5pt; color: #8a8478; margin-top: 2pt; }
+
+  .totals-wrap { display: flex; justify-content: flex-end; margin-top: 12pt; }
+  .totals { width: 200pt; }
+  .totals-row { display: flex; justify-content: space-between; font-size: 9.5pt; padding: 5pt 0; color: #55504a; }
+  .totals-row .val { font-family: "DejaVu Sans Mono", monospace; }
+  .totals-row.discount .val { color: {{ overdue_color }}; }
+  .totals-row.grand {
+    border-top: 1.2pt solid #c7c1b6; margin-top: 4pt; padding-top: 10pt;
+    font-size: 12.5pt; font-weight: bold; color: #1c1b19;
+  }
+  .totals-row.grand .val { font-family: "DejaVu Sans Mono", monospace; font-size: 13.5pt; }
+
+  .stamp {
+    display: inline-block;
+    margin-top: 6pt;
+    transform: rotate(-6deg);
+    border: 1.6pt solid {{ stamp_color }};
+    color: {{ stamp_color }};
+    font-family: "DejaVu Serif", serif;
+    font-weight: bold;
+    font-size: 11pt;
+    letter-spacing: 1pt;
+    text-transform: uppercase;
+    padding: 2pt 9pt;
+    border-radius: 3pt;
+  }
+
+  .foot {
+    margin-top: 26pt; padding-top: 14pt; border-top: 1pt solid #dedad2;
+    display: flex; justify-content: space-between; align-items: flex-end; gap: 14pt;
+  }
+  .foot-note { font-size: 8.5pt; color: #55504a; line-height: 1.5; max-width: 320pt; }
+  .foot-note strong { color: #1c1b19; }
+  .foot-currency { font-size: 7.5pt; color: #8a8478; text-align: right; font-family: "DejaVu Sans Mono", monospace; }
+</style>
+</head>
+<body>
+  <div class="band"></div>
+
+  <div class="head">
+    <div class="brand">
+      <div class="brand-mark">
+        {% if logo_data_uri %}<img src="{{ logo_data_uri }}">{% else %}{{ tenant_initial }}{% endif %}
+      </div>
+      <div>
+        <div class="brand-name">{{ tenant_name }}</div>
+        {% if tenant_currency %}<div class="brand-sub">{{ tenant_currency }}</div>{% endif %}
+      </div>
+    </div>
+    <div class="doc-meta">
+      <div class="doc-eyebrow">Invoice</div>
+      <div class="doc-number">{{ invoice_number }}</div>
+      <div class="doc-date">Issued {{ issued_date }}</div>
+    </div>
+  </div>
+
+  <div class="grid-meta">
+    <div>
+      <div class="meta-label">Billed to</div>
+      <div class="meta-value">{{ student_name }}</div>
+      {% if guardian_name %}<div class="meta-sub">Guardian: {{ guardian_name }}</div>{% endif %}
+    </div>
+    <div>
+      <div class="meta-label">Payment method</div>
+      <div class="meta-value">{{ method_label }}</div>
+      {% if due_date %}<div class="meta-sub">Due {{ due_date }}</div>{% endif %}
+    </div>
+    <div>
+      <div class="meta-label">Status</div>
+      <div class="meta-value">{{ status_line }}</div>
+      <div class="meta-sub">{{ student_code }}</div>
+      <div class="stamp">{{ status_label }}</div>
+    </div>
+  </div>
+
+  <table class="items">
+    <thead>
+      <tr><th>Description</th><th class="num">Amount</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>
+          <div class="item-title">{{ item_title }}</div>
+          {% if item_sub %}<div class="item-sub">{{ item_sub }}</div>{% endif %}
+        </td>
+        <td class="num">{{ subtotal }}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="totals-wrap">
+    <div class="totals">
+      <div class="totals-row">
+        <span>Subtotal</span>
+        <span class="val">{{ subtotal }}</span>
+      </div>
+      {% if discount and discount != "0.00" %}
+      <div class="totals-row discount">
+        <span>Discount</span>
+        <span class="val">&minus;{{ discount }}</span>
+      </div>
+      {% endif %}
+      <div class="totals-row grand">
+        <span>Total ({{ currency }})</span>
+        <span class="val">{{ total }}</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <div class="foot-note">Thank you for choosing <strong>{{ tenant_name }}</strong>. This invoice was generated automatically and is valid without a signature.</div>
+    <div class="foot-currency">Amounts in {{ currency }}</div>
+  </div>
+</body>
+</html>

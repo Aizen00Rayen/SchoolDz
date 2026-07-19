@@ -6,6 +6,7 @@ import os
 import time
 import secrets
 import uuid
+import base64
 import mimetypes
 import requests
 from datetime import datetime, timedelta
@@ -13,8 +14,10 @@ from django.conf import settings
 from django.db import transaction
 from django.db.models import Q, Sum, F, Count
 from django.http import FileResponse, Http404, HttpResponse
+from django.template.loader import render_to_string
 from django.utils import timezone
 from django.shortcuts import redirect
+from weasyprint import HTML
 from rest_framework import viewsets, status, serializers
 from rest_framework.decorators import api_view, permission_classes, throttle_classes, action
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -506,6 +509,116 @@ def portal_payment_checkout_status(request, checkout_id):
         'status': checkout.status,
         'payment': PaymentSerializer(checkout.payment).data if checkout.payment else None,
     })
+
+
+STAMP_COLORS = {
+    'paid': '#2F6B4F',
+    'pending': '#A8762C',
+    'overdue': '#B23A2E',
+    'refunded': '#8A8478',
+    'cancelled': '#8A8478',
+}
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def payment_invoice_pdf(request, payment_id):
+    """Renders the approved invoice template (see api/templates/invoice.html)
+    for a single payment. Reachable by staff of that tenant, the payment's
+    own guardian, or a super admin — deliberately not a PaymentViewSet action
+    since TenantScopedViewSet blocks role='parent' outright."""
+    user = request.user
+    payment = Payment.objects.select_related('student', 'student__parent', 'course', 'group', 'tenant').filter(id=payment_id).first()
+    if not payment:
+        raise NotFound('Payment not found')
+
+    if user.is_super_admin():
+        pass
+    elif user.role == 'parent':
+        guardian = Guardian.objects.filter(user_id=user.id, tenant_id=user.tenant_id).first()
+        if not guardian or payment.tenant_id != user.tenant_id or payment.student.parent_id != guardian.id:
+            raise NotFound('Payment not found')
+    else:
+        if not user.tenant_id or payment.tenant_id != user.tenant_id:
+            raise NotFound('Payment not found')
+
+    tenant = payment.tenant
+    student = payment.student
+
+    logo_data_uri = None
+    if tenant.logo_url:
+        try:
+            filename = tenant.logo_url.rsplit('/', 1)[-1]
+            logo_path = os.path.join(settings.MEDIA_ROOT, 'logos', filename)
+            with open(logo_path, 'rb') as f:
+                raw = f.read()
+            mime = mimetypes.guess_type(filename)[0] or 'image/png'
+            logo_data_uri = f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+        except OSError:
+            logo_data_uri = None
+
+    today = timezone.now().date()
+    is_overdue = payment.status in ['pending', 'partial'] and payment.due_date and payment.due_date < today
+    stamp_key = 'overdue' if is_overdue else payment.status
+    stamp_color = STAMP_COLORS.get(stamp_key, '#8A8478')
+
+    if payment.status == 'paid':
+        status_label = 'Paid'
+        status_line = f"Paid — {payment.paid_at.strftime('%d %b %Y')}" if payment.paid_at else 'Paid'
+    elif is_overdue:
+        status_label = 'Overdue'
+        status_line = f"Overdue since {payment.due_date.strftime('%d %b %Y')}"
+    elif payment.status in ['pending', 'partial']:
+        status_label = 'Pending'
+        status_line = f"Due {payment.due_date.strftime('%d %b %Y')}" if payment.due_date else 'Pending'
+    else:
+        status_label = payment.get_status_display().capitalize()
+        status_line = status_label
+
+    item_sub_parts = []
+    if payment.group:
+        item_sub_parts.append(payment.group.name)
+    # Only add the kind label when it isn't already the item title (that
+    # happens when there's no linked course — kind is the title itself then).
+    if payment.course:
+        item_sub_parts.append(payment.get_kind_display().capitalize())
+
+    subtotal = payment.amount
+    discount = payment.discount or 0
+    total = subtotal - discount
+
+    context = {
+        'primary_color': tenant.primary_color or '#0A0A0B',
+        'accent_color': tenant.accent_color or '#E53935',
+        'overdue_color': '#B23A2E',
+        'stamp_color': stamp_color,
+        'status_label': status_label,
+        'status_line': status_line,
+        'tenant_name': tenant.name,
+        'tenant_initial': (tenant.name or 'S')[0].upper(),
+        'tenant_currency': None,
+        'logo_data_uri': logo_data_uri,
+        'invoice_number': payment.invoice_number or payment.id,
+        'issued_date': payment.created_at.strftime('%d %b %Y'),
+        'student_name': f"{student.first_name} {student.last_name}",
+        'guardian_name': student.parent.name if student.parent else None,
+        'method_label': payment.get_method_display().replace('_', ' ').capitalize(),
+        'due_date': payment.due_date.strftime('%d %b %Y') if payment.due_date and payment.status != 'paid' else None,
+        'student_code': student.student_code,
+        'item_title': payment.course.title if payment.course else payment.get_kind_display().capitalize(),
+        'item_sub': ' · '.join(item_sub_parts),
+        'subtotal': f"{subtotal:,.2f}",
+        'discount': f"{discount:,.2f}",
+        'total': f"{total:,.2f}",
+        'currency': tenant.currency or 'DZD',
+    }
+
+    html_string = render_to_string('invoice.html', context)
+    pdf_bytes = HTML(string=html_string).write_pdf()
+
+    response = HttpResponse(pdf_bytes, content_type='application/pdf')
+    response['Content-Disposition'] = f'inline; filename="{payment.invoice_number or payment.id}.pdf"'
+    return response
 
 
 @api_view(['GET'])

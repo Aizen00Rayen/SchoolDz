@@ -81,6 +81,8 @@ urlpatterns = [
 
     # Payments
     *_both('payments/overdue', views.payments_overdue, 'payments_overdue'),
+    path('payments/<str:payment_id>/invoice/', views.payment_invoice_pdf, name='payment_invoice_pdf'),
+    path('payments/<str:payment_id>/invoice', views.payment_invoice_pdf, name='payment_invoice_pdf_noslash'),
 
     # Parent portal
     *_both('portal/children', views.portal_children, 'portal_children'),

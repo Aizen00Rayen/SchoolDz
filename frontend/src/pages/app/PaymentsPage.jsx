@@ -1,14 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import CrudPanel, { StatusPill } from "./CrudPanel";
-import { AlertTriangle, Wallet } from "lucide-react";
+import { AlertTriangle, Wallet, FileDown } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Field } from "./StudentsPage";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { api } from "@/lib/api";
+import { api, extractError, openInvoicePdf } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
+
+const downloadInvoice = (paymentId) => openInvoicePdf(paymentId).catch((e) => toast.error(extractError(e)));
 
 const DEFAULT_FORM = {
   student_id: "", course_id: "", kind: "monthly",
@@ -61,9 +65,19 @@ export default function PaymentsPage() {
         {
           key: "invoice_number", label: "Invoice",
           render: (r) => (
-            <div>
-              <div className="font-mono text-xs">{r.invoice_number}</div>
-              <div className="text-[11px] text-muted-foreground capitalize">{r.kind}</div>
+            <div className="flex items-center gap-2">
+              <div>
+                <div className="font-mono text-xs">{r.invoice_number}</div>
+                <div className="text-[11px] text-muted-foreground capitalize">{r.kind}</div>
+              </div>
+              <Button
+                type="button" variant="ghost" size="icon" className="h-7 w-7 flex-shrink-0"
+                onClick={() => downloadInvoice(r.id)}
+                title="Download invoice PDF"
+                data-testid={`payments-invoice-download-${r.id}`}
+              >
+                <FileDown className="w-3.5 h-3.5" />
+              </Button>
             </div>
           ),
         },

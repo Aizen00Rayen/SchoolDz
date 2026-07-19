@@ -2,12 +2,16 @@ import { useMemo, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { startOfMonth, endOfMonth, format } from "date-fns";
-import { ArrowLeft, AlertTriangle, StickyNote } from "lucide-react";
-import { api } from "@/lib/api";
+import { ArrowLeft, AlertTriangle, StickyNote, FileDown } from "lucide-react";
+import { toast } from "sonner";
+import { api, extractError, openInvoicePdf } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { PageHeader, LoadingRows, StatusPill, CalendarGrid, CalendarMonthNav } from "@/pages/app/_shared";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+
+const downloadInvoice = (paymentId) => openInvoicePdf(paymentId).catch((e) => toast.error(extractError(e)));
 
 function Table({ rows, isLoading, empty, columns }) {
   if (isLoading) return <LoadingRows />;
@@ -173,7 +177,20 @@ export default function PortalChildDetailPage() {
             rows={paymentsQ.data?.items || []}
             empty="No payment records yet."
             columns={[
-              { key: "invoice_number", label: "Invoice", render: (r) => <span className="font-mono text-xs">{r.invoice_number}</span> },
+              {
+                key: "invoice_number", label: "Invoice",
+                render: (r) => (
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs">{r.invoice_number}</span>
+                    <Button
+                      type="button" variant="ghost" size="icon" className="h-7 w-7"
+                      onClick={() => downloadInvoice(r.id)} title="Download invoice PDF"
+                    >
+                      <FileDown className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                ),
+              },
               {
                 key: "amount", label: "Amount",
                 render: (r) => <span className="font-mono font-semibold">{Math.round(r.amount).toLocaleString()} {tenant?.currency || "DZD"}</span>,

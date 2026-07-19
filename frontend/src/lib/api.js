@@ -11,6 +11,16 @@ export function resolveFileUrl(path) {
   return `${BACKEND_URL}${path}`;
 }
 
+/** Fetches a payment's invoice PDF (auth'd — the endpoint needs the Bearer
+ * token, so a plain <a href> won't carry it) and opens it in a new tab.
+ * Used from both the staff Payments page and the parent portal. */
+export async function openInvoicePdf(paymentId) {
+  const res = await api.get(`/payments/${paymentId}/invoice`, { responseType: "blob" });
+  const url = URL.createObjectURL(res.data);
+  window.open(url, "_blank");
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
 // In-memory access token (also cookies are set httpOnly by backend)
 let accessToken = null;
 export const setAccessToken = (t) => {
