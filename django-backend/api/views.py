@@ -16,7 +16,7 @@ from django.http import FileResponse, Http404, HttpResponse
 from django.utils import timezone
 from django.shortcuts import redirect
 from rest_framework import viewsets, status, serializers
-from rest_framework.decorators import api_view, permission_classes, action
+from rest_framework.decorators import api_view, permission_classes, throttle_classes, action
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, PermissionDenied, NotFound, APIException
@@ -24,7 +24,7 @@ from rest_framework.authtoken.models import Token
 
 from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Attendance, Payment, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message
 from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, AttendanceSerializer, PaymentSerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer
-from .services import GoogleOAuthService, ChargilyClient
+from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle
 
 # Single source of truth for pricing:
 PLANS_CONFIG = {
@@ -240,6 +240,7 @@ def auth_register(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([LoginRateThrottle])
 def auth_login(request):
     email = request.data.get('email')
     password = request.data.get('password')
@@ -332,6 +333,7 @@ def auth_refresh(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([PasswordResetRateThrottle])
 def auth_forgot_password(request):
     email = request.data.get('email')
     if not email:
@@ -361,6 +363,7 @@ def auth_forgot_password(request):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([PasswordResetRateThrottle])
 def auth_reset_password(request):
     token = request.data.get('token')
     new_password = request.data.get('new_password')

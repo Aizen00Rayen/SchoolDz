@@ -187,6 +187,14 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
+    # Brute-force protection for auth endpoints — now shared by the web app
+    # and three mobile apps. Applied per-view (see LoginRateThrottle /
+    # PasswordResetRateThrottle in api/services.py), not globally, so
+    # everything else is unaffected.
+    'DEFAULT_THROTTLE_RATES': {
+        'login': '10/min',
+        'password_reset': '5/min',
+    },
 }
 
 PASSWORD_HASHERS = [

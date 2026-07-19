@@ -8,9 +8,22 @@ from django.conf import settings
 from django.core import signing
 from rest_framework.authentication import TokenAuthentication
 from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.throttling import AnonRateThrottle
 
 class BearerTokenAuthentication(TokenAuthentication):
     keyword = 'Bearer'
+
+
+class LoginRateThrottle(AnonRateThrottle):
+    """Per-IP brute-force guard on /auth/login — shared by the web app and
+    all three mobile apps. Rate comes from DEFAULT_THROTTLE_RATES['login']."""
+    scope = 'login'
+
+
+class PasswordResetRateThrottle(AnonRateThrottle):
+    """Per-IP guard on the forgot/reset-password endpoints, so they can't be
+    used to spam a target's inbox or brute-force reset tokens."""
+    scope = 'password_reset'
 
 
 from chargily_pay import ChargilyClient as SDKChargilyClient
