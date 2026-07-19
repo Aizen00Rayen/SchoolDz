@@ -40,6 +40,9 @@ import PortalShell from "@/pages/portal/PortalShell";
 import PortalHomePage from "@/pages/portal/PortalHomePage";
 import PortalChildDetailPage from "@/pages/portal/PortalChildDetailPage";
 import PortalMessagesPage from "@/pages/portal/PortalMessagesPage";
+import EnrollPage from "@/pages/enroll/EnrollPage";
+import EnrollSuccessPage from "@/pages/enroll/EnrollSuccessPage";
+import EnrollFailurePage from "@/pages/enroll/EnrollFailurePage";
 
 function RequireAuth({ children }) {
   const { user, loading } = useAuth();
@@ -116,6 +119,11 @@ function App() {
                   <Route path="/billing" element={<RequireAuth><BillingGatePage /></RequireAuth>} />
                   <Route path="/billing/success" element={<RequireAuth><BillingSuccessPage /></RequireAuth>} />
                   <Route path="/billing/failure" element={<RequireAuth><BillingFailurePage /></RequireAuth>} />
+
+                  {/* Public self-enrollment (per-school, no login required to view) */}
+                  <Route path="/enroll/:slug" element={<EnrollPage />} />
+                  <Route path="/enroll/:slug/success" element={<RequireAuth><EnrollSuccessPage /></RequireAuth>} />
+                  <Route path="/enroll/:slug/failure" element={<RequireAuth><EnrollFailurePage /></RequireAuth>} />
 
                   {/* Admin */}
                   <Route path="/admin/login" element={<AdminLoginPage />} />

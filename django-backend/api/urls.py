@@ -47,6 +47,12 @@ urlpatterns = [
     # Public student-badge lookup (student mobile app — no login, see docstring)
     *_both('public/student-lookup', views.public_student_lookup, 'public_student_lookup'),
 
+    # Public self-enrollment page (per-school, unauthenticated)
+    path('public/schools/<str:slug>/enroll/', views.public_school_enroll, name='public_school_enroll'),
+    path('public/schools/<str:slug>/enroll', views.public_school_enroll, name='public_school_enroll_noslash'),
+    path('public/schools/<str:slug>/', views.public_school_info, name='public_school_info'),
+    path('public/schools/<str:slug>', views.public_school_info, name='public_school_info_noslash'),
+
     # Google OAuth
     *_both('auth/google/start', views.google_start, 'google_start'),
     *_both('auth/google/callback', views.google_callback, 'google_callback'),
@@ -90,6 +96,8 @@ urlpatterns = [
     path('portal/children/<str:student_id>/teachers', views.portal_child_teachers, name='portal_child_teachers_noslash'),
     *_both('portal/conversation', views.portal_conversation, 'portal_conversation'),
     *_both('portal/conversation/messages', views.portal_conversation_messages, 'portal_conversation_messages'),
+    path('portal/payment-checkout/<str:checkout_id>/', views.portal_payment_checkout_status, name='portal_payment_checkout_status'),
+    path('portal/payment-checkout/<str:checkout_id>', views.portal_payment_checkout_status, name='portal_payment_checkout_status_noslash'),
 
     # Super Admin Platform
     *_both('admin/platform-summary', views.admin_platform_summary, 'admin_platform_summary'),

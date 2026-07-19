@@ -49,6 +49,15 @@ export function AuthProvider({ children }) {
     return data.user;
   };
 
+  /** Used by the public self-enrollment page: the enroll endpoint already
+   * returns a fresh access_token + user in one call, no separate /auth/login
+   * round-trip needed. */
+  const loginWithToken = async (token, initialUser) => {
+    setAccessToken(token);
+    if (initialUser) setUser(initialUser);
+    await loadMe();
+  };
+
   const loginWithGoogleCode = async (code) => {
     const { data } = await api.post("/auth/google/exchange", { code });
     // Set the token FIRST before any other requests can fire
@@ -77,7 +86,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, tenant, loading, login, register, loginWithGoogleCode, logout, refreshTenant, extractError }}
+      value={{ user, tenant, loading, login, register, loginWithToken, loginWithGoogleCode, logout, refreshTenant, extractError }}
     >
       {children}
     </AuthContext.Provider>

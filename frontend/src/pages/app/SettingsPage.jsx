@@ -1,13 +1,14 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ImagePlus, Loader2, RefreshCw, ArrowUpCircle } from "lucide-react";
+import { ImagePlus, Loader2, RefreshCw, ArrowUpCircle, Copy, ExternalLink } from "lucide-react";
 import { PageHeader } from "./_shared";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { api, extractError, resolveFileUrl } from "@/lib/api";
 import { Field } from "./StudentsPage";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,6 +40,7 @@ export default function SettingsPage() {
   const [upgradePlan, setUpgradePlan] = useState("");
 
   const higherPlans = PLAN_ORDER.slice(PLAN_ORDER.indexOf(tenant?.plan) + 1);
+  const enrollUrl = `${window.location.origin}/enroll/${tenant?.slug || ""}`;
 
   const renewQuoteQuery = useQuery({
     queryKey: ["billing-renew-quote", renewCycle],
@@ -205,6 +207,34 @@ export default function SettingsPage() {
             </div>
           </Field>
         </div>
+      </div>
+
+      <div className="surface-card p-6 mb-4">
+        <h3 className="font-display font-semibold text-lg mb-1">Public enrollment page</h3>
+        <p className="text-sm text-muted-foreground mb-4">
+          Share this link so parents can browse your courses and enroll their kids themselves — pick which courses show up from the Courses page.
+        </p>
+        <div className="flex items-center gap-2 mb-4">
+          <Input readOnly value={enrollUrl} className="font-mono text-xs bg-muted/40" />
+          <Button
+            type="button" variant="outline" size="icon"
+            onClick={() => { navigator.clipboard.writeText(enrollUrl); toast.success("Link copied"); }}
+          >
+            <Copy className="w-3.5 h-3.5" />
+          </Button>
+          <Button type="button" variant="outline" size="icon" asChild>
+            <a href={enrollUrl} target="_blank" rel="noreferrer"><ExternalLink className="w-3.5 h-3.5" /></a>
+          </Button>
+        </div>
+        <Field label="Description shown on the page">
+          <Textarea
+            value={form.enrollment_description || ""}
+            onChange={(e) => setForm({ ...form, enrollment_description: e.target.value })}
+            disabled={!canEdit}
+            rows={3}
+            placeholder="A short welcome message for prospective parents."
+          />
+        </Field>
       </div>
 
       <div className="surface-card p-6">

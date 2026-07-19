@@ -1,7 +1,8 @@
 import CrudPanel, { StatusPill } from "./CrudPanel";
-import { BookOpen } from "lucide-react";
+import { BookOpen, Globe } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Field } from "./StudentsPage";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -11,7 +12,7 @@ import { useAuth } from "@/lib/auth";
 
 const DEFAULT_FORM = {
   title: "", description: "", category: "", duration_weeks: 12, price: 0,
-  max_students: 20, color: "#0A0A0B", status: "active",
+  max_students: 20, color: "#0A0A0B", status: "active", show_on_enrollment: false,
 };
 
 export default function CoursesPage() {
@@ -49,6 +50,12 @@ export default function CoursesPage() {
         },
         { key: "max_students", label: "Capacity" },
         { key: "status", label: "Status", render: (r) => <StatusPill status={r.status} /> },
+        {
+          key: "show_on_enrollment", label: "Public",
+          render: (r) => r.show_on_enrollment ? (
+            <span className="inline-flex items-center gap-1 text-[11px] text-success"><Globe className="w-3 h-3" /> Listed</span>
+          ) : <span className="text-[11px] text-muted-foreground">—</span>,
+        },
       ]}
       renderForm={(form, setForm) => (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -86,6 +93,18 @@ export default function CoursesPage() {
             <Field label="Description">
               <Textarea value={form.description || ""} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} />
             </Field>
+          </div>
+          <div className="md:col-span-2">
+            <label className="flex items-center gap-2.5 rounded-lg border border-border p-3 cursor-pointer">
+              <Checkbox
+                checked={!!form.show_on_enrollment}
+                onCheckedChange={(v) => setForm({ ...form, show_on_enrollment: !!v })}
+              />
+              <div>
+                <div className="text-sm font-medium">Show on public enrollment page</div>
+                <div className="text-xs text-muted-foreground">Parents will be able to see this course and self-enroll their child, with its active groups shown as available seats.</div>
+              </div>
+            </label>
           </div>
         </div>
       )}

@@ -45,6 +45,7 @@ class Tenant(models.Model):
     max_students = models.IntegerField(null=True, blank=True)
     max_users = models.IntegerField(null=True, blank=True)
     trial_ends_at = models.DateTimeField(null=True, blank=True)
+    enrollment_description = models.TextField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -223,6 +224,7 @@ class Course(models.Model):
         ('archived', 'archived'),
     ]
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='active')
+    show_on_enrollment = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -371,18 +373,22 @@ class ChargilyCheckout(models.Model):
         ('standard', 'standard'),
         ('premium', 'premium'),
     ]
-    plan = models.CharField(max_length=50, choices=PLAN_CHOICES)
+    plan = models.CharField(max_length=50, choices=PLAN_CHOICES, null=True, blank=True)
     BILLING_CYCLE_CHOICES = [
         ('monthly', 'monthly'),
         ('annual', 'annual'),
     ]
-    billing_cycle = models.CharField(max_length=50, choices=BILLING_CYCLE_CHOICES)
+    billing_cycle = models.CharField(max_length=50, choices=BILLING_CYCLE_CHOICES, null=True, blank=True)
     TYPE_CHOICES = [
         ('signup', 'signup'),
         ('renew', 'renew'),
         ('upgrade', 'upgrade'),
+        ('student_payment', 'student_payment'),
     ]
     type = models.CharField(max_length=50, choices=TYPE_CHOICES, default='signup')
+    # Only set when type='student_payment' — the tuition Payment this checkout
+    # is paying off, as opposed to a tenant plan/subscription checkout.
+    payment = models.ForeignKey('Payment', on_delete=models.SET_NULL, null=True, blank=True, related_name='chargily_checkouts')
     amount = models.PositiveIntegerField()
     currency = models.CharField(max_length=8, default='dzd')
     chargily_checkout_id = models.CharField(max_length=255, unique=True, null=True, blank=True)

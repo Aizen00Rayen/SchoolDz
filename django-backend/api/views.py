@@ -24,7 +24,7 @@ from rest_framework.authtoken.models import Token
 
 from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Attendance, Payment, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message
 from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, AttendanceSerializer, PaymentSerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer
-from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle
+from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle, EnrollmentRateThrottle
 
 # Single source of truth for pricing:
 PLANS_CONFIG = {
@@ -307,6 +307,205 @@ def public_student_lookup(request):
 def auth_logout(request):
     request.auth.delete()
     return Response({'ok': True})
+
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def public_school_info(request, slug):
+    """Public-facing catalog for a school's self-enrollment page: just the
+    branding and whichever courses/groups staff opted into showing."""
+    tenant = Tenant.objects.filter(slug=slug.strip().lower(), status='active').first()
+    if not tenant:
+        raise NotFound('School not found')
+
+    courses = Course.objects.filter(tenant=tenant, show_on_enrollment=True, status='active').prefetch_related('groups')
+    course_data = []
+    for c in courses:
+        groups = []
+        for g in c.groups.filter(status='active'):
+            seats_left = max(g.capacity - g.students.count(), 0)
+            groups.append({
+                'id': g.id,
+                'name': g.name,
+                'schedule': g.schedule,
+                'room': g.room,
+                'capacity': g.capacity,
+                'seats_left': seats_left,
+            })
+        course_data.append({
+            'id': c.id,
+            'title': c.title,
+            'description': c.description,
+            'category': c.category,
+            'duration_weeks': c.duration_weeks,
+            'price': str(c.price),
+            'color': c.color,
+            'groups': groups,
+        })
+
+    return Response({
+        'id': tenant.id,
+        'name': tenant.name,
+        'slug': tenant.slug,
+        'logo_url': tenant.logo_url,
+        'primary_color': tenant.primary_color,
+        'accent_color': tenant.accent_color,
+        'language': tenant.language,
+        'currency': tenant.currency,
+        'enrollment_description': tenant.enrollment_description,
+        'courses': course_data,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+@throttle_classes([EnrollmentRateThrottle])
+def public_school_enroll(request, slug):
+    """Self-service enrollment from a school's public page: creates the
+    guardian's parent-portal account, the student, and a tuition Payment —
+    either left pending for in-person payment, or backed by a fresh Chargily
+    checkout for online payment."""
+    tenant = Tenant.objects.filter(slug=slug.strip().lower(), status='active').first()
+    if not tenant:
+        raise NotFound('School not found')
+
+    data = request.data
+    guardian_name = (data.get('guardian_name') or '').strip()
+    guardian_email = (data.get('guardian_email') or '').strip().lower()
+    guardian_phone = (data.get('guardian_phone') or '').strip()
+    password = data.get('password') or ''
+    student_first = (data.get('student_first_name') or '').strip()
+    student_last = (data.get('student_last_name') or '').strip()
+    group_id = data.get('group_id')
+    payment_method = data.get('payment_method')  # 'online' | 'office'
+
+    if not all([guardian_name, guardian_email, password, student_first, student_last, group_id]):
+        return Response({'error': 'All fields are required'}, status=status.HTTP_400_BAD_REQUEST)
+    if payment_method not in ['online', 'office']:
+        return Response({'error': 'Choose a payment method'}, status=status.HTTP_400_BAD_REQUEST)
+    if len(password) < 8:
+        return Response({'error': 'Password must be at least 8 characters'}, status=status.HTTP_400_BAD_REQUEST)
+
+    group = Group.objects.filter(
+        id=group_id, tenant=tenant, status='active', course__show_on_enrollment=True,
+    ).select_related('course').first()
+    if not group:
+        raise NotFound('That course is not available for enrollment')
+
+    if group.students.count() >= group.capacity:
+        return Response({'error': 'This group is full — please choose another.'}, status=status.HTTP_409_CONFLICT)
+
+    if User.objects.filter(email=guardian_email).exists():
+        return Response({
+            'error': 'An account with this email already exists. Log in to the parent portal to enroll another child.',
+        }, status=status.HTTP_409_CONFLICT)
+
+    existing_count = Student.objects.filter(tenant_id=tenant.id).count()
+    if tenant.max_students is not None and existing_count >= tenant.max_students:
+        return Response({'error': 'This school is at capacity — please contact them directly.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    course = group.course
+
+    with transaction.atomic():
+        guardian_user = User.objects.create_user(
+            email=guardian_email, password=password, name=guardian_name,
+            tenant=tenant, role='parent', phone=guardian_phone or None, email_verified=False,
+        )
+        guardian = Guardian.objects.create(
+            tenant=tenant, user=guardian_user, name=guardian_name,
+            email=guardian_email, phone=guardian_phone or None, relationship='guardian',
+        )
+        student_code = f"{tenant.student_prefix or 'STU-'}{str(existing_count + 1).zfill(5)}"
+        student = Student.objects.create(
+            tenant=tenant, parent=guardian, first_name=student_first, last_name=student_last,
+            student_code=student_code, enrollment_date=timezone.now(), status='active',
+        )
+        group.students.add(student)
+
+        invoice_count = Payment.objects.filter(tenant_id=tenant.id).count()
+        invoice_number = f"{tenant.invoice_prefix or 'INV-'}{str(invoice_count + 1).zfill(6)}"
+        payment = Payment.objects.create(
+            tenant=tenant, student=student, course=course, group=group, kind='registration',
+            amount=course.price, method='card' if payment_method == 'online' else 'cash',
+            status='pending', due_date=timezone.now().date(), invoice_number=invoice_number,
+        )
+
+        auth_token = Token.objects.create(user=guardian_user)
+
+    result = {
+        'access_token': auth_token.key,
+        'user': UserSerializer(guardian_user).data,
+        'student': StudentSerializer(student).data,
+        'payment': PaymentSerializer(payment).data,
+    }
+
+    if payment_method == 'office':
+        return Response(result)
+
+    # Online: kick off a Chargily checkout tied to this specific payment.
+    frontend = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000').rstrip('/')
+    app_url = getattr(settings, 'APP_URL', 'http://localhost:8002').rstrip('/')
+    locale = tenant.language if tenant.language in ['ar', 'fr'] else 'en'
+
+    checkout = ChargilyCheckout.objects.create(
+        tenant=tenant, type='student_payment', payment=payment,
+        amount=int(course.price), currency=tenant.currency.lower(), status='pending',
+    )
+    client = ChargilyClient()
+    try:
+        response = client.createCheckout({
+            'amount': int(course.price),
+            'currency': tenant.currency.lower(),
+            'locale': locale,
+            'description': f"{course.title} — {student_first} {student_last}",
+            'success_url': f"{frontend}/enroll/{tenant.slug}/success?checkout={checkout.id}",
+            'failure_url': f"{frontend}/enroll/{tenant.slug}/failure?checkout={checkout.id}",
+            'webhook_endpoint': f"{app_url}/api/v1/billing/webhook",
+            'metadata': {'checkout_id': checkout.id, 'tenant_id': tenant.id},
+        })
+    except Exception as e:
+        checkout.status = 'failed'
+        checkout.save()
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f'Chargily checkout creation failed for enrollment: {str(e)}')
+        result['payment_error'] = (
+            'Enrollment succeeded, but the payment provider could not be reached. '
+            'You can pay at the office, or retry payment from your parent portal.'
+        )
+        return Response(result)
+
+    checkout.chargily_checkout_id = response.get('id')
+    checkout.checkout_url = response.get('checkout_url')
+    checkout.save()
+    result['checkout_url'] = checkout.checkout_url
+    return Response(result)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def portal_payment_checkout_status(request, checkout_id):
+    """Lets a freshly-enrolled parent poll their own tuition checkout after
+    returning from Chargily, mirroring billing_checkout_status but scoped to
+    a Payment instead of the tenant's own subscription."""
+    user = request.user
+    checkout = ChargilyCheckout.objects.filter(id=checkout_id, type='student_payment').select_related('payment').first()
+    if not checkout or checkout.tenant_id != user.tenant_id:
+        raise NotFound('Checkout not found')
+
+    if checkout.status == 'pending' and checkout.chargily_checkout_id:
+        client = ChargilyClient()
+        try:
+            remote = client.getCheckout(checkout.chargily_checkout_id)
+            if remote:
+                apply_remote_status(checkout, remote.get('status', 'pending'))
+        except Exception:
+            pass
+
+    return Response({
+        'status': checkout.status,
+        'payment': PaymentSerializer(checkout.payment).data if checkout.payment else None,
+    })
 
 
 @api_view(['GET'])
@@ -802,12 +1001,26 @@ def billing_webhook(request):
 def apply_remote_status(checkout, remote_status):
     if checkout.status == 'paid':
         return
-        
+
+    if checkout.type == 'student_payment':
+        if remote_status == 'paid':
+            payment = checkout.payment
+            if payment and payment.status != 'paid':
+                payment.status = 'paid'
+                payment.paid_at = timezone.now()
+                payment.save(update_fields=['status', 'paid_at', 'updated_at'])
+            checkout.status = 'paid'
+            checkout.save()
+        elif remote_status in ['failed', 'canceled', 'expired']:
+            checkout.status = 'failed' if remote_status == 'canceled' else remote_status
+            checkout.save()
+        return
+
     if remote_status == 'paid':
         tenant = checkout.tenant
         now = timezone.now()
         tier = PLANS_CONFIG['tiers'][checkout.plan]
-        
+
         def get_period_expiration(from_dt):
             if checkout.billing_cycle == 'annual':
                 # Add a year. To avoid calendar month edge cases, estimate or add exactly:

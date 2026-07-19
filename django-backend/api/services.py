@@ -26,6 +26,12 @@ class PasswordResetRateThrottle(AnonRateThrottle):
     scope = 'password_reset'
 
 
+class EnrollmentRateThrottle(AnonRateThrottle):
+    """Per-IP guard on the public self-enrollment endpoint — it creates a
+    real user account + student record per call, unlike a plain lookup."""
+    scope = 'enrollment'
+
+
 from chargily_pay import ChargilyClient as SDKChargilyClient
 from chargily_pay.entity import Checkout as SDKCheckout
 
