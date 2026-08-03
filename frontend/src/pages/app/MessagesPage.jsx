@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/dialog";
 import { api, extractError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { usePermission } from "@/lib/permissions";
 
 function NewConversationDialog({ onCreated }) {
   const { t } = useI18n();
@@ -72,6 +73,7 @@ function NewConversationDialog({ onCreated }) {
 
 export default function MessagesPage() {
   const { t } = useI18n();
+  const { canEdit } = usePermission("messages");
   const qc = useQueryClient();
   const [selectedId, setSelectedId] = useState(null);
   const [q, setQ] = useState("");
@@ -114,7 +116,7 @@ export default function MessagesPage() {
       <PageHeader
         title={t("menu.messages")}
         subtitle={t("subtitle.messages")}
-        actions={<NewConversationDialog onCreated={setSelectedId} />}
+        actions={canEdit ? <NewConversationDialog onCreated={setSelectedId} /> : null}
       />
       <div className="surface-card flex-1 min-h-0 grid grid-cols-[280px_1fr] overflow-hidden">
         <div className="border-e border-border overflow-y-auto">
@@ -168,6 +170,7 @@ export default function MessagesPage() {
               onSend={(body) => sendMut.mutate(body)}
               currentRole="staff"
               sending={sendMut.isPending}
+              readOnly={!canEdit}
             />
           )}
         </div>

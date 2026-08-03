@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Image } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
+import { Feather } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { verifyStudent } from "./api";
-
-const ACCENT = "#E53935";
-const OK = "#16A34A";
-const INK = "#0A0A0B";
+import { ACCENT, OK, INK, MUTED, BG, BORDER, CARD, RADIUS, SPACING, SHADOW_MD } from "./theme";
 
 export default function ScannerScreen({ token, teacherName, onLogout }) {
+  const insets = useSafeAreaInsets();
   const [permission, requestPermission] = useCameraPermissions();
   const [locked, setLocked] = useState(false); // true while verifying or showing a result
   const [busy, setBusy] = useState(false);
@@ -33,14 +33,15 @@ export default function ScannerScreen({ token, teacherName, onLogout }) {
   };
 
   if (!permission) {
-    return <View style={styles.center}><ActivityIndicator /></View>;
+    return <View style={styles.center}><ActivityIndicator color={ACCENT} /></View>;
   }
 
   if (!permission.granted) {
     return (
       <View style={styles.center}>
+        <View style={styles.permIcon}><Feather name="camera-off" size={28} color={MUTED} /></View>
         <Text style={styles.permText}>Camera access is needed to scan student badges.</Text>
-        <TouchableOpacity style={styles.button} onPress={requestPermission}>
+        <TouchableOpacity style={styles.button} onPress={requestPermission} activeOpacity={0.85}>
           <Text style={styles.buttonText}>Grant camera access</Text>
         </TouchableOpacity>
       </View>
@@ -49,10 +50,13 @@ export default function ScannerScreen({ token, teacherName, onLogout }) {
 
   return (
     <View style={styles.flex}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Scan a student badge</Text>
-        <TouchableOpacity onPress={onLogout}>
-          <Text style={styles.logout}>Sign out ({teacherName})</Text>
+      <View style={[styles.header, { paddingTop: insets.top + SPACING.md }]}>
+        <View>
+          <Text style={styles.headerTitle}>Scan a badge</Text>
+          <Text style={styles.headerSub}>{teacherName}</Text>
+        </View>
+        <TouchableOpacity onPress={onLogout} style={styles.logoutButton} hitSlop={8}>
+          <Feather name="log-out" size={18} color={MUTED} />
         </TouchableOpacity>
       </View>
 
@@ -64,8 +68,15 @@ export default function ScannerScreen({ token, teacherName, onLogout }) {
             barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
             onBarcodeScanned={onScanned}
           />
-          <View style={styles.frame} pointerEvents="none" />
-          <Text style={styles.hint}>Line up the student's QR code inside the frame</Text>
+          <View style={styles.frameWrap} pointerEvents="none">
+            <View style={styles.frame}>
+              <View style={[styles.corner, styles.cornerTL]} />
+              <View style={[styles.corner, styles.cornerTR]} />
+              <View style={[styles.corner, styles.cornerBL]} />
+              <View style={[styles.corner, styles.cornerBR]} />
+            </View>
+            <Text style={styles.hint}>Line up the student's QR code inside the frame</Text>
+          </View>
         </View>
       ) : (
         <View style={styles.resultWrap}>
@@ -74,12 +85,16 @@ export default function ScannerScreen({ token, teacherName, onLogout }) {
           ) : result?.ok ? (
             <ResultCard student={result.data} />
           ) : (
-            <View style={[styles.card, { borderColor: ACCENT }]}>
+            <View style={[styles.card, styles.cardError]}>
+              <View style={[styles.statusIcon, { backgroundColor: ACCENT }]}>
+                <Feather name="x" size={22} color="#fff" />
+              </View>
               <Text style={[styles.statusText, { color: ACCENT }]}>Not recognized</Text>
               <Text style={styles.statusSub}>{result?.message}</Text>
             </View>
           )}
-          <TouchableOpacity style={styles.button} onPress={scanAgain}>
+          <TouchableOpacity style={styles.button} onPress={scanAgain} activeOpacity={0.85}>
+            <Feather name="camera" size={17} color="#fff" />
             <Text style={styles.buttonText}>Scan next student</Text>
           </TouchableOpacity>
         </View>
@@ -91,7 +106,7 @@ export default function ScannerScreen({ token, teacherName, onLogout }) {
 function ResultCard({ student }) {
   const color = student.paid ? OK : ACCENT;
   return (
-    <View style={[styles.card, { borderColor: color }]}>
+    <View style={[styles.card, { borderTopColor: color }]}>
       {student.photo_url ? (
         <Image source={{ uri: student.photo_url }} style={styles.photo} />
       ) : (
@@ -103,55 +118,80 @@ function ResultCard({ student }) {
       <Text style={styles.code}>{student.student_code}</Text>
 
       <View style={[styles.badge, { backgroundColor: color }]}>
-        <Text style={styles.badgeText}>{student.paid ? "✓ Enrolled & paid up" : "✕ Payment overdue"}</Text>
+        <Feather name={student.paid ? "check-circle" : "alert-circle"} size={14} color="#fff" />
+        <Text style={styles.badgeText}>{student.paid ? "Enrolled & paid up" : "Payment overdue"}</Text>
       </View>
 
       {!!student.groups?.length && (
-        <Text style={styles.groups}>{student.groups.join(" · ")}</Text>
+        <View style={styles.groupsRow}>
+          <Feather name="users" size={13} color={MUTED} />
+          <Text style={styles.groups}>{student.groups.join(" · ")}</Text>
+        </View>
       )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: "#FAFAFA" },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 28, backgroundColor: "#FAFAFA" },
+  flex: { flex: 1, backgroundColor: BG },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 28, backgroundColor: BG },
+  permIcon: {
+    width: 64, height: 64, borderRadius: RADIUS.pill, backgroundColor: "#F4F4F5",
+    alignItems: "center", justifyContent: "center", marginBottom: SPACING.lg,
+  },
   permText: { fontSize: 15, color: INK, textAlign: "center", marginBottom: 20 },
   header: {
-    paddingTop: 56, paddingBottom: 14, paddingHorizontal: 20,
+    paddingBottom: SPACING.md, paddingHorizontal: SPACING.xl,
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
-    backgroundColor: "#fff", borderBottomWidth: 1, borderBottomColor: "#E4E4E7",
+    backgroundColor: INK,
   },
-  headerTitle: { fontSize: 17, fontWeight: "700", color: INK },
-  logout: { fontSize: 12, color: "#71717A", textDecorationLine: "underline" },
+  headerTitle: { fontSize: 18, fontWeight: "800", color: "#fff" },
+  headerSub: { fontSize: 12, color: "rgba(255,255,255,0.55)", marginTop: 2 },
+  logoutButton: {
+    width: 34, height: 34, borderRadius: RADIUS.pill, backgroundColor: "rgba(255,255,255,0.1)",
+    alignItems: "center", justifyContent: "center",
+  },
   cameraWrap: { flex: 1 },
   camera: { flex: 1 },
-  frame: {
-    position: "absolute", top: "25%", left: "12%", right: "12%", bottom: "30%",
-    borderWidth: 3, borderColor: "#fff", borderRadius: 24,
-  },
+  frameWrap: { ...StyleSheet.absoluteFillObject, alignItems: "center", justifyContent: "center" },
+  frame: { width: "72%", aspectRatio: 1, position: "relative" },
+  corner: { position: "absolute", width: 32, height: 32, borderColor: "#fff" },
+  cornerTL: { top: 0, left: 0, borderTopWidth: 4, borderLeftWidth: 4, borderTopLeftRadius: 16 },
+  cornerTR: { top: 0, right: 0, borderTopWidth: 4, borderRightWidth: 4, borderTopRightRadius: 16 },
+  cornerBL: { bottom: 0, left: 0, borderBottomWidth: 4, borderLeftWidth: 4, borderBottomLeftRadius: 16 },
+  cornerBR: { bottom: 0, right: 0, borderBottomWidth: 4, borderRightWidth: 4, borderBottomRightRadius: 16 },
   hint: {
-    position: "absolute", bottom: 40, left: 0, right: 0, textAlign: "center",
+    position: "absolute", bottom: -56, left: 0, right: 0, textAlign: "center",
     color: "#fff", fontSize: 14, fontWeight: "600", textShadowColor: "#000", textShadowRadius: 6,
   },
   resultWrap: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24 },
   card: {
-    width: "100%", maxWidth: 340, backgroundColor: "#fff", borderRadius: 20, borderWidth: 2,
-    padding: 28, alignItems: "center",
+    width: "100%", maxWidth: 340, backgroundColor: CARD, borderRadius: RADIUS.xl, borderTopWidth: 4,
+    padding: 28, alignItems: "center", ...SHADOW_MD,
   },
-  photo: { width: 72, height: 72, borderRadius: 36, marginBottom: 14 },
+  cardError: { borderTopColor: ACCENT },
+  statusIcon: {
+    width: 48, height: 48, borderRadius: RADIUS.pill, alignItems: "center", justifyContent: "center",
+    marginBottom: SPACING.sm,
+  },
+  photo: { width: 76, height: 76, borderRadius: 38, marginBottom: SPACING.md },
   photoPlaceholder: { backgroundColor: "#F4F4F5", alignItems: "center", justifyContent: "center" },
-  photoInitial: { fontSize: 26, fontWeight: "800", color: "#71717A" },
+  photoInitial: { fontSize: 28, fontWeight: "800", color: MUTED },
   name: { fontSize: 20, fontWeight: "800", color: INK, textAlign: "center" },
-  code: { fontSize: 13, color: "#71717A", marginTop: 2, marginBottom: 18, fontFamily: "monospace" },
-  badge: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 999 },
-  badgeText: { color: "#fff", fontWeight: "700", fontSize: 14 },
-  groups: { marginTop: 14, fontSize: 12, color: "#A1A1AA" },
+  code: { fontSize: 13, color: MUTED, marginTop: 2, marginBottom: SPACING.lg, fontFamily: "monospace" },
+  badge: {
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingHorizontal: 16, paddingVertical: 10, borderRadius: RADIUS.pill,
+  },
+  badgeText: { color: "#fff", fontWeight: "700", fontSize: 13 },
+  groupsRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: SPACING.md },
+  groups: { fontSize: 12, color: MUTED },
   statusText: { fontSize: 20, fontWeight: "800" },
-  statusSub: { fontSize: 13, color: "#71717A", marginTop: 8, textAlign: "center" },
+  statusSub: { fontSize: 13, color: MUTED, marginTop: 8, textAlign: "center" },
   button: {
-    backgroundColor: INK, borderRadius: 10, paddingVertical: 15, paddingHorizontal: 32,
-    alignItems: "center", marginTop: 24,
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    backgroundColor: INK, borderRadius: RADIUS.md, paddingVertical: 15, paddingHorizontal: 32,
+    marginTop: SPACING.xl,
   },
   buttonText: { color: "#fff", fontSize: 15, fontWeight: "700" },
 });

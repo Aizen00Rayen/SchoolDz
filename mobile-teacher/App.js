@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { StatusBar } from "expo-status-bar";
 import { View, ActivityIndicator } from "react-native";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 import LoginScreen from "./src/LoginScreen";
 import ScannerScreen from "./src/ScannerScreen";
 import { loadSession, saveSession, clearSession } from "./src/storage";
+import { BG, ACCENT } from "./src/theme";
 
 export default function App() {
   const [session, setSession] = useState(undefined); // undefined = still loading
@@ -25,20 +27,20 @@ export default function App() {
 
   if (session === undefined) {
     return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "#FAFAFA" }}>
-        <ActivityIndicator />
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: BG }}>
+        <ActivityIndicator color={ACCENT} />
       </View>
     );
   }
 
   return (
-    <>
+    <SafeAreaProvider>
       {session ? (
         <ScannerScreen token={session.token} teacherName={session.user?.name || session.user?.email} onLogout={onLogout} />
       ) : (
         <LoginScreen onLoggedIn={onLoggedIn} />
       )}
       <StatusBar style="dark" />
-    </>
+    </SafeAreaProvider>
   );
 }

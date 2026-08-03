@@ -11,6 +11,7 @@ import {
 import { api, extractError, openInvoicePdf } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
+import { usePermission } from "@/lib/permissions";
 
 const downloadInvoice = (paymentId) => openInvoicePdf(paymentId).catch((e) => toast.error(extractError(e)));
 
@@ -22,6 +23,7 @@ const DEFAULT_FORM = {
 export default function PaymentsPage() {
   const { t } = useI18n();
   const { tenant } = useAuth();
+  const { canEdit } = usePermission("payments");
   const { data: students } = useQuery({
     queryKey: ["students-list"],
     queryFn: async () => (await api.get("/students")).data,
@@ -61,6 +63,8 @@ export default function PaymentsPage() {
       subtitle={t("subtitle.payments")}
       emptyIcon={Wallet}
       defaultForm={DEFAULT_FORM}
+      canEdit={canEdit}
+      canCreate={canEdit}
       columns={[
         {
           key: "invoice_number", label: t("field.invoice"),

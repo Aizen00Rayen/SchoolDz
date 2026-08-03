@@ -1,82 +1,22 @@
-import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
 import CrudPanel from "./CrudPanel";
-import { Copy, Send, UserRound } from "lucide-react";
+import { UserRound } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
-} from "@/components/ui/dialog";
-import { Field } from "./StudentsPage";
+import { Field, InviteButton } from "./_shared";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { api, extractError } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
+import { usePermission } from "@/lib/permissions";
 
 const DEFAULT_FORM = {
   name: "", email: "", phone: "", address: "", occupation: "", relationship: "father",
   emergency_contact: "", student_ids: [],
 };
-
-function InviteButton({ guardian, canInvite }) {
-  const { t } = useI18n();
-  const qc = useQueryClient();
-  const [inviteUrl, setInviteUrl] = useState(null);
-
-  const inviteMut = useMutation({
-    mutationFn: () => api.post(`/parents/${guardian.id}/invite`).then((r) => r.data),
-    onSuccess: (data) => {
-      setInviteUrl(data.invite_url);
-      qc.invalidateQueries({ queryKey: ["parents"] });
-    },
-    onError: (e) => toast.error(extractError(e)),
-  });
-
-  if (!canInvite) {
-    return (
-      <Button size="sm" variant="outline" disabled title={t("invite.available_plans")}>
-        <Send className="w-3.5 h-3.5 me-1.5" /> {t("invite.invite")}
-      </Button>
-    );
-  }
-
-  return (
-    <>
-      <Button
-        size="sm" variant="outline"
-        disabled={!guardian.email || inviteMut.isPending}
-        onClick={() => inviteMut.mutate()}
-        title={!guardian.email ? t("invite.add_email_first") : undefined}
-      >
-        <Send className="w-3.5 h-3.5 me-1.5" /> {guardian.user_id ? t("invite.reinvite") : t("invite.invite")}
-      </Button>
-      <Dialog open={!!inviteUrl} onOpenChange={(open) => !open && setInviteUrl(null)}>
-        <DialogContent className="bg-card">
-          <DialogHeader>
-            <DialogTitle className="font-display text-xl">{t("invite.link_ready")}</DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground">
-              {t("invite.share_hint", { name: guardian.name })}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex items-center gap-2">
-            <Input readOnly value={inviteUrl || ""} className="font-mono text-xs" />
-            <Button
-              type="button" size="icon" variant="outline"
-              onClick={() => { navigator.clipboard.writeText(inviteUrl); toast.success(t("toast.copied")); }}
-            >
-              <Copy className="w-4 h-4" />
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
-  );
-}
 
 export function StudentPicker({ selected, onChange }) {
   const { t } = useI18n();
@@ -117,10 +57,13 @@ export default function ParentsPage() {
   const { t } = useI18n();
   const { tenant } = useAuth();
   const canInvite = tenant?.plan && tenant.plan !== "basic";
+  const { canEdit } = usePermission("parents");
   return (
     <CrudPanel
       moduleKey="parents"
       endpoint="/parents"
+      canEdit={canEdit}
+      canCreate={canEdit}
       title={t("menu.parents")}
       subtitle={t("subtitle.parents")}
       emptyIcon={UserRound}
@@ -132,7 +75,7 @@ export default function ParentsPage() {
         { key: "relationship", label: t("field.relationship"), render: (r) => <span className="capitalize text-xs">{r.relationship ? t(`relationship.${r.relationship}`) : "—"}</span> },
         {
           key: "portal", label: t("field.portal"),
-          render: (r) => <InviteButton guardian={r} canInvite={canInvite} />,
+          render: (r) => <InviteButton person={r} endpoint="/parents" invalidateKey="parents" canInvite={canInvite} />,
         },
       ]}
       renderForm={(form, setForm) => (

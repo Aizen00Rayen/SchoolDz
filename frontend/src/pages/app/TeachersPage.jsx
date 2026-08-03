@@ -3,12 +3,13 @@ import CrudPanel, { StatusPill } from "./CrudPanel";
 import { Users } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Field } from "./StudentsPage";
+import { Field, InviteButton } from "./_shared";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { usePermission } from "@/lib/permissions";
 
 const DEFAULT_FORM = {
   first_name: "", last_name: "", email: "", phone: "", subjects: [],
@@ -59,6 +60,7 @@ function SubjectPicker({ selected, onChange }) {
 
 export default function TeachersPage() {
   const { t } = useI18n();
+  const { canEdit } = usePermission("teachers");
   return (
     <CrudPanel
       moduleKey="teachers"
@@ -67,6 +69,8 @@ export default function TeachersPage() {
       subtitle={t("subtitle.teachers")}
       emptyIcon={Users}
       defaultForm={DEFAULT_FORM}
+      canEdit={canEdit}
+      canCreate={canEdit}
       columns={[
         {
           key: "name", label: t("field.full_name"),
@@ -81,6 +85,10 @@ export default function TeachersPage() {
         { key: "phone", label: t("field.phone"), render: (r) => <span className="font-mono text-xs">{r.phone || "—"}</span> },
         { key: "hourly_rate", label: t("field.rate_hr"), render: (r) => <span className="font-mono">{r.hourly_rate?.toLocaleString?.() ?? "—"}</span> },
         { key: "status", label: t("field.status"), render: (r) => <StatusPill status={r.status} /> },
+        {
+          key: "portal", label: t("field.portal"),
+          render: (r) => <InviteButton person={r} endpoint="/teachers" invalidateKey="teachers" />,
+        },
       ]}
       renderForm={(form, setForm) => (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

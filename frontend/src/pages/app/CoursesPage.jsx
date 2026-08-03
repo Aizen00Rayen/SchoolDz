@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/select";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
+import { usePermission } from "@/lib/permissions";
 
 const DEFAULT_FORM = {
   title: "", description: "", category: "", duration_weeks: 12, price: 0,
@@ -18,10 +19,13 @@ const DEFAULT_FORM = {
 export default function CoursesPage() {
   const { t } = useI18n();
   const { tenant } = useAuth();
+  const { canEdit } = usePermission("courses");
   return (
     <CrudPanel
       moduleKey="courses"
       endpoint="/courses"
+      canEdit={canEdit}
+      canCreate={canEdit}
       title={t("menu.courses")}
       subtitle={t("subtitle.courses")}
       emptyIcon={BookOpen}

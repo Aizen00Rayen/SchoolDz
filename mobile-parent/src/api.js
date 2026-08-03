@@ -58,3 +58,11 @@ export const getConversation = (token) => request(token, "/portal/conversation")
 export const getMessages = (token) => request(token, "/portal/conversation/messages");
 export const sendMessage = (token, body) =>
   request(token, "/portal/conversation/messages", { method: "POST", body: JSON.stringify({ body }) });
+
+// Returns the invoice endpoint's absolute URL — used by ChildDetailScreen to
+// download the PDF (via expo-file-system, since it needs the Bearer header
+// that a plain <a href>/WebView src can't attach on native).
+export async function getInvoiceUrl(paymentId) {
+  const base = await getApiBase();
+  return `${base}/payments/${paymentId}/invoice`;
+}

@@ -12,6 +12,7 @@ import { useI18n } from "@/lib/i18n";
 import { useTheme, useTenantBranding } from "@/lib/theme";
 import { APPUI, AUTH } from "@/constants/testIds";
 import { api, resolveFileUrl } from "@/lib/api";
+import { getModulePermission } from "@/lib/permissions";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -25,18 +26,18 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 const NAV = [
   { key: "dashboard", to: "/app/dashboard", icon: BarChart3 },
-  { key: "students", to: "/app/students", icon: GraduationCap },
-  { key: "parents", to: "/app/parents", icon: UserRound },
-  { key: "teachers", to: "/app/teachers", icon: Users },
-  { key: "courses", to: "/app/courses", icon: BookOpen },
-  { key: "groups", to: "/app/groups", icon: Layers },
-  { key: "sessions", to: "/app/sessions", icon: CalendarClock },
-  { key: "calendar", to: "/app/calendar", icon: CalendarDays, premiumOnly: true },
-  { key: "attendance", to: "/app/attendance", icon: ClipboardCheck },
-  { key: "payments", to: "/app/payments", icon: Wallet },
-  { key: "grades", to: "/app/grades", icon: Award },
+  { key: "students", to: "/app/students", icon: GraduationCap, module: "students" },
+  { key: "parents", to: "/app/parents", icon: UserRound, module: "parents" },
+  { key: "teachers", to: "/app/teachers", icon: Users, module: "teachers" },
+  { key: "courses", to: "/app/courses", icon: BookOpen, module: "courses" },
+  { key: "groups", to: "/app/groups", icon: Layers, module: "groups" },
+  { key: "sessions", to: "/app/sessions", icon: CalendarClock, module: "sessions" },
+  { key: "calendar", to: "/app/calendar", icon: CalendarDays, premiumOnly: true, module: "sessions" },
+  { key: "attendance", to: "/app/attendance", icon: ClipboardCheck, module: "attendance" },
+  { key: "payments", to: "/app/payments", icon: Wallet, module: "payments" },
+  { key: "grades", to: "/app/grades", icon: Award, module: "grades" },
   { key: "reports", to: "/app/reports", icon: FileBarChart2 },
-  { key: "messages", to: "/app/messages", icon: MessageSquare, standardPlusOnly: true },
+  { key: "messages", to: "/app/messages", icon: MessageSquare, standardPlusOnly: true, module: "messages" },
   { key: "users", to: "/app/users", icon: Users, adminOnly: true },
   { key: "settings", to: "/app/settings", icon: Settings },
 ];
@@ -177,7 +178,12 @@ export default function AppShell() {
         </div>
 
         <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
-          {NAV.filter((n) => (!n.adminOnly || isAdmin) && (!n.premiumOnly || isPremium) && (!n.standardPlusOnly || isStandardPlus)).map((item) => (
+          {NAV.filter((n) =>
+            (!n.adminOnly || isAdmin) &&
+            (!n.premiumOnly || isPremium) &&
+            (!n.standardPlusOnly || isStandardPlus) &&
+            (!n.module || getModulePermission(user, n.module) !== "hidden")
+          ).map((item) => (
             <NavLink
               key={item.key}
               to={item.to}

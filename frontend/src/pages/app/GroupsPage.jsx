@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { usePermission } from "@/lib/permissions";
 
 const DEFAULT_FORM = {
   course_id: "", name: "", teacher_id: "", room: "", capacity: 20,
@@ -18,6 +19,7 @@ const DEFAULT_FORM = {
 
 export default function GroupsPage() {
   const { t } = useI18n();
+  const { canEdit } = usePermission("groups");
   const { data: courses } = useQuery({
     queryKey: ["courses-list"],
     queryFn: async () => (await api.get("/courses")).data,
@@ -38,6 +40,8 @@ export default function GroupsPage() {
       subtitle={t("subtitle.groups")}
       emptyIcon={Layers}
       defaultForm={DEFAULT_FORM}
+      canEdit={canEdit}
+      canCreate={canEdit}
       columns={[
         {
           key: "name", label: t("field.group"),

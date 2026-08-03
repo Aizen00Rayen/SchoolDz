@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { api, extractError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { usePermission } from "@/lib/permissions";
 
 const DEFAULT_FORM = {
   first_name: "",
@@ -112,6 +113,7 @@ function ImportCsvDialog() {
 
 export default function StudentsPage() {
   const { t } = useI18n();
+  const { canEdit } = usePermission("students");
   return (
     <CrudPanel
       moduleKey="students"
@@ -120,7 +122,9 @@ export default function StudentsPage() {
       subtitle={t("subtitle.students")}
       emptyIcon={GraduationCap}
       defaultForm={DEFAULT_FORM}
-      extraActions={<ImportCsvDialog />}
+      canEdit={canEdit}
+      canCreate={canEdit}
+      extraActions={canEdit ? <ImportCsvDialog /> : null}
       columns={[
         {
           key: "name", label: t("field.full_name"),

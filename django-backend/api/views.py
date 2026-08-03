@@ -25,7 +25,7 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, PermissionDenied, NotFound, APIException
 from rest_framework.authtoken.models import Token
 
-from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Attendance, Payment, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message
+from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Attendance, Payment, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, PERMISSION_MODULES, PERMISSION_LEVELS
 from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, AttendanceSerializer, PaymentSerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer
 from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle, EnrollmentRateThrottle
 
@@ -103,6 +103,31 @@ def prorate_upgrade_amount(tenant, new_plan):
 
 # Base Tenant-Scoped ViewSet
 class TenantScopedViewSet(viewsets.ModelViewSet):
+    # Subclasses for a permission-gated module (students, payments, etc. —
+    # see PERMISSION_MODULES) set this so secretary/accountant/teacher users
+    # are restricted per User.permissions. Owner/director/super_admin always
+    # get full access regardless (see User.get_permission). Leave None for
+    # resources that aren't part of the per-tab permission system.
+    module_key = None
+    # Actions that must stay reachable regardless of the module_key tab
+    # permission — e.g. StudentViewSet.verify is the QR-scanner lookup the
+    # teacher mobile app depends on, unrelated to the desktop Students tab.
+    module_view_exempt_actions = []
+
+    def check_module_view(self):
+        """Raise if the current user can't even see this module's tab."""
+        user = self.request.user
+        if getattr(self, 'action', None) in self.module_view_exempt_actions:
+            return
+        if self.module_key and not user.is_super_admin() and user.get_permission(self.module_key) == 'hidden':
+            raise PermissionDenied('Forbidden')
+
+    def check_module_edit(self):
+        """Raise unless the current user has edit rights on this module."""
+        user = self.request.user
+        if self.module_key and not user.is_super_admin() and user.get_permission(self.module_key) != 'edit':
+            raise PermissionDenied('You do not have permission to modify this.')
+
     def get_queryset(self):
         user = self.request.user
         queryset = super().get_queryset()
@@ -114,6 +139,8 @@ class TenantScopedViewSet(viewsets.ModelViewSet):
         # could list every student/payment/guardian in the whole tenant.
         if user.role == 'parent':
             raise PermissionDenied('Forbidden')
+
+        self.check_module_view()
 
         if user.is_super_admin():
             if user.tenant_id:
@@ -138,12 +165,22 @@ class TenantScopedViewSet(viewsets.ModelViewSet):
             serializer.save()
 
     def create(self, request, *args, **kwargs):
+        self.check_module_edit()
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    def update(self, request, *args, **kwargs):
+        self.check_module_edit()
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        self.check_module_edit()
+        return super().partial_update(request, *args, **kwargs)
+
     def destroy(self, request, *args, **kwargs):
+        self.check_module_edit()
         instance = self.get_object()
         self.perform_destroy(instance)
         return Response({'message': 'Deleted successfully'}, status=status.HTTP_200_OK)
@@ -1428,16 +1465,18 @@ def attendance_for_session(request, session_id):
     tid = user.tenant_id
     if not tid:
         raise PermissionDenied('User has no tenant')
-        
+    if not user.is_super_admin() and user.get_permission('attendance') == 'hidden':
+        raise PermissionDenied('Forbidden')
+
     if request.method == 'GET':
         items = Attendance.objects.filter(tenant_id=tid, session_id=session_id)
         return Response({'items': AttendanceSerializer(items, many=True).data, 'total': items.count()})
-        
+
     elif request.method == 'POST':
         # Bulk Mark
-        if not user.is_super_admin() and user.role not in ['owner', 'director', 'secretary', 'accountant', 'teacher']:
+        if not user.is_super_admin() and user.get_permission('attendance') != 'edit':
             raise PermissionDenied('Forbidden')
-            
+
         marks = request.data.get('marks')
         if not isinstance(marks, list):
             return Response({'error': 'marks must be an array'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1805,6 +1844,23 @@ class TenantViewSet(viewsets.ModelViewSet):
         return Response(TenantSerializer(tenant).data)
 
 
+def _clean_permissions(raw):
+    """Validate a {module: level} payload against the known modules/levels.
+    Returns a cleaned dict (unknown modules dropped) or raises ValidationError."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValidationError({'permissions': 'Must be an object of module -> level'})
+    cleaned = {}
+    for module_key, level in raw.items():
+        if module_key not in PERMISSION_MODULES:
+            continue
+        if level not in PERMISSION_LEVELS:
+            raise ValidationError({'permissions': f"Invalid level '{level}' for '{module_key}'"})
+        cleaned[module_key] = level
+    return cleaned
+
+
 class UserViewSet(TenantScopedViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
@@ -1853,6 +1909,8 @@ class UserViewSet(TenantScopedViewSet):
                 if current_count >= tenant.max_users:
                     raise PermissionDenied(f"Your {tenant.plan} plan allows up to {tenant.max_users} users. Upgrade your plan to add more.")
                     
+        permissions = _clean_permissions(request.data.get('permissions'))
+
         with transaction.atomic():
             new_user = User.objects.create_user(
                 email=email_clean,
@@ -1861,9 +1919,10 @@ class UserViewSet(TenantScopedViewSet):
                 tenant=user.tenant,
                 role=role,
                 phone=request.data.get('phone'),
-                email_verified=True
+                email_verified=True,
+                permissions=permissions,
             )
-            
+
         return Response(UserSerializer(new_user).data)
 
     def update(self, request, *args, **kwargs):
@@ -1907,7 +1966,10 @@ class UserViewSet(TenantScopedViewSet):
             if email_clean != target.email and User.objects.filter(email=email_clean).exists():
                 return Response({'error': 'Email already registered'}, status=status.HTTP_409_CONFLICT)
             updates['email'] = email_clean
-            
+
+        if 'permissions' in request.data:
+            updates['permissions'] = _clean_permissions(request.data['permissions'])
+
         if not updates:
             return Response({'error': 'No editable fields in payload'}, status=status.HTTP_400_BAD_REQUEST)
             
@@ -1940,6 +2002,7 @@ class UserViewSet(TenantScopedViewSet):
 class GuardianViewSet(TenantScopedViewSet):
     queryset = Guardian.objects.all()
     serializer_class = GuardianSerializer
+    module_key = 'parents'
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -1953,7 +2016,7 @@ class GuardianViewSet(TenantScopedViewSet):
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
     def create(self, request, *args, **kwargs):
-        user = request.user
+        self.check_module_edit()
         data = request.data.copy()
         student_ids = data.pop('student_ids', None)
 
@@ -1968,6 +2031,7 @@ class GuardianViewSet(TenantScopedViewSet):
         return Response(self.get_serializer(guardian).data, status=status.HTTP_200_OK)
 
     def update(self, request, *args, **kwargs):
+        self.check_module_edit()
         instance = self.get_object()
         data = request.data.copy()
         student_ids = data.pop('student_ids', None)
@@ -2034,6 +2098,7 @@ class GuardianViewSet(TenantScopedViewSet):
 class TeacherViewSet(TenantScopedViewSet):
     queryset = Teacher.objects.all()
     serializer_class = TeacherSerializer
+    module_key = 'teachers'
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -2047,23 +2112,66 @@ class TeacherViewSet(TenantScopedViewSet):
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
     def create(self, request, *args, **kwargs):
-        user = request.user
-        if not user.is_super_admin() and user.role not in ['owner', 'director', 'secretary', 'accountant', 'teacher']:
-            raise PermissionDenied('Forbidden')
-            
+        self.check_module_edit()
         data = request.data.copy()
         # Auto hire date
         data['hire_date'] = timezone.now().date().isoformat()
-        
+
         serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=['post'])
+    def invite(self, request, pk=None):
+        user = request.user
+        if not user.is_super_admin() and user.role not in ['owner', 'director', 'secretary']:
+            raise PermissionDenied('Forbidden')
+
+        tenant = Tenant.objects.filter(id=user.tenant_id).first()
+        if not tenant:
+            raise ValidationError('Tenant not found')
+
+        teacher = self.get_object()
+        if not teacher.email:
+            return Response({'error': 'Add an email to this teacher before inviting them'}, status=status.HTTP_400_BAD_REQUEST)
+
+        email = teacher.email.strip().lower()
+        existing = User.objects.filter(email=email).first()
+        if existing and existing.id != (teacher.user_id or ''):
+            return Response({'error': 'This email is already registered to a different account'}, status=status.HTTP_409_CONFLICT)
+
+        if teacher.user_id:
+            invited_user = teacher.user
+        else:
+            invited_user = User.objects.create_user(
+                email=email,
+                name=f"{teacher.first_name} {teacher.last_name}".strip(),
+                tenant=tenant,
+                role='teacher',
+                email_verified=False,
+            )
+            invited_user.set_unusable_password()
+            invited_user.save()
+            teacher.user = invited_user
+            teacher.save(update_fields=['user', 'updated_at'])
+
+        token = secrets.token_urlsafe(32)
+        PasswordResetToken.objects.create(
+            token=token,
+            user=invited_user,
+            expires_at=timezone.now() + timedelta(days=7),
+            used=False,
+        )
+        invite_url = f"{settings.FRONTEND_URL}/reset-password?token={token}"
+        return Response({'teacher': TeacherSerializer(teacher).data, 'invite_url': invite_url})
+
 
 class StudentViewSet(TenantScopedViewSet):
     queryset = Student.objects.all()
     serializer_class = StudentSerializer
+    module_key = 'students'
+    module_view_exempt_actions = ['verify']
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -2080,14 +2188,12 @@ class StudentViewSet(TenantScopedViewSet):
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
     def create(self, request, *args, **kwargs):
+        self.check_module_edit()
         user = request.user
-        if not user.is_super_admin() and user.role not in ['owner', 'director', 'secretary', 'accountant', 'teacher']:
-            raise PermissionDenied('Forbidden')
-            
         tenant = Tenant.objects.filter(id=user.tenant_id).first()
         if not tenant:
             raise ValidationError('Tenant not found')
-            
+
         count = Student.objects.filter(tenant_id=user.tenant_id).count()
         if tenant.max_students is not None and count >= tenant.max_students:
             raise PermissionDenied(f"Your {tenant.plan} plan allows up to {tenant.max_students} students. Upgrade your plan to add more.")
@@ -2105,10 +2211,8 @@ class StudentViewSet(TenantScopedViewSet):
 
     @action(detail=False, methods=['post'], url_path='import')
     def import_csv(self, request):
+        self.check_module_edit()
         user = request.user
-        if not user.is_super_admin() and user.role not in ['owner', 'director', 'secretary', 'accountant', 'teacher']:
-            raise PermissionDenied('Forbidden')
-
         tenant = Tenant.objects.filter(id=user.tenant_id).first()
         if not tenant:
             raise ValidationError('Tenant not found')
@@ -2205,6 +2309,7 @@ class StudentViewSet(TenantScopedViewSet):
 class CourseViewSet(TenantScopedViewSet):
     queryset = Course.objects.all()
     serializer_class = CourseSerializer
+    module_key = 'courses'
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -2218,10 +2323,7 @@ class CourseViewSet(TenantScopedViewSet):
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
     def create(self, request, *args, **kwargs):
-        user = request.user
-        if not user.is_super_admin() and user.role not in ['owner', 'director', 'secretary', 'accountant', 'teacher']:
-            raise PermissionDenied('Forbidden')
-            
+        self.check_module_edit()
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
@@ -2231,6 +2333,7 @@ class CourseViewSet(TenantScopedViewSet):
 class GroupViewSet(TenantScopedViewSet):
     queryset = Group.objects.all()
     serializer_class = GroupSerializer
+    module_key = 'groups'
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -2248,10 +2351,7 @@ class GroupViewSet(TenantScopedViewSet):
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
     def create(self, request, *args, **kwargs):
-        user = request.user
-        if not user.is_super_admin() and user.role not in ['owner', 'director', 'secretary', 'accountant', 'teacher']:
-            raise PermissionDenied('Forbidden')
-
+        self.check_module_edit()
         data = request.data.copy()
         student_ids = data.pop('student_ids', None)
 
@@ -2267,6 +2367,7 @@ class GroupViewSet(TenantScopedViewSet):
         return Response(self.get_serializer(group).data, status=status.HTTP_200_OK)
 
     def update(self, request, *args, **kwargs):
+        self.check_module_edit()
         instance = self.get_object()
         data = request.data.copy()
         student_ids = data.pop('student_ids', None)
@@ -2284,6 +2385,7 @@ class GroupViewSet(TenantScopedViewSet):
 
     @action(detail=True, methods=['post'])
     def enroll(self, request, pk=None):
+        self.check_module_edit()
         student_id = request.data.get('student_id')
         if not student_id:
             return Response({'error': 'student_id is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2298,6 +2400,7 @@ class GroupViewSet(TenantScopedViewSet):
 
     @action(detail=True, methods=['post'])
     def unenroll(self, request, pk=None):
+        self.check_module_edit()
         student_id = request.data.get('student_id')
         if not student_id:
             return Response({'error': 'student_id is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2314,6 +2417,7 @@ class GroupViewSet(TenantScopedViewSet):
 class ClassSessionViewSet(TenantScopedViewSet):
     queryset = ClassSession.objects.all()
     serializer_class = ClassSessionSerializer
+    module_key = 'sessions'
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -2340,18 +2444,16 @@ class ClassSessionViewSet(TenantScopedViewSet):
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
     def create(self, request, *args, **kwargs):
+        self.check_module_edit()
         user = request.user
-        if not user.is_super_admin() and user.role not in ['owner', 'director', 'secretary', 'accountant', 'teacher']:
-            raise PermissionDenied('Forbidden')
-            
         group_id = request.data.get('group_id')
         if not group_id:
             return Response({'error': 'group_id is required'}, status=status.HTTP_400_BAD_REQUEST)
-            
+
         group = Group.objects.filter(id=group_id, tenant_id=user.tenant_id).first()
         if not group:
             raise NotFound('Group not found')
-            
+
         data = request.data.copy()
         data['course_id'] = group.course_id
 
@@ -2362,10 +2464,8 @@ class ClassSessionViewSet(TenantScopedViewSet):
 
     @action(detail=False, methods=['post'], url_path='generate-recurring')
     def generate_recurring(self, request):
+        self.check_module_edit()
         user = request.user
-        if not user.is_super_admin() and user.role not in ['owner', 'director', 'secretary', 'accountant', 'teacher']:
-            raise PermissionDenied('Forbidden')
-
         tenant = Tenant.objects.filter(id=user.tenant_id).first()
         if not tenant:
             raise ValidationError('Tenant not found')
@@ -2423,6 +2523,7 @@ class ClassSessionViewSet(TenantScopedViewSet):
 class PaymentViewSet(TenantScopedViewSet):
     queryset = Payment.objects.all()
     serializer_class = PaymentSerializer
+    module_key = 'payments'
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -2442,10 +2543,8 @@ class PaymentViewSet(TenantScopedViewSet):
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
     def create(self, request, *args, **kwargs):
+        self.check_module_edit()
         user = request.user
-        if not user.is_super_admin() and user.role not in ['owner', 'director', 'secretary', 'accountant', 'teacher']:
-            raise PermissionDenied('Forbidden')
-
         tenant = Tenant.objects.filter(id=user.tenant_id).first()
         if not tenant:
             raise ValidationError('Tenant not found')
@@ -2495,6 +2594,7 @@ def payments_overdue(request):
 class GradeViewSet(TenantScopedViewSet):
     queryset = Grade.objects.all()
     serializer_class = GradeSerializer
+    module_key = 'grades'
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -2512,10 +2612,7 @@ class GradeViewSet(TenantScopedViewSet):
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
     def create(self, request, *args, **kwargs):
-        user = request.user
-        if not user.is_super_admin() and user.role not in ['owner', 'director', 'secretary', 'accountant', 'teacher']:
-            raise PermissionDenied('Forbidden')
-
+        self.check_module_edit()
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
@@ -2525,6 +2622,7 @@ class GradeViewSet(TenantScopedViewSet):
 class ConversationViewSet(TenantScopedViewSet):
     queryset = Conversation.objects.all()
     serializer_class = ConversationSerializer
+    module_key = 'messages'
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset()).select_related('guardian')
@@ -2538,10 +2636,8 @@ class ConversationViewSet(TenantScopedViewSet):
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
     def create(self, request, *args, **kwargs):
+        self.check_module_edit()
         user = request.user
-        if not user.is_super_admin() and user.role not in ['owner', 'director', 'secretary', 'teacher']:
-            raise PermissionDenied('Forbidden')
-
         guardian = Guardian.objects.filter(id=request.data.get('guardian_id'), tenant_id=user.tenant_id).first()
         if not guardian:
             raise NotFound('Parent not found')
@@ -2554,6 +2650,7 @@ class ConversationViewSet(TenantScopedViewSet):
         convo = self.get_object()
 
         if request.method == 'POST':
+            self.check_module_edit()
             body = (request.data.get('body') or '').strip()
             if not body:
                 return Response({'error': 'Message body is required'}, status=status.HTTP_400_BAD_REQUEST)

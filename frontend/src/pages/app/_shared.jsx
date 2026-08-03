@@ -6,7 +6,7 @@ import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval,
   isSameMonth, isToday, format, addMonths, subMonths,
 } from "date-fns";
-import { ChevronLeft, ChevronRight, Repeat, Send } from "lucide-react";
+import { ChevronLeft, ChevronRight, Copy, Repeat, Send } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -56,6 +56,65 @@ export function EmptyState({ icon: Icon, title, description, action }) {
       {description && <p className="text-sm text-muted-foreground max-w-md mx-auto">{description}</p>}
       {action && <div className="mt-6">{action}</div>}
     </div>
+  );
+}
+
+/** Generic "invite to portal/app" button + share-link dialog. Posts to
+ * `${endpoint}/${person.id}/invite`, which creates (or reuses) a linked
+ * User account and returns a one-time password-set link. Used for both
+ * parents (parent portal) and teachers (mobile scanner app). */
+export function InviteButton({ person, endpoint, invalidateKey, canInvite = true }) {
+  const { t } = useI18n();
+  const qc = useQueryClient();
+  const [inviteUrl, setInviteUrl] = useState(null);
+
+  const inviteMut = useMutation({
+    mutationFn: () => api.post(`${endpoint}/${person.id}/invite`).then((r) => r.data),
+    onSuccess: (data) => {
+      setInviteUrl(data.invite_url);
+      qc.invalidateQueries({ queryKey: [invalidateKey] });
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
+  if (!canInvite) {
+    return (
+      <Button size="sm" variant="outline" disabled title={t("invite.available_plans")}>
+        <Send className="w-3.5 h-3.5 me-1.5" /> {t("invite.invite")}
+      </Button>
+    );
+  }
+
+  return (
+    <>
+      <Button
+        size="sm" variant="outline"
+        disabled={!person.email || inviteMut.isPending}
+        onClick={() => inviteMut.mutate()}
+        title={!person.email ? t("invite.add_email_first") : undefined}
+      >
+        <Send className="w-3.5 h-3.5 me-1.5" /> {person.user_id ? t("invite.reinvite") : t("invite.invite")}
+      </Button>
+      <Dialog open={!!inviteUrl} onOpenChange={(open) => !open && setInviteUrl(null)}>
+        <DialogContent className="bg-card">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl">{t("invite.link_ready")}</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {t("invite.share_hint", { name: person.name || `${person.first_name || ""} ${person.last_name || ""}`.trim() })}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center gap-2">
+            <Input readOnly value={inviteUrl || ""} className="font-mono text-xs" />
+            <Button
+              type="button" size="icon" variant="outline"
+              onClick={() => { navigator.clipboard.writeText(inviteUrl); toast.success(t("toast.copied")); }}
+            >
+              <Copy className="w-4 h-4" />
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -275,7 +334,7 @@ export function RecurringDialog({ groups }) {
 /** Dumb chat-thread UI: message bubbles + composer. Owns no data-fetching —
  * the page wrapper passes in `messages` and an `onSend(body)` callback, so
  * the same component drives both the staff inbox and the parent portal. */
-export function ChatThread({ messages, onSend, currentRole, sending }) {
+export function ChatThread({ messages, onSend, currentRole, sending, readOnly = false }) {
   const { t } = useI18n();
   const [text, setText] = useState("");
   const bottomRef = useRef(null);
@@ -314,28 +373,30 @@ export function ChatThread({ messages, onSend, currentRole, sending }) {
         })}
         <div ref={bottomRef} />
       </div>
-      <form onSubmit={submit} className="flex items-end gap-2 p-3 border-t border-border">
-        <Textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit(e);
-            }
-          }}
-          placeholder={t("chat.placeholder")}
-          rows={1}
-          className="resize-none min-h-[40px] max-h-32"
-        />
-        <Button
-          type="submit" size="icon"
-          disabled={!text.trim() || sending}
-          className="bg-accent hover:bg-accent/90 text-accent-foreground flex-shrink-0"
-        >
-          <Send className="w-4 h-4" />
-        </Button>
-      </form>
+      {!readOnly && (
+        <form onSubmit={submit} className="flex items-end gap-2 p-3 border-t border-border">
+          <Textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                submit(e);
+              }
+            }}
+            placeholder={t("chat.placeholder")}
+            rows={1}
+            className="resize-none min-h-[40px] max-h-32"
+          />
+          <Button
+            type="submit" size="icon"
+            disabled={!text.trim() || sending}
+            className="bg-accent hover:bg-accent/90 text-accent-foreground flex-shrink-0"
+          >
+            <Send className="w-4 h-4" />
+          </Button>
+        </form>
+      )}
     </div>
   );
 }

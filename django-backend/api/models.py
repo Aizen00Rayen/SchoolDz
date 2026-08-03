@@ -5,6 +5,15 @@ from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
 def generate_uuid():
     return str(uuid.uuid4())
 
+# The tabs an owner/director can grant secretary/accountant/teacher users
+# access to, and the levels each can be set to. Kept here (not just in the
+# frontend) so serializers/views validate against the same source of truth.
+PERMISSION_MODULES = [
+    'students', 'teachers', 'parents', 'courses', 'groups',
+    'sessions', 'payments', 'grades', 'attendance', 'messages',
+]
+PERMISSION_LEVELS = ['hidden', 'view', 'edit']
+
 class Tenant(models.Model):
     id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
     name = models.CharField(max_length=255)
@@ -86,6 +95,12 @@ class User(AbstractBaseUser):
         ('student', 'student'),
     ]
     role = models.CharField(max_length=50, choices=ROLE_CHOICES)
+    # Per-module tab access for secretary/accountant/teacher, set by the
+    # owner/director when creating or editing a staff user — e.g.
+    # {"students": "edit", "payments": "view"}. Missing key = hidden.
+    # Ignored for owner/director/super_admin, who always have full access
+    # (see get_permission below and PERMISSION_MODULES for the valid keys).
+    permissions = models.JSONField(null=True, blank=True, default=dict)
     phone = models.CharField(max_length=255, null=True, blank=True)
     avatar_url = models.CharField(max_length=255, null=True, blank=True)
     is_active = models.BooleanField(default=True)
@@ -108,6 +123,14 @@ class User(AbstractBaseUser):
 
     def is_super_admin(self):
         return self.role == 'super_admin'
+
+    def get_permission(self, module_key):
+        """Effective access level for a tab/module: 'edit', 'view', or 'hidden'.
+        Owner/director/super_admin always get 'edit' — only secretary/
+        accountant/teacher are limited by the stored `permissions` map."""
+        if self.is_super_admin() or self.role in ('owner', 'director'):
+            return 'edit'
+        return (self.permissions or {}).get(module_key, 'hidden')
 
     @property
     def is_staff(self):

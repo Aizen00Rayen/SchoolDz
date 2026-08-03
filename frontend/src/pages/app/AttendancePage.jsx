@@ -5,6 +5,7 @@ import { ClipboardCheck, Save, Search } from "lucide-react";
 
 import { api, extractError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { usePermission } from "@/lib/permissions";
 import { APPUI } from "@/constants/testIds";
 import { PageHeader, EmptyState } from "./_shared";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,7 @@ const STATUS_KEYS = [
 
 export default function AttendancePage() {
   const { t } = useI18n();
+  const { canEdit } = usePermission("attendance");
   const qc = useQueryClient();
   const [sessionId, setSessionId] = useState("");
   const [marks, setMarks] = useState({}); // student_id -> status
@@ -101,6 +103,7 @@ export default function AttendancePage() {
         title={t("menu.attendance")}
         subtitle={t("subtitle.attendance")}
         actions={
+          canEdit ? (
           <Button
             onClick={() => saveMut.mutate()}
             disabled={!sessionId || saveMut.isPending || Object.keys(marks).length === 0}
@@ -110,6 +113,7 @@ export default function AttendancePage() {
             <Save className="w-4 h-4 me-2" />
             {t("attendance.save")}
           </Button>
+          ) : null
         }
       />
 
@@ -183,8 +187,9 @@ export default function AttendancePage() {
                           <button
                             key={st.key}
                             data-testid={APPUI.attendanceMark(s.id, st.key)}
-                            onClick={() => setMarks((m) => ({ ...m, [s.id]: st.key }))}
-                            className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                            onClick={() => canEdit && setMarks((m) => ({ ...m, [s.id]: st.key }))}
+                            disabled={!canEdit}
+                            className={`px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
                               active ? st.cls : "hover:bg-muted text-foreground"
                             }`}
                             type="button"

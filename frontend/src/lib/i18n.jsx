@@ -470,6 +470,15 @@ const TRANSLATIONS = {
     "plan.basic": "Basique",
     "plan.standard": "Standard",
     "plan.premium": "Premium",
+
+    "permissions.title": "Accès aux onglets",
+    "permissions.desc": "Choisissez ce que cette personne peut voir et modifier.",
+    "permissions.full_access": "Accès complet à tout, non modifiable.",
+    "permissions.hidden": "Masqué",
+    "permissions.view": "Voir",
+    "permissions.edit": "Modifier",
+    "users.edit_member": "Modifier le membre",
+    "users.edit_permissions": "Modifier les accès",
   },
 
   en: {
@@ -923,6 +932,15 @@ const TRANSLATIONS = {
     "plan.basic": "Basic",
     "plan.standard": "Standard",
     "plan.premium": "Premium",
+
+    "permissions.title": "Tab access",
+    "permissions.desc": "Choose what this person can see and change.",
+    "permissions.full_access": "Full access to everything, not customizable.",
+    "permissions.hidden": "Hidden",
+    "permissions.view": "View",
+    "permissions.edit": "Edit",
+    "users.edit_member": "Edit team member",
+    "users.edit_permissions": "Edit access",
   },
 
   ar: {
@@ -1376,6 +1394,15 @@ const TRANSLATIONS = {
     "plan.basic": "أساسي",
     "plan.standard": "قياسي",
     "plan.premium": "مميز",
+
+    "permissions.title": "الوصول إلى الأقسام",
+    "permissions.desc": "اختر ما يمكن لهذا الشخص رؤيته وتعديله.",
+    "permissions.full_access": "وصول كامل لكل شيء، غير قابل للتخصيص.",
+    "permissions.hidden": "مخفي",
+    "permissions.view": "عرض",
+    "permissions.edit": "تعديل",
+    "users.edit_member": "تعديل عضو الفريق",
+    "users.edit_permissions": "تعديل الصلاحيات",
   },
 };
 

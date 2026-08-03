@@ -4,10 +4,13 @@ import {
   KeyboardAvoidingView, Platform,
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
+import { Feather } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { getMessages, sendMessage } from "./api";
-import { ACCENT, INK, BG, BORDER, MUTED } from "./theme";
+import { ACCENT, INK, BG, BORDER, MUTED, CARD, RADIUS, SPACING } from "./theme";
 
 export default function MessagesScreen({ navigation, token }) {
+  const insets = useSafeAreaInsets();
   const [messages, setMessages] = useState(null);
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
@@ -48,16 +51,18 @@ export default function MessagesScreen({ navigation, token }) {
 
   return (
     <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === "ios" ? "padding" : "height"} keyboardVerticalOffset={0}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Text style={styles.backButtonText}>‹ Back</Text>
+      <View style={[styles.header, { paddingTop: insets.top + SPACING.md }]}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton} hitSlop={8}>
+          <Feather name="arrow-left" size={20} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Messages</Text>
-        <Text style={styles.headerSub}>Conversation with your school's staff</Text>
+        <View>
+          <Text style={styles.headerTitle}>Messages</Text>
+          <Text style={styles.headerSub}>Conversation with your school's staff</Text>
+        </View>
       </View>
 
       {messages === null && !error ? (
-        <ActivityIndicator style={{ marginTop: 40 }} />
+        <ActivityIndicator style={{ marginTop: 40 }} color={ACCENT} />
       ) : error ? (
         <Text style={styles.error}>{error}</Text>
       ) : (
@@ -65,9 +70,14 @@ export default function MessagesScreen({ navigation, token }) {
           ref={listRef}
           data={messages}
           keyExtractor={(m) => m.id}
-          contentContainerStyle={{ padding: 16 }}
+          contentContainerStyle={{ padding: SPACING.lg }}
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
-          ListEmptyComponent={<Text style={styles.empty}>No messages yet — say hello!</Text>}
+          ListEmptyComponent={
+            <View style={styles.emptyWrap}>
+              <Feather name="message-circle" size={22} color={MUTED} />
+              <Text style={styles.empty}>No messages yet — say hello!</Text>
+            </View>
+          }
           renderItem={({ item }) => (
             <View style={[styles.bubbleWrap, item.sender_role === "parent" && styles.bubbleWrapMine]}>
               <View style={[styles.bubble, item.sender_role === "parent" ? styles.bubbleMine : styles.bubbleTheirs]}>
@@ -81,16 +91,17 @@ export default function MessagesScreen({ navigation, token }) {
         />
       )}
 
-      <View style={styles.composer}>
+      <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, SPACING.md) }]}>
         <TextInput
           style={styles.input}
           value={body}
           onChangeText={setBody}
           placeholder="Write a message…"
+          placeholderTextColor="#A1A1AA"
           multiline
         />
-        <TouchableOpacity style={styles.sendButton} onPress={onSend} disabled={sending || !body.trim()}>
-          <Text style={styles.sendButtonText}>Send</Text>
+        <TouchableOpacity style={styles.sendButton} onPress={onSend} disabled={sending || !body.trim()} activeOpacity={0.85}>
+          {sending ? <ActivityIndicator size="small" color="#fff" /> : <Feather name="send" size={17} color="#fff" />}
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -99,29 +110,37 @@ export default function MessagesScreen({ navigation, token }) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: BG },
-  header: { paddingTop: 56, paddingBottom: 14, paddingHorizontal: 20, backgroundColor: "#fff", borderBottomWidth: 1, borderBottomColor: BORDER },
-  backButton: { marginBottom: 8 },
-  backButtonText: { fontSize: 14, color: ACCENT, fontWeight: "600" },
-  headerTitle: { fontSize: 20, fontWeight: "800", color: INK },
-  headerSub: { fontSize: 12, color: MUTED, marginTop: 2 },
+  header: {
+    paddingBottom: SPACING.lg, paddingHorizontal: SPACING.xl, backgroundColor: INK,
+    flexDirection: "row", alignItems: "center", gap: SPACING.md,
+  },
+  backButton: {
+    width: 34, height: 34, borderRadius: RADIUS.pill, backgroundColor: "rgba(255,255,255,0.1)",
+    alignItems: "center", justifyContent: "center",
+  },
+  headerTitle: { fontSize: 18, fontWeight: "800", color: "#fff" },
+  headerSub: { fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: 2 },
   error: { color: ACCENT, textAlign: "center", marginTop: 40, paddingHorizontal: 24 },
-  empty: { color: MUTED, textAlign: "center", marginTop: 40 },
-  bubbleWrap: { marginBottom: 12, alignItems: "flex-start" },
+  emptyWrap: { alignItems: "center", marginTop: 40, gap: SPACING.sm },
+  empty: { color: MUTED, textAlign: "center" },
+  bubbleWrap: { marginBottom: SPACING.md, alignItems: "flex-start" },
   bubbleWrapMine: { alignItems: "flex-end" },
-  bubble: { maxWidth: "80%", borderRadius: 16, paddingHorizontal: 14, paddingVertical: 10 },
-  bubbleTheirs: { backgroundColor: "#fff", borderWidth: 1, borderColor: BORDER, borderBottomLeftRadius: 4 },
+  bubble: { maxWidth: "80%", borderRadius: RADIUS.lg, paddingHorizontal: 14, paddingVertical: 10 },
+  bubbleTheirs: { backgroundColor: CARD, borderWidth: 1, borderColor: BORDER, borderBottomLeftRadius: 4 },
   bubbleMine: { backgroundColor: INK, borderBottomRightRadius: 4 },
   bubbleText: { fontSize: 14, color: INK },
   bubbleTextMine: { color: "#fff" },
   bubbleMeta: { fontSize: 10, color: MUTED, marginTop: 4 },
   composer: {
-    flexDirection: "row", alignItems: "flex-end", gap: 10, padding: 12,
-    backgroundColor: "#fff", borderTopWidth: 1, borderTopColor: BORDER,
+    flexDirection: "row", alignItems: "flex-end", gap: 10, padding: SPACING.md,
+    backgroundColor: CARD, borderTopWidth: 1, borderTopColor: BORDER,
   },
   input: {
-    flex: 1, borderWidth: 1, borderColor: BORDER, borderRadius: 20, paddingHorizontal: 16,
-    paddingVertical: 10, maxHeight: 100, fontSize: 14, backgroundColor: BG,
+    flex: 1, borderWidth: 1, borderColor: BORDER, borderRadius: RADIUS.pill, paddingHorizontal: 16,
+    paddingVertical: 10, maxHeight: 100, fontSize: 14, backgroundColor: BG, color: INK,
   },
-  sendButton: { backgroundColor: ACCENT, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 11 },
-  sendButtonText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  sendButton: {
+    width: 40, height: 40, borderRadius: RADIUS.pill, backgroundColor: ACCENT,
+    alignItems: "center", justifyContent: "center",
+  },
 });

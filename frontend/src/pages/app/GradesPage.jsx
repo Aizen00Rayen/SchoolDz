@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { usePermission } from "@/lib/permissions";
 
 const DEFAULT_FORM = {
   student_id: "", course_id: "", title: "", score: 0, max_score: 100,
@@ -16,6 +17,7 @@ const DEFAULT_FORM = {
 
 export default function GradesPage() {
   const { t } = useI18n();
+  const { canEdit } = usePermission("grades");
   const { data: students } = useQuery({
     queryKey: ["students-list"],
     queryFn: async () => (await api.get("/students")).data,
@@ -35,6 +37,8 @@ export default function GradesPage() {
       subtitle={t("subtitle.grades")}
       emptyIcon={Award}
       defaultForm={DEFAULT_FORM}
+      canEdit={canEdit}
+      canCreate={canEdit}
       columns={[
         {
           key: "student", label: t("field.student"),

@@ -9,6 +9,7 @@ import {
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
+import { usePermission } from "@/lib/permissions";
 
 const nowLocalIso = () => {
   const d = new Date();
@@ -62,6 +63,7 @@ function SessionRangePicker({ form, setForm }) {
 export default function SessionsPage() {
   const { t } = useI18n();
   const { tenant } = useAuth();
+  const { canEdit } = usePermission("sessions");
   const { data: groups } = useQuery({
     queryKey: ["groups-list"],
     queryFn: async () => (await api.get("/groups")).data,
@@ -81,7 +83,9 @@ export default function SessionsPage() {
       subtitle={t("subtitle.sessions")}
       emptyIcon={CalendarClock}
       defaultForm={DEFAULT_FORM}
-      extraActions={tenant?.plan === "premium" ? <RecurringDialog groups={groups} /> : null}
+      canEdit={canEdit}
+      canCreate={canEdit}
+      extraActions={canEdit && tenant?.plan === "premium" ? <RecurringDialog groups={groups} /> : null}
       columns={[
         {
           key: "series", label: "",
