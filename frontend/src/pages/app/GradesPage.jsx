@@ -32,33 +32,33 @@ export default function GradesPage() {
       moduleKey="grades"
       endpoint="/grades"
       title={t("menu.grades")}
-      subtitle="Exam and quiz scores per student."
+      subtitle={t("subtitle.grades")}
       emptyIcon={Award}
       defaultForm={DEFAULT_FORM}
       columns={[
         {
-          key: "student", label: "Student",
+          key: "student", label: t("field.student"),
           render: (r) => {
             const s = stuMap[r.student_id];
             return s ? `${s.first_name} ${s.last_name}` : "—";
           },
         },
-        { key: "title", label: "Title", render: (r) => <span className="font-medium">{r.title}</span> },
+        { key: "title", label: t("field.title"), render: (r) => <span className="font-medium">{r.title}</span> },
         {
-          key: "course", label: "Course",
+          key: "course", label: t("field.course"),
           render: (r) => courseMap[r.course_id]?.title || <span className="text-muted-foreground">—</span>,
         },
         {
-          key: "score", label: "Score",
+          key: "score", label: t("field.score"),
           render: (r) => <span className="font-mono">{r.score} / {r.max_score}</span>,
         },
-        { key: "date", label: "Date", render: (r) => <span className="font-mono text-xs">{(r.date || "").slice(0, 10)}</span> },
+        { key: "date", label: t("field.date"), render: (r) => <span className="font-mono text-xs">{(r.date || "").slice(0, 10)}</span> },
       ]}
       renderForm={(form, setForm) => (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Field label="Student" required>
+          <Field label={t("field.student")} required>
             <Select value={form.student_id || ""} onValueChange={(v) => setForm({ ...form, student_id: v })}>
-              <SelectTrigger className="bg-background"><SelectValue placeholder="Select student" /></SelectTrigger>
+              <SelectTrigger className="bg-background"><SelectValue placeholder={t("placeholder.select_student")} /></SelectTrigger>
               <SelectContent className="bg-popover max-h-72">
                 {(students?.items || []).map((s) => (
                   <SelectItem key={s.id} value={s.id}>{s.first_name} {s.last_name}</SelectItem>
@@ -66,7 +66,7 @@ export default function GradesPage() {
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Course">
+          <Field label={t("field.course")}>
             <Select value={form.course_id || ""} onValueChange={(v) => setForm({ ...form, course_id: v })}>
               <SelectTrigger className="bg-background"><SelectValue placeholder="—" /></SelectTrigger>
               <SelectContent className="bg-popover">
@@ -77,17 +77,17 @@ export default function GradesPage() {
             </Select>
           </Field>
           <div className="md:col-span-2">
-            <Field label="Title" required>
+            <Field label={t("field.title")} required>
               <Input value={form.title || ""} onChange={(e) => setForm({ ...form, title: e.target.value })} required placeholder="Midterm exam" />
             </Field>
           </div>
-          <Field label="Score" required>
+          <Field label={t("field.score")} required>
             <Input type="number" value={form.score ?? 0} onChange={(e) => setForm({ ...form, score: parseFloat(e.target.value) || 0 })} required />
           </Field>
-          <Field label="Max score">
+          <Field label={t("field.max_score")}>
             <Input type="number" value={form.max_score ?? 100} onChange={(e) => setForm({ ...form, max_score: parseFloat(e.target.value) || 0 })} />
           </Field>
-          <Field label="Date" required>
+          <Field label={t("field.date")} required>
             <Input type="date" value={(form.date || "").slice(0, 10)} onChange={(e) => setForm({ ...form, date: e.target.value })} required />
           </Field>
         </div>

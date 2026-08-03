@@ -46,10 +46,10 @@ export default function PaymentsPage() {
           </div>
           <div>
             <div className="text-sm font-medium">
-              {overdue.total} overdue payment{overdue.total > 1 ? "s" : ""}
+              {t("payments.overdue_count", { count: overdue.total })}
             </div>
             <div className="text-xs text-muted-foreground">
-              {Math.round(overdue.total_owed).toLocaleString()} {tenant?.currency || "DZD"} outstanding past due date
+              {t("payments.overdue_amount", { amount: Math.round(overdue.total_owed).toLocaleString(), currency: tenant?.currency || "DZD" })}
             </div>
           </div>
         </div>
@@ -58,22 +58,22 @@ export default function PaymentsPage() {
       moduleKey="payments"
       endpoint="/payments"
       title={t("menu.payments")}
-      subtitle="Invoices, receipts, and outstanding balances."
+      subtitle={t("subtitle.payments")}
       emptyIcon={Wallet}
       defaultForm={DEFAULT_FORM}
       columns={[
         {
-          key: "invoice_number", label: "Invoice",
+          key: "invoice_number", label: t("field.invoice"),
           render: (r) => (
             <div className="flex items-center gap-2">
               <div>
                 <div className="font-mono text-xs">{r.invoice_number}</div>
-                <div className="text-[11px] text-muted-foreground capitalize">{r.kind}</div>
+                <div className="text-[11px] text-muted-foreground capitalize">{t(`kind.${r.kind}`)}</div>
               </div>
               <Button
                 type="button" variant="ghost" size="icon" className="h-7 w-7 flex-shrink-0"
                 onClick={() => downloadInvoice(r.id)}
-                title="Download invoice PDF"
+                title={t("payments.download_invoice")}
                 data-testid={`payments-invoice-download-${r.id}`}
               >
                 <FileDown className="w-3.5 h-3.5" />
@@ -82,32 +82,32 @@ export default function PaymentsPage() {
           ),
         },
         {
-          key: "student", label: "Student",
+          key: "student", label: t("field.student"),
           render: (r) => {
             const s = stuMap[r.student_id];
             return s ? `${s.first_name} ${s.last_name}` : "—";
           },
         },
         {
-          key: "course", label: "Course",
+          key: "course", label: t("field.course"),
           render: (r) => courseMap[r.course_id]?.title || <span className="text-muted-foreground">—</span>,
         },
         {
-          key: "amount", label: "Amount",
+          key: "amount", label: t("field.amount"),
           render: (r) => (
             <span className="font-mono font-semibold">
               {Math.round(r.amount).toLocaleString()} {tenant?.currency || "DZD"}
             </span>
           ),
         },
-        { key: "method", label: "Method", render: (r) => <span className="capitalize text-xs">{r.method}</span> },
-        { key: "status", label: "Status", render: (r) => <StatusPill status={r.status} /> },
+        { key: "method", label: t("field.method"), render: (r) => <span className="capitalize text-xs">{t(`method.${r.method}`)}</span> },
+        { key: "status", label: t("field.status"), render: (r) => <StatusPill status={r.status} /> },
       ]}
       renderForm={(form, setForm) => (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Field label="Student" required>
+          <Field label={t("field.student")} required>
             <Select value={form.student_id || ""} onValueChange={(v) => setForm({ ...form, student_id: v })}>
-              <SelectTrigger className="bg-background"><SelectValue placeholder="Select student" /></SelectTrigger>
+              <SelectTrigger className="bg-background"><SelectValue placeholder={t("placeholder.select_student")} /></SelectTrigger>
               <SelectContent className="bg-popover max-h-72">
                 {(students?.items || []).map((s) => (
                   <SelectItem key={s.id} value={s.id}>{s.first_name} {s.last_name}</SelectItem>
@@ -115,7 +115,7 @@ export default function PaymentsPage() {
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Course">
+          <Field label={t("field.course")}>
             <Select value={form.course_id || ""} onValueChange={(v) => setForm({ ...form, course_id: v })}>
               <SelectTrigger className="bg-background"><SelectValue placeholder="—" /></SelectTrigger>
               <SelectContent className="bg-popover">
@@ -125,49 +125,49 @@ export default function PaymentsPage() {
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Kind">
+          <Field label={t("field.kind")}>
             <Select value={form.kind || "monthly"} onValueChange={(v) => setForm({ ...form, kind: v })}>
               <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
               <SelectContent className="bg-popover">
-                <SelectItem value="registration">Registration</SelectItem>
-                <SelectItem value="monthly">Monthly</SelectItem>
-                <SelectItem value="course">Course</SelectItem>
-                <SelectItem value="installment">Installment</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
+                <SelectItem value="registration">{t("kind.registration")}</SelectItem>
+                <SelectItem value="monthly">{t("kind.monthly")}</SelectItem>
+                <SelectItem value="course">{t("kind.course")}</SelectItem>
+                <SelectItem value="installment">{t("kind.installment")}</SelectItem>
+                <SelectItem value="other">{t("kind.other")}</SelectItem>
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Method">
+          <Field label={t("field.method")}>
             <Select value={form.method || "cash"} onValueChange={(v) => setForm({ ...form, method: v })}>
               <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
               <SelectContent className="bg-popover">
-                <SelectItem value="cash">Cash</SelectItem>
-                <SelectItem value="card">Card</SelectItem>
-                <SelectItem value="bank_transfer">Bank transfer</SelectItem>
-                <SelectItem value="cheque">Cheque</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
+                <SelectItem value="cash">{t("method.cash")}</SelectItem>
+                <SelectItem value="card">{t("method.card")}</SelectItem>
+                <SelectItem value="bank_transfer">{t("method.bank_transfer")}</SelectItem>
+                <SelectItem value="cheque">{t("method.cheque")}</SelectItem>
+                <SelectItem value="other">{t("method.other")}</SelectItem>
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Amount" required>
+          <Field label={t("field.amount")} required>
             <Input type="number" value={form.amount || 0} onChange={(e) => setForm({ ...form, amount: parseFloat(e.target.value) || 0 })} required />
           </Field>
-          <Field label="Discount">
+          <Field label={t("field.discount")}>
             <Input type="number" value={form.discount || 0} onChange={(e) => setForm({ ...form, discount: parseFloat(e.target.value) || 0 })} />
           </Field>
-          <Field label="Status">
+          <Field label={t("field.status")}>
             <Select value={form.status || "paid"} onValueChange={(v) => setForm({ ...form, status: v })}>
               <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
               <SelectContent className="bg-popover">
-                <SelectItem value="paid">Paid</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="partial">Partial</SelectItem>
-                <SelectItem value="refunded">Refunded</SelectItem>
-                <SelectItem value="cancelled">Cancelled</SelectItem>
+                <SelectItem value="paid">{t("status.paid")}</SelectItem>
+                <SelectItem value="pending">{t("status.pending")}</SelectItem>
+                <SelectItem value="partial">{t("status.partial")}</SelectItem>
+                <SelectItem value="refunded">{t("status.refunded")}</SelectItem>
+                <SelectItem value="cancelled">{t("status.cancelled")}</SelectItem>
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Reference">
+          <Field label={t("field.reference")}>
             <Input value={form.reference || ""} onChange={(e) => setForm({ ...form, reference: e.target.value })} placeholder="TXN-1234" />
           </Field>
         </div>

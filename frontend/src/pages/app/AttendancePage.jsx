@@ -14,11 +14,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const STATUSES = [
-  { key: "present", label: "Present", cls: "bg-success text-success-foreground" },
-  { key: "late", label: "Late", cls: "bg-warning text-warning-foreground" },
-  { key: "excused", label: "Excused", cls: "bg-info text-info-foreground" },
-  { key: "absent", label: "Absent", cls: "bg-destructive text-destructive-foreground" },
+const STATUS_KEYS = [
+  { key: "present", cls: "bg-success text-success-foreground" },
+  { key: "late", cls: "bg-warning text-warning-foreground" },
+  { key: "excused", cls: "bg-info text-info-foreground" },
+  { key: "absent", cls: "bg-destructive text-destructive-foreground" },
 ];
 
 export default function AttendancePage() {
@@ -78,7 +78,7 @@ export default function AttendancePage() {
       return api.post(`/attendance/session/${sessionId}`, payload).then((r) => r.data);
     },
     onSuccess: () => {
-      toast.success("Attendance saved");
+      toast.success(t("toast.attendance_saved"));
       qc.invalidateQueries({ queryKey: ["attendance", sessionId] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
     },
@@ -99,7 +99,7 @@ export default function AttendancePage() {
     <div>
       <PageHeader
         title={t("menu.attendance")}
-        subtitle="Fast one-click marking for every session."
+        subtitle={t("subtitle.attendance")}
         actions={
           <Button
             onClick={() => saveMut.mutate()}
@@ -108,23 +108,23 @@ export default function AttendancePage() {
             className="bg-accent hover:bg-accent/90 text-accent-foreground"
           >
             <Save className="w-4 h-4 me-2" />
-            Save attendance
+            {t("attendance.save")}
           </Button>
         }
       />
 
       <div className="surface-card p-5 mb-6">
-        <Label className="text-xs mb-2 block">Select session</Label>
+        <Label className="text-xs mb-2 block">{t("attendance.select_session")}</Label>
         <Select value={sessionId} onValueChange={setSessionId}>
           <SelectTrigger className="bg-background max-w-xl" data-testid="attendance-session-select">
-            <SelectValue placeholder="Pick a session" />
+            <SelectValue placeholder={t("attendance.pick_session_placeholder")} />
           </SelectTrigger>
           <SelectContent className="bg-popover max-h-96">
             {(sessions?.items || []).map((s) => {
               const g = (groups?.items || []).find((gg) => gg.id === s.group_id);
               return (
                 <SelectItem key={s.id} value={s.id}>
-                  {new Date(s.start_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })} — {g?.name || "Group"} · {s.topic || "—"}
+                  {new Date(s.start_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })} — {g?.name || t("field.group")} · {s.topic || "—"}
                 </SelectItem>
               );
             })}
@@ -135,14 +135,14 @@ export default function AttendancePage() {
       {!sessionId ? (
         <EmptyState
           icon={ClipboardCheck}
-          title="Pick a session"
-          description="Choose a session above to start marking attendance."
+          title={t("attendance.pick_session_title")}
+          description={t("attendance.pick_session_desc")}
         />
       ) : enrolled.length === 0 ? (
         <EmptyState
           icon={ClipboardCheck}
-          title="No students enrolled"
-          description="Add students to this group first."
+          title={t("attendance.no_students_title")}
+          description={t("attendance.no_students_desc")}
         />
       ) : (
         <div>
@@ -158,16 +158,16 @@ export default function AttendancePage() {
               />
             </div>
             <div className="text-xs text-muted-foreground font-mono">
-              {visibleEnrolled.length} / {enrolled.length} students
+              {visibleEnrolled.length} / {enrolled.length} {t("field.students")}
             </div>
           </div>
           <div className="surface-card overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-muted/40 border-b border-border">
               <tr>
-                <th className="text-start px-4 py-2.5 text-xs uppercase tracking-widest text-muted-foreground font-medium">Student</th>
-                <th className="text-start px-4 py-2.5 text-xs uppercase tracking-widest text-muted-foreground font-medium">Code</th>
-                <th className="text-start px-4 py-2.5 text-xs uppercase tracking-widest text-muted-foreground font-medium">Mark</th>
+                <th className="text-start px-4 py-2.5 text-xs uppercase tracking-widest text-muted-foreground font-medium">{t("field.student")}</th>
+                <th className="text-start px-4 py-2.5 text-xs uppercase tracking-widest text-muted-foreground font-medium">{t("field.code")}</th>
+                <th className="text-start px-4 py-2.5 text-xs uppercase tracking-widest text-muted-foreground font-medium">{t("field.mark")}</th>
               </tr>
             </thead>
             <tbody>
@@ -177,7 +177,7 @@ export default function AttendancePage() {
                   <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{s.student_code}</td>
                   <td className="px-4 py-2">
                     <div className="inline-flex rounded-lg border border-border overflow-hidden">
-                      {STATUSES.map((st) => {
+                      {STATUS_KEYS.map((st) => {
                         const active = marks[s.id] === st.key;
                         return (
                           <button
@@ -189,7 +189,7 @@ export default function AttendancePage() {
                             }`}
                             type="button"
                           >
-                            {st.label}
+                            {t(`status.${st.key}`)}
                           </button>
                         );
                       })}

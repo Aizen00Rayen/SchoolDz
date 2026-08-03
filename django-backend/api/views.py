@@ -2251,11 +2251,36 @@ class GroupViewSet(TenantScopedViewSet):
         user = request.user
         if not user.is_super_admin() and user.role not in ['owner', 'director', 'secretary', 'accountant', 'teacher']:
             raise PermissionDenied('Forbidden')
-            
-        serializer = self.get_serializer(data=request.data)
+
+        data = request.data.copy()
+        student_ids = data.pop('student_ids', None)
+
+        serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        group = serializer.instance
+
+        if student_ids:
+            students = Student.objects.filter(id__in=student_ids, tenant_id=group.tenant_id)
+            group.students.set(students)
+
+        return Response(self.get_serializer(group).data, status=status.HTTP_200_OK)
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        data = request.data.copy()
+        student_ids = data.pop('student_ids', None)
+
+        partial = kwargs.pop('partial', False)
+        serializer = self.get_serializer(instance, data=data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        if student_ids is not None:
+            students = Student.objects.filter(id__in=student_ids, tenant_id=instance.tenant_id)
+            instance.students.set(students)
+
+        return Response(self.get_serializer(instance).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'])
     def enroll(self, request, pk=None):

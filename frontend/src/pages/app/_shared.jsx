@@ -19,6 +19,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { api, extractError } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 
 export function Field({ label, required, children }) {
   return (
@@ -59,6 +60,7 @@ export function EmptyState({ icon: Icon, title, description, action }) {
 }
 
 export function StatusPill({ status, tone = "default" }) {
+  const { t } = useI18n();
   const map = {
     active: "bg-success/10 text-success",
     paid: "bg-success/10 text-success",
@@ -76,11 +78,13 @@ export function StatusPill({ status, tone = "default" }) {
     late: "bg-warning/10 text-warning",
     excused: "bg-info/10 text-info",
     draft: "bg-muted text-muted-foreground",
+    graduated: "bg-info/10 text-info",
+    archived: "bg-muted text-muted-foreground",
   };
   const cls = map[status] || "bg-muted text-muted-foreground";
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium capitalize ${cls}`}>
-      {status}
+      {status ? t(`status.${status}`) : status}
     </span>
   );
 }
@@ -111,13 +115,14 @@ export function FadeIn({ children, delay = 0 }) {
   );
 }
 
-const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const WEEKDAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
 /** Pure month-grid calendar — dumb/presentational, takes a flat sessions list
  * and groups it by day itself so callers never need to pre-bucket anything.
  * Used by both the staff Calendar page (full CRUD via onDayClick) and the
  * parent portal's read-only session calendar. */
 export function CalendarGrid({ month, sessions, onDayClick }) {
+  const { t } = useI18n();
   const start = startOfWeek(startOfMonth(month));
   const end = endOfWeek(endOfMonth(month));
   const days = eachDayOfInterval({ start, end });
@@ -131,9 +136,9 @@ export function CalendarGrid({ month, sessions, onDayClick }) {
   return (
     <div className="border border-border rounded-xl overflow-hidden bg-card">
       <div className="grid grid-cols-7 border-b border-border bg-muted/40">
-        {WEEKDAY_LABELS.map((d) => (
+        {WEEKDAY_KEYS.map((d) => (
           <div key={d} className="text-center text-[11px] font-medium uppercase tracking-widest text-muted-foreground py-2">
-            {d}
+            {t(`weekday.${d}`)}
           </div>
         ))}
       </div>
@@ -163,7 +168,7 @@ export function CalendarGrid({ month, sessions, onDayClick }) {
                   </div>
                 ))}
                 {daySessions.length > 3 && (
-                  <div className="text-[10px] text-muted-foreground px-1">+{daySessions.length - 3} more</div>
+                  <div className="text-[10px] text-muted-foreground px-1">{t("calendar.more", { count: daySessions.length - 3 })}</div>
                 )}
               </div>
             </button>
@@ -176,6 +181,7 @@ export function CalendarGrid({ month, sessions, onDayClick }) {
 
 /** Header row for a CalendarGrid: month label + prev/next/today nav. */
 export function CalendarMonthNav({ month, onChange }) {
+  const { t } = useI18n();
   return (
     <div className="flex items-center justify-between mb-4">
       <div className="font-display text-lg font-semibold">{format(month, "MMMM yyyy")}</div>
@@ -184,7 +190,7 @@ export function CalendarMonthNav({ month, onChange }) {
           <ChevronLeft className="w-4 h-4" />
         </Button>
         <Button variant="outline" size="sm" className="h-8" onClick={() => onChange(new Date())}>
-          Today
+          {t("calendar.today")}
         </Button>
         <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => onChange(addMonths(month, 1))}>
           <ChevronRight className="w-4 h-4" />
@@ -204,6 +210,7 @@ const nowLocalIso = () => {
  * group in one call. Shared between SessionsPage and CalendarPage so both
  * surfaces stay wired to the same /sessions/generate-recurring mutation. */
 export function RecurringDialog({ groups }) {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ group_id: "", start_at: nowLocalIso(), end_at: nowLocalIso(), weeks: 8 });
@@ -211,7 +218,7 @@ export function RecurringDialog({ groups }) {
   const mut = useMutation({
     mutationFn: () => api.post("/sessions/generate-recurring", form).then((r) => r.data),
     onSuccess: (data) => {
-      toast.success(`${data.items?.length || 0} sessions created`);
+      toast.success(t("toast.sessions_created", { count: data.items?.length || 0 }));
       qc.invalidateQueries({ queryKey: ["sessions"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
       setOpen(false);
@@ -222,20 +229,20 @@ export function RecurringDialog({ groups }) {
   return (
     <>
       <Button variant="outline" onClick={() => setOpen(true)}>
-        <Repeat className="w-4 h-4 me-2" /> Make recurring
+        <Repeat className="w-4 h-4 me-2" /> {t("recurring.make_recurring")}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="bg-card">
           <DialogHeader>
-            <DialogTitle className="font-display text-xl">Generate recurring sessions</DialogTitle>
+            <DialogTitle className="font-display text-xl">{t("recurring.title")}</DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              Creates one session per week, same time, for the group below.
+              {t("recurring.desc")}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={(e) => { e.preventDefault(); mut.mutate(); }} className="space-y-4">
-            <Field label="Group" required>
+            <Field label={t("field.group")} required>
               <Select value={form.group_id} onValueChange={(v) => setForm({ ...form, group_id: v })}>
-                <SelectTrigger className="bg-background"><SelectValue placeholder="Select group" /></SelectTrigger>
+                <SelectTrigger className="bg-background"><SelectValue placeholder={t("sessions.select_group")} /></SelectTrigger>
                 <SelectContent className="bg-popover">
                   {(groups?.items || []).map((g) => (
                     <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>
@@ -243,19 +250,19 @@ export function RecurringDialog({ groups }) {
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="First session start" required>
+            <Field label={t("field.first_session_start")} required>
               <Input type="datetime-local" value={form.start_at} onChange={(e) => setForm({ ...form, start_at: e.target.value })} required />
             </Field>
-            <Field label="First session end" required>
+            <Field label={t("field.first_session_end")} required>
               <Input type="datetime-local" value={form.end_at} onChange={(e) => setForm({ ...form, end_at: e.target.value })} required />
             </Field>
-            <Field label="Weeks (1-12)" required>
+            <Field label={t("field.weeks_1_12")} required>
               <Input type="number" min={1} max={12} value={form.weeks} onChange={(e) => setForm({ ...form, weeks: parseInt(e.target.value, 10) || 1 })} required />
             </Field>
             <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+              <Button type="button" variant="outline" onClick={() => setOpen(false)}>{t("actions.cancel")}</Button>
               <Button type="submit" disabled={!form.group_id || mut.isPending} className="bg-accent hover:bg-accent/90 text-accent-foreground">
-                Generate
+                {t("recurring.generate")}
               </Button>
             </div>
           </form>
@@ -269,6 +276,7 @@ export function RecurringDialog({ groups }) {
  * the page wrapper passes in `messages` and an `onSend(body)` callback, so
  * the same component drives both the staff inbox and the parent portal. */
 export function ChatThread({ messages, onSend, currentRole, sending }) {
+  const { t } = useI18n();
   const [text, setText] = useState("");
   const bottomRef = useRef(null);
 
@@ -288,7 +296,7 @@ export function ChatThread({ messages, onSend, currentRole, sending }) {
     <div className="flex flex-col h-full min-h-0">
       <div className="flex-1 overflow-y-auto space-y-3 p-4">
         {(messages || []).length === 0 && (
-          <p className="text-sm text-muted-foreground text-center py-8">No messages yet — say hello!</p>
+          <p className="text-sm text-muted-foreground text-center py-8">{t("chat.no_messages")}</p>
         )}
         {(messages || []).map((m) => {
           const mine = m.sender_role === currentRole;
@@ -316,7 +324,7 @@ export function ChatThread({ messages, onSend, currentRole, sending }) {
               submit(e);
             }
           }}
-          placeholder="Write a message…"
+          placeholder={t("chat.placeholder")}
           rows={1}
           className="resize-none min-h-[40px] max-h-32"
         />

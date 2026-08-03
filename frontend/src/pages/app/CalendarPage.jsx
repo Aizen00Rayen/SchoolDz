@@ -38,14 +38,14 @@ export default function CalendarPage() {
   if (!isPremium) {
     return (
       <div>
-        <PageHeader title={t("menu.calendar")} subtitle="A full month view of your sessions." />
+        <PageHeader title={t("menu.calendar")} subtitle={t("subtitle.calendar")} />
         <EmptyState
           icon={CalendarDays}
-          title="Calendar is a Premium feature"
-          description="Upgrade to Premium to see all your sessions in a month view and generate recurring schedules."
+          title={t("calendar.premium_feature_title")}
+          description={t("calendar.premium_feature_desc")}
           action={
             <Button onClick={() => nav("/app/settings")} className="bg-accent hover:bg-accent/90 text-accent-foreground">
-              Upgrade plan
+              {t("calendar.upgrade_plan")}
             </Button>
           }
         />
@@ -57,7 +57,7 @@ export default function CalendarPage() {
     <div>
       <PageHeader
         title={t("menu.calendar")}
-        subtitle="A full month view of your sessions."
+        subtitle={t("subtitle.calendar")}
         actions={<RecurringDialog groups={groups} />}
       />
       <CalendarMonthNav month={month} onChange={setMonth} />
@@ -76,7 +76,7 @@ export default function CalendarPage() {
           </DialogHeader>
           <div className="space-y-2 max-h-96 overflow-y-auto">
             {dayDetail?.sessions.length === 0 && (
-              <p className="text-sm text-muted-foreground">No sessions this day.</p>
+              <p className="text-sm text-muted-foreground">{t("calendar.no_sessions_day")}</p>
             )}
             {dayDetail?.sessions.map((s) => (
               <div key={s.id} className="surface-card p-3">
@@ -84,10 +84,10 @@ export default function CalendarPage() {
                   <span className="font-mono text-xs text-muted-foreground">
                     {format(new Date(s.start_at), "HH:mm")} → {format(new Date(s.end_at), "HH:mm")}
                   </span>
-                  <span className="text-[11px] capitalize text-muted-foreground">{s.status}</span>
+                  <span className="text-[11px] capitalize text-muted-foreground">{t(`status.${s.status}`)}</span>
                 </div>
                 {s.topic && <div className="text-sm font-medium mt-1">{s.topic}</div>}
-                {s.room && <div className="text-xs text-muted-foreground">Room {s.room}</div>}
+                {s.room && <div className="text-xs text-muted-foreground">{t("field.room")} {s.room}</div>}
               </div>
             ))}
           </div>

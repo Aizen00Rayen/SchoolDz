@@ -15,14 +15,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 
-const ROLES = [
-  { value: "owner", label: "Owner" },
-  { value: "director", label: "Director" },
-  { value: "secretary", label: "Secretary" },
-  { value: "accountant", label: "Accountant" },
-  { value: "teacher", label: "Teacher" },
-  { value: "parent", label: "Parent" },
-];
+const ROLE_VALUES = ["owner", "director", "secretary", "accountant", "teacher", "parent"];
 
 export default function UsersPage() {
   const { t } = useI18n();
@@ -40,7 +33,7 @@ export default function UsersPage() {
   const createMut = useMutation({
     mutationFn: (payload) => api.post("/users", payload).then((r) => r.data),
     onSuccess: () => {
-      toast.success("User created");
+      toast.success(t("toast.user_created"));
       qc.invalidateQueries({ queryKey: ["users-list"] });
       setOpen(false);
       setForm({ name: "", email: "", password: "", role: "secretary", phone: "" });
@@ -51,7 +44,7 @@ export default function UsersPage() {
   const deleteMut = useMutation({
     mutationFn: (id) => api.delete(`/users/${id}`).then((r) => r.data),
     onSuccess: () => {
-      toast.success("User deleted");
+      toast.success(t("toast.user_deleted"));
       qc.invalidateQueries({ queryKey: ["users-list"] });
     },
     onError: (e) => toast.error(extractError(e)),
@@ -63,7 +56,7 @@ export default function UsersPage() {
     <div>
       <PageHeader
         title={t("menu.users")}
-        subtitle="Team members, roles and permissions."
+        subtitle={t("subtitle.users")}
         actions={
           <Button
             onClick={() => setOpen(true)}
@@ -87,21 +80,21 @@ export default function UsersPage() {
           />
         </div>
         <div className="text-xs text-muted-foreground font-mono">
-          {data?.total ?? 0} users
+          {data?.total ?? 0} {t("menu.users")}
         </div>
       </div>
 
       {items.length === 0 && !isLoading ? (
-        <EmptyState icon={Users} title="No team members yet" description="Invite colleagues to help run your center." />
+        <EmptyState icon={Users} title={t("users.no_members_title")} description={t("users.no_members_desc")} />
       ) : (
         <div className="surface-card overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-muted/40 border-b border-border">
               <tr>
-                <th className="text-start px-4 py-2.5 text-xs uppercase tracking-widest text-muted-foreground font-medium">Name</th>
-                <th className="text-start px-4 py-2.5 text-xs uppercase tracking-widest text-muted-foreground font-medium">Email</th>
-                <th className="text-start px-4 py-2.5 text-xs uppercase tracking-widest text-muted-foreground font-medium">Role</th>
-                <th className="text-start px-4 py-2.5 text-xs uppercase tracking-widest text-muted-foreground font-medium">Phone</th>
+                <th className="text-start px-4 py-2.5 text-xs uppercase tracking-widest text-muted-foreground font-medium">{t("field.name")}</th>
+                <th className="text-start px-4 py-2.5 text-xs uppercase tracking-widest text-muted-foreground font-medium">{t("field.email")}</th>
+                <th className="text-start px-4 py-2.5 text-xs uppercase tracking-widest text-muted-foreground font-medium">{t("field.role")}</th>
+                <th className="text-start px-4 py-2.5 text-xs uppercase tracking-widest text-muted-foreground font-medium">{t("field.phone")}</th>
                 <th className="w-16"></th>
               </tr>
             </thead>
@@ -111,7 +104,7 @@ export default function UsersPage() {
                   <td className="px-4 py-3 font-medium">{u.name}</td>
                   <td className="px-4 py-3">{u.email}</td>
                   <td className="px-4 py-3">
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-muted capitalize">{u.role}</span>
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-muted capitalize">{t(`role.${u.role}`)}</span>
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{u.phone || "—"}</td>
                   <td className="px-4 py-2 text-end">
@@ -119,7 +112,7 @@ export default function UsersPage() {
                       size="icon"
                       variant="ghost"
                       onClick={async () => {
-                        if (await confirm({ title: "Delete this user?", destructive: true })) {
+                        if (await confirm({ title: t("confirm.delete_user"), destructive: true })) {
                           deleteMut.mutate(u.id);
                         }
                       }}
@@ -139,9 +132,9 @@ export default function UsersPage() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-lg bg-card">
           <DialogHeader>
-            <DialogTitle className="font-display text-xl">Add team member</DialogTitle>
+            <DialogTitle className="font-display text-xl">{t("users.add_member")}</DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              Grant a colleague access with a specific role.
+              {t("users.grant_access")}
             </DialogDescription>
           </DialogHeader>
           <form
@@ -151,29 +144,29 @@ export default function UsersPage() {
             }}
             className="space-y-4"
           >
-            <Field label="Full name" required>
+            <Field label={t("field.full_name")} required>
               <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required data-testid="users-form-name" />
             </Field>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field label="Email" required>
+              <Field label={t("field.email")} required>
                 <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required data-testid="users-form-email" />
               </Field>
-              <Field label="Password" required>
+              <Field label={t("field.password")} required>
                 <Input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required minLength={8} data-testid="users-form-password" />
               </Field>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field label="Role">
+              <Field label={t("field.role")}>
                 <Select value={form.role} onValueChange={(v) => setForm({ ...form, role: v })}>
                   <SelectTrigger className="bg-background" data-testid="users-form-role"><SelectValue /></SelectTrigger>
                   <SelectContent className="bg-popover">
-                    {ROLES.map((r) => (
-                      <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+                    {ROLE_VALUES.map((v) => (
+                      <SelectItem key={v} value={v}>{t(`role.${v}`)}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </Field>
-              <Field label="Phone">
+              <Field label={t("field.phone")}>
                 <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
               </Field>
             </div>

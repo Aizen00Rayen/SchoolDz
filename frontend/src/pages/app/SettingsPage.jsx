@@ -68,7 +68,7 @@ export default function SettingsPage() {
       if (data.checkout_url) {
         window.location.href = data.checkout_url;
       } else if (data.applied_immediately) {
-        toast.success("Plan upgraded");
+        toast.success(t("toast.plan_upgraded"));
         await refreshTenant();
         setUpgradeOpen(false);
       }
@@ -84,7 +84,7 @@ export default function SettingsPage() {
   const saveMut = useMutation({
     mutationFn: async () => api.patch(`/tenants/${tenant.id}`, form).then((r) => r.data),
     onSuccess: async () => {
-      toast.success("Settings saved");
+      toast.success(t("toast.settings_saved"));
       await refreshTenant();
     },
     onError: (e) => toast.error(extractError(e)),
@@ -97,7 +97,7 @@ export default function SettingsPage() {
       return api.post(`/tenants/${tenant.id}/logo`, body).then((r) => r.data);
     },
     onSuccess: async (updated) => {
-      toast.success("Logo updated");
+      toast.success(t("toast.logo_updated"));
       setForm((f) => ({ ...f, logo_url: updated.logo_url }));
       await refreshTenant();
     },
@@ -109,11 +109,11 @@ export default function SettingsPage() {
     e.target.value = "";
     if (!file) return;
     if (!ALLOWED_LOGO_TYPES.includes(file.type)) {
-      toast.error("Only PNG, JPEG, WEBP or GIF images are allowed");
+      toast.error(t("settings.logo_type_error"));
       return;
     }
     if (file.size > MAX_LOGO_BYTES) {
-      toast.error("Logo must be under 3MB");
+      toast.error(t("settings.logo_size_error"));
       return;
     }
     uploadLogoMut.mutate(file);
@@ -124,18 +124,18 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-4xl">
-      <PageHeader title={t("menu.settings")} subtitle="Configure your workspace, branding and preferences." />
+      <PageHeader title={t("menu.settings")} subtitle={t("settings.subtitle")} />
 
       <div className="surface-card p-6 mb-4">
-        <h3 className="font-display font-semibold text-lg mb-4">Workspace</h3>
+        <h3 className="font-display font-semibold text-lg mb-4">{t("common.workspace")}</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Field label="Name">
+          <Field label={t("field.name")}>
             <Input value={form.name || ""} onChange={(e) => setForm({ ...form, name: e.target.value })} disabled={!canEdit} data-testid="settings-name-input" />
           </Field>
-          <Field label="Slug">
+          <Field label={t("field.slug")}>
             <Input value={form.slug || ""} disabled className="font-mono" />
           </Field>
-          <Field label="Language">
+          <Field label={t("field.language")}>
             <Select value={form.language || "fr"} onValueChange={(v) => setForm({ ...form, language: v })} disabled={!canEdit}>
               <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
               <SelectContent className="bg-popover">
@@ -145,34 +145,34 @@ export default function SettingsPage() {
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Currency">
+          <Field label={t("field.currency")}>
             <Input value={form.currency || "DZD"} onChange={(e) => setForm({ ...form, currency: e.target.value })} disabled={!canEdit} />
           </Field>
-          <Field label="Timezone">
+          <Field label={t("field.timezone")}>
             <Input value={form.timezone || "Africa/Algiers"} onChange={(e) => setForm({ ...form, timezone: e.target.value })} disabled={!canEdit} />
           </Field>
-          <Field label="Center type">
+          <Field label={t("field.center_type")}>
             <Input value={form.center_type || "tutoring"} onChange={(e) => setForm({ ...form, center_type: e.target.value })} disabled={!canEdit} />
           </Field>
-          <Field label="Invoice prefix">
+          <Field label={t("field.invoice_prefix")}>
             <Input value={form.invoice_prefix || "INV-"} onChange={(e) => setForm({ ...form, invoice_prefix: e.target.value })} disabled={!canEdit} />
           </Field>
-          <Field label="Student prefix">
+          <Field label={t("field.student_prefix")}>
             <Input value={form.student_prefix || "STU-"} onChange={(e) => setForm({ ...form, student_prefix: e.target.value })} disabled={!canEdit} />
           </Field>
         </div>
       </div>
 
       <div className="surface-card p-6 mb-4">
-        <h3 className="font-display font-semibold text-lg mb-4">Branding</h3>
+        <h3 className="font-display font-semibold text-lg mb-4">{t("settings.branding")}</h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Field label="Primary color">
+          <Field label={t("field.primary_color")}>
             <Input type="color" value={form.primary_color || "#0A0A0B"} onChange={(e) => setForm({ ...form, primary_color: e.target.value })} disabled={!canEdit} className="h-11" />
           </Field>
-          <Field label="Accent color">
+          <Field label={t("field.accent_color")}>
             <Input type="color" value={form.accent_color || "#E53935"} onChange={(e) => setForm({ ...form, accent_color: e.target.value })} disabled={!canEdit} className="h-11" />
           </Field>
-          <Field label="Logo">
+          <Field label={t("field.logo")}>
             <div className="flex items-center gap-3">
               <div className="w-11 h-11 rounded-lg border border-border bg-muted grid place-items-center overflow-hidden flex-shrink-0">
                 {form.logo_url ? (
@@ -202,7 +202,7 @@ export default function SettingsPage() {
                 ) : (
                   <ImagePlus className="w-3.5 h-3.5 me-2" />
                 )}
-                {form.logo_url ? "Replace logo" : "Upload logo"}
+                {form.logo_url ? t("settings.replace_logo") : t("settings.upload_logo")}
               </Button>
             </div>
           </Field>
@@ -210,15 +210,15 @@ export default function SettingsPage() {
       </div>
 
       <div className="surface-card p-6 mb-4">
-        <h3 className="font-display font-semibold text-lg mb-1">Public enrollment page</h3>
+        <h3 className="font-display font-semibold text-lg mb-1">{t("settings.public_enrollment")}</h3>
         <p className="text-sm text-muted-foreground mb-4">
-          Share this link so parents can browse your courses and enroll their kids themselves — pick which courses show up from the Courses page.
+          {t("settings.public_enrollment_desc")}
         </p>
         <div className="flex items-center gap-2 mb-4">
           <Input readOnly value={enrollUrl} className="font-mono text-xs bg-muted/40" />
           <Button
             type="button" variant="outline" size="icon"
-            onClick={() => { navigator.clipboard.writeText(enrollUrl); toast.success("Link copied"); }}
+            onClick={() => { navigator.clipboard.writeText(enrollUrl); toast.success(t("settings.link_copied")); }}
           >
             <Copy className="w-3.5 h-3.5" />
           </Button>
@@ -226,44 +226,46 @@ export default function SettingsPage() {
             <a href={enrollUrl} target="_blank" rel="noreferrer"><ExternalLink className="w-3.5 h-3.5" /></a>
           </Button>
         </div>
-        <Field label="Description shown on the page">
+        <Field label={t("field.description_enrollment")}>
           <Textarea
             value={form.enrollment_description || ""}
             onChange={(e) => setForm({ ...form, enrollment_description: e.target.value })}
             disabled={!canEdit}
             rows={3}
-            placeholder="A short welcome message for prospective parents."
+            placeholder={t("settings.enrollment_welcome_placeholder")}
           />
         </Field>
       </div>
 
       <div className="surface-card p-6">
-        <h3 className="font-display font-semibold text-lg mb-2">Subscription</h3>
+        <h3 className="font-display font-semibold text-lg mb-2">{t("settings.subscription")}</h3>
         <p className="text-sm text-muted-foreground mb-1">
-          Plan: <span className="capitalize font-medium">{tenant.plan || "—"}</span> · Status:{" "}
-          <span className="capitalize font-medium">{tenant.status}</span>
+          {t("settings.plan_label")}: <span className="capitalize font-medium">{tenant.plan ? t(`plan.${tenant.plan}`) : "—"}</span> · {t("settings.status_label")}:{" "}
+          <span className="capitalize font-medium">{t(`status.${tenant.status}`)}</span>
         </p>
         {tenant.plan_expires_at && (
           <p className="text-sm text-muted-foreground mb-4">
-            {tenant.status === "active" ? "Renews / expires" : "Expired"} on{" "}
-            <span className="font-medium">{new Date(tenant.plan_expires_at).toLocaleDateString()}</span>
-            {tenant.billing_cycle && <span className="capitalize"> · {tenant.billing_cycle}</span>}
+            {t(tenant.status === "active" ? "settings.renews_on" : "settings.expired_on", { date: new Date(tenant.plan_expires_at).toLocaleDateString() })}
+            {tenant.billing_cycle && <span className="capitalize"> · {t(`cycle.${tenant.billing_cycle}`)}</span>}
           </p>
         )}
         <div className="text-xs font-mono text-muted-foreground mb-4">
-          {tenant.max_students ?? "Unlimited"} students · {tenant.max_users ?? "Unlimited"} users
+          {t("settings.students_users_count", {
+            students: tenant.max_students ?? t("settings.unlimited"),
+            users: tenant.max_users ?? t("settings.unlimited"),
+          })}
         </div>
 
         {canEdit && tenant.status === "active" && (
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={() => setRenewOpen(true)} data-testid="settings-renew-button">
               <RefreshCw className="w-3.5 h-3.5 me-2" />
-              Extend duration
+              {t("settings.extend_duration")}
             </Button>
             {higherPlans.length > 0 && (
               <Button variant="outline" size="sm" onClick={openUpgrade} data-testid="settings-upgrade-button">
                 <ArrowUpCircle className="w-3.5 h-3.5 me-2" />
-                Upgrade plan
+                {t("calendar.upgrade_plan")}
               </Button>
             )}
           </div>
@@ -273,25 +275,24 @@ export default function SettingsPage() {
       <Dialog open={renewOpen} onOpenChange={setRenewOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Extend your subscription</DialogTitle>
+            <DialogTitle>{t("settings.extend_subscription_title")}</DialogTitle>
             <DialogDescription>
-              Add another billing period to your <span className="capitalize font-medium">{tenant.plan}</span> plan.
-              If you renew before it expires, the new period is added on top of your current expiry — no time is lost.
+              {t("settings.extend_subscription_desc", { plan: tenant.plan ? t(`plan.${tenant.plan}`) : "" })}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            <Field label="Billing cycle">
+            <Field label={t("field.billing_cycle")}>
               <Select value={renewCycle} onValueChange={setRenewCycle}>
                 <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
                 <SelectContent className="bg-popover">
-                  <SelectItem value="monthly">Monthly</SelectItem>
-                  <SelectItem value="annual">Annual</SelectItem>
+                  <SelectItem value="monthly">{t("cycle.monthly")}</SelectItem>
+                  <SelectItem value="annual">{t("cycle.annual")}</SelectItem>
                 </SelectContent>
               </Select>
             </Field>
             <div className="text-sm text-muted-foreground">
-              Amount due:{" "}
+              {t("settings.amount_due")}{" "}
               <span className="font-semibold text-foreground">
                 {renewQuoteQuery.isLoading
                   ? "…"
@@ -301,14 +302,14 @@ export default function SettingsPage() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRenewOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setRenewOpen(false)}>{t("actions.cancel")}</Button>
             <Button
               onClick={() => renewMut.mutate()}
               disabled={renewMut.isPending || renewQuoteQuery.isLoading}
               className="bg-accent hover:bg-accent/90 text-accent-foreground"
               data-testid="settings-renew-confirm"
             >
-              {renewMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Pay & extend"}
+              {renewMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : t("settings.pay_extend")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -317,26 +318,25 @@ export default function SettingsPage() {
       <Dialog open={upgradeOpen} onOpenChange={setUpgradeOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Upgrade your plan</DialogTitle>
+            <DialogTitle>{t("settings.upgrade_plan_title")}</DialogTitle>
             <DialogDescription>
-              You'll only pay the prorated difference for the time left in your current period — your renewal date
-              doesn't change.
+              {t("settings.upgrade_plan_desc")}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            <Field label="New plan">
+            <Field label={t("field.new_plan")}>
               <Select value={upgradePlan} onValueChange={setUpgradePlan}>
                 <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
                 <SelectContent className="bg-popover">
                   {higherPlans.map((p) => (
-                    <SelectItem key={p} value={p} className="capitalize">{p}</SelectItem>
+                    <SelectItem key={p} value={p} className="capitalize">{t(`plan.${p}`)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </Field>
             <div className="text-sm text-muted-foreground">
-              Amount due now:{" "}
+              {t("settings.amount_due_now")}{" "}
               <span className="font-semibold text-foreground">
                 {upgradeQuoteQuery.isLoading
                   ? "…"
@@ -346,14 +346,14 @@ export default function SettingsPage() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setUpgradeOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setUpgradeOpen(false)}>{t("actions.cancel")}</Button>
             <Button
               onClick={() => upgradeMut.mutate()}
               disabled={upgradeMut.isPending || upgradeQuoteQuery.isLoading || !upgradePlan}
               className="bg-accent hover:bg-accent/90 text-accent-foreground"
               data-testid="settings-upgrade-confirm"
             >
-              {upgradeMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Pay & upgrade"}
+              {upgradeMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : t("settings.pay_upgrade")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -367,7 +367,7 @@ export default function SettingsPage() {
             data-testid="settings-save-button"
             className="bg-accent hover:bg-accent/90 text-accent-foreground"
           >
-            {saveMut.isPending ? "Saving…" : t("actions.save")}
+            {saveMut.isPending ? t("settings.saving") : t("actions.save")}
           </Button>
         </div>
       )}

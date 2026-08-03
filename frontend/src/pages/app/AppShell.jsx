@@ -155,13 +155,13 @@ export default function AppShell() {
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="w-56 bg-popover" align="start">
-              <DropdownMenuLabel className="text-xs">Workspace</DropdownMenuLabel>
+              <DropdownMenuLabel className="text-xs">{t("common.workspace")}</DropdownMenuLabel>
               <DropdownMenuItem>
                 <Building2 className="w-4 h-4 me-2" />
                 <div className="text-sm">
                   <div className="font-medium">{tenant?.name}</div>
                   <div className="text-[10px] text-muted-foreground capitalize">
-                    {tenant?.plan} · {tenant?.status}
+                    {tenant?.plan ? t(`plan.${tenant.plan}`) : ""} · {tenant?.status ? t(`status.${tenant.status}`) : ""}
                   </div>
                 </div>
               </DropdownMenuItem>
@@ -169,7 +169,7 @@ export default function AppShell() {
               <DropdownMenuItem asChild>
                 <Link to="/app/settings">
                   <Settings className="w-4 h-4 me-2" />
-                  Workspace settings
+                  {t("common.workspace_settings")}
                 </Link>
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -201,8 +201,8 @@ export default function AppShell() {
             {t("common.plan_active")}
           </div>
           <div className="px-2 pb-3 text-xs text-muted-foreground capitalize">
-            {tenant?.plan || "Free"}
-            {tenant?.billing_cycle ? ` · ${tenant.billing_cycle}` : ""}
+            {tenant?.plan ? t(`plan.${tenant.plan}`) : t("common.free")}
+            {tenant?.billing_cycle ? ` · ${t(`cycle.${tenant.billing_cycle}`)}` : ""}
           </div>
           <Button
             variant="outline"
@@ -321,17 +321,17 @@ export default function AppShell() {
           data-testid={APPUI.topbarSearchInput}
         />
         <CommandList>
-          {cmdBusy && <div className="p-3 text-xs text-muted-foreground">Searching…</div>}
+          {cmdBusy && <div className="p-3 text-xs text-muted-foreground">{t("search.searching")}</div>}
           {!cmdBusy && cmdResults.length === 0 && cmdQuery && (
-            <CommandEmpty>No results found.</CommandEmpty>
+            <CommandEmpty>{t("search.no_results")}</CommandEmpty>
           )}
           {!cmdQuery && (
-            <CommandGroup heading="Quick actions">
+            <CommandGroup heading={t("search.quick_actions")}>
               {[
-                { l: "Go to Students", to: "/app/students" },
-                { l: "Go to Payments", to: "/app/payments" },
-                { l: "Go to Sessions", to: "/app/sessions" },
-                { l: "Mark Attendance", to: "/app/attendance" },
+                { l: t("search.go_to", { module: t("menu.students") }), to: "/app/students" },
+                { l: t("search.go_to", { module: t("menu.payments") }), to: "/app/payments" },
+                { l: t("search.go_to", { module: t("menu.sessions") }), to: "/app/sessions" },
+                { l: t("search.mark_attendance"), to: "/app/attendance" },
               ].map((a) => (
                 <CommandItem
                   key={a.to}
@@ -346,7 +346,7 @@ export default function AppShell() {
             </CommandGroup>
           )}
           {cmdResults.length > 0 && (
-            <CommandGroup heading="Results">
+            <CommandGroup heading={t("search.results")}>
               {cmdResults.map((r) => (
                 <CommandItem
                   key={`${r.type}-${r.id}`}

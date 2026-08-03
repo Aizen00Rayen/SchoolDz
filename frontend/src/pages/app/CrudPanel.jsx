@@ -54,7 +54,7 @@ export default function CrudPanel({
   const createMut = useMutation({
     mutationFn: (payload) => api.post(endpoint, payload).then((r) => r.data),
     onSuccess: () => {
-      toast.success("Created");
+      toast.success(t("toast.created"));
       qc.invalidateQueries({ queryKey: [moduleKey] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
       setOpen(false);
@@ -66,7 +66,7 @@ export default function CrudPanel({
   const updateMut = useMutation({
     mutationFn: ({ id, payload }) => api.patch(`${endpoint}/${id}`, payload).then((r) => r.data),
     onSuccess: () => {
-      toast.success("Updated");
+      toast.success(t("toast.updated"));
       qc.invalidateQueries({ queryKey: [moduleKey] });
       setOpen(false);
       setEditing(null);
@@ -78,7 +78,7 @@ export default function CrudPanel({
   const deleteMut = useMutation({
     mutationFn: (id) => api.delete(`${endpoint}/${id}`).then((r) => r.data),
     onSuccess: () => {
-      toast.success("Deleted");
+      toast.success(t("toast.deleted"));
       qc.invalidateQueries({ queryKey: [moduleKey] });
     },
     onError: (e) => toast.error(extractError(e)),
@@ -138,7 +138,7 @@ export default function CrudPanel({
           />
         </div>
         <div className="text-xs text-muted-foreground font-mono">
-          {data?.total ?? 0} {moduleKey}
+          {data?.total ?? 0} {t(`menu.${moduleKey}`)}
         </div>
       </div>
 
@@ -148,8 +148,8 @@ export default function CrudPanel({
         ) : items.length === 0 ? (
           <EmptyState
             icon={EmptyIcon}
-            title={`No ${moduleKey} yet`}
-            description="Create your first record to get started."
+            title={t("crud.no_items_yet", { module: t(`menu.${moduleKey}`) })}
+            description={t("crud.create_first")}
             action={canCreate && (
               <Button onClick={openCreate} className="bg-accent hover:bg-accent/90 text-accent-foreground">
                 <Plus className="w-4 h-4 me-2" /> {t("actions.new")}
@@ -195,7 +195,7 @@ export default function CrudPanel({
                           <Button
                             size="icon" variant="ghost"
                             onClick={async () => {
-                              if (await confirm({ title: "Delete this record?", destructive: true })) {
+                              if (await confirm({ title: t("confirm.delete_record"), destructive: true })) {
                                 deleteMut.mutate(row.id);
                               }
                             }}
@@ -219,10 +219,12 @@ export default function CrudPanel({
         <DialogContent className="max-w-2xl bg-card">
           <DialogHeader>
             <DialogTitle className="font-display text-xl">
-              {editing ? `${t("actions.edit")} ${moduleKey}` : `${t("actions.new")} ${moduleKey}`}
+              {editing
+                ? t("crud.edit_module", { module: t(`menu.${moduleKey}`) })
+                : t("crud.new_module", { module: t(`menu.${moduleKey}`) })}
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              Fill in the details below and click Save.
+              {t("crud.fill_details")}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={onSubmit} className="space-y-4">

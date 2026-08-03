@@ -12,6 +12,7 @@ import { api, extractError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
 function NewConversationDialog({ onCreated }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
 
@@ -34,17 +35,17 @@ function NewConversationDialog({ onCreated }) {
   return (
     <>
       <Button onClick={() => setOpen(true)} className="bg-accent hover:bg-accent/90 text-accent-foreground">
-        <Plus className="w-4 h-4 me-2" /> New conversation
+        <Plus className="w-4 h-4 me-2" /> {t("messages.new_conversation")}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="bg-card">
           <DialogHeader>
-            <DialogTitle className="font-display text-xl">Start a conversation</DialogTitle>
+            <DialogTitle className="font-display text-xl">{t("messages.start_conversation")}</DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              Pick a parent to message.
+              {t("messages.pick_parent")}
             </DialogDescription>
           </DialogHeader>
-          <Input placeholder="Search parents…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <Input placeholder={t("messages.search_parents")} value={q} onChange={(e) => setQ(e.target.value)} />
           <div className="max-h-72 overflow-y-auto space-y-1">
             {(parents?.items || []).map((p) => (
               <button
@@ -52,15 +53,15 @@ function NewConversationDialog({ onCreated }) {
                 type="button"
                 disabled={!p.email || createMut.isPending}
                 onClick={() => createMut.mutate(p.id)}
-                title={!p.email ? "This parent has no email on file" : undefined}
+                title={!p.email ? t("messages.no_email_on_file") : undefined}
                 className="w-full text-start px-3 py-2 rounded-lg hover:bg-muted/60 disabled:opacity-40 disabled:cursor-not-allowed text-sm"
               >
                 <div className="font-medium">{p.name}</div>
-                <div className="text-xs text-muted-foreground">{p.email || "No email"}</div>
+                <div className="text-xs text-muted-foreground">{p.email || t("messages.no_email")}</div>
               </button>
             ))}
             {parents && parents.items.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-6">No parents found.</p>
+              <p className="text-sm text-muted-foreground text-center py-6">{t("messages.no_parents_found")}</p>
             )}
           </div>
         </DialogContent>
@@ -97,7 +98,7 @@ export default function MessagesPage() {
     onError: (e) => toast.error(extractError(e)),
   });
 
-  const conversations = convosQ.data?.items || [];
+  const conversations = useMemo(() => convosQ.data?.items || [], [convosQ.data]);
   const filteredConversations = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return conversations;
@@ -112,7 +113,7 @@ export default function MessagesPage() {
     <div className="flex flex-col h-[calc(100vh-8rem)]">
       <PageHeader
         title={t("menu.messages")}
-        subtitle="Conversations with parents."
+        subtitle={t("subtitle.messages")}
         actions={<NewConversationDialog onCreated={setSelectedId} />}
       />
       <div className="surface-card flex-1 min-h-0 grid grid-cols-[280px_1fr] overflow-hidden">
@@ -133,10 +134,10 @@ export default function MessagesPage() {
             <div className="p-4"><LoadingRows rows={3} cols={1} /></div>
           ) : conversations.length === 0 ? (
             <div className="p-4">
-              <EmptyState icon={MessageSquare} title="No conversations yet" description="Start one from the button above." />
+              <EmptyState icon={MessageSquare} title={t("messages.no_conversations_title")} description={t("messages.no_conversations_desc")} />
             </div>
           ) : filteredConversations.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-6 px-4">No conversations match "{q}".</p>
+            <p className="text-sm text-muted-foreground text-center py-6 px-4">{t("messages.no_match", { query: q })}</p>
           ) : (
             filteredConversations.map((c) => (
               <button
@@ -159,7 +160,7 @@ export default function MessagesPage() {
         <div className="min-h-0">
           {!selectedId ? (
             <div className="h-full grid place-items-center text-sm text-muted-foreground">
-              Select a conversation to view messages.
+              {t("messages.select_conversation")}
             </div>
           ) : (
             <ChatThread

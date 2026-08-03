@@ -136,7 +136,7 @@ export default function DashboardPage() {
               <div key={s.id} className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-muted transition-colors">
                 <div className="w-1.5 h-10 rounded-full bg-accent flex-shrink-0" />
                 <div className="min-w-0 flex-1">
-                  <div className="text-sm font-medium truncate">{s.topic || "Session"}</div>
+                  <div className="text-sm font-medium truncate">{s.topic || t("menu.sessions")}</div>
                   <div className="text-[11px] font-mono text-muted-foreground">
                     {new Date(s.start_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                     {" → "}
@@ -183,7 +183,7 @@ export default function DashboardPage() {
               <div key={p.id} className="flex items-center justify-between py-2 border-b border-border last:border-0">
                 <div>
                   <div className="text-sm font-medium">{p.invoice_number}</div>
-                  <div className="text-[11px] font-mono text-muted-foreground capitalize">{p.kind}</div>
+                  <div className="text-[11px] font-mono text-muted-foreground capitalize">{t(`kind.${p.kind}`)}</div>
                 </div>
                 <div className="text-end">
                   <div className="text-sm font-mono font-semibold">

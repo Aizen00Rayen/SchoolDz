@@ -25,17 +25,17 @@ export default function ReportsPage() {
 
   return (
     <div>
-      <PageHeader title={t("menu.reports")} subtitle="Financial and operational insights." />
+      <PageHeader title={t("menu.reports")} subtitle={t("reports.subtitle")} />
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <Card icon={Users} label="Active students" value={stats.students_total} />
-        <Card icon={Wallet} label="Revenue this month" value={`${(stats.revenue_month || 0).toLocaleString()} ${tenant?.currency || "DZD"}`} />
-        <Card icon={TrendingUp} label="Paid invoices" value={paid} />
-        <Card icon={TrendingDown} label="Outstanding" value={`${(stats.outstanding || 0).toLocaleString()} ${tenant?.currency || "DZD"}`} />
+        <Card icon={Users} label={t("reports.active_students")} value={stats.students_total} />
+        <Card icon={Wallet} label={t("reports.revenue_month")} value={`${(stats.revenue_month || 0).toLocaleString()} ${tenant?.currency || "DZD"}`} />
+        <Card icon={TrendingUp} label={t("reports.paid_invoices")} value={paid} />
+        <Card icon={TrendingDown} label={t("reports.outstanding")} value={`${(stats.outstanding || 0).toLocaleString()} ${tenant?.currency || "DZD"}`} />
       </div>
 
       <div className="surface-card p-5">
-        <h3 className="font-display font-semibold text-lg mb-4">Revenue by month</h3>
+        <h3 className="font-display font-semibold text-lg mb-4">{t("reports.revenue_by_month")}</h3>
         <div className="h-72 min-h-[280px]">
           {data?.revenue_trend && (
             <ResponsiveContainer width="100%" height="100%">
