@@ -25,4 +25,4 @@ COPY . .
 
 EXPOSE 8002
 
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8002"]
+CMD ["gunicorn", "schooldz.wsgi:application", "--bind", "0.0.0.0:8002", "--workers", "3", "--timeout", "60", "--reload", "--access-logfile", "-", "--error-logfile", "-"]
