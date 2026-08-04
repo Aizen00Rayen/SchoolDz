@@ -7,9 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 
 const FEATURES = {
-  basic: ["50 students", "3 users", "Email support", "Core modules"],
-  standard: ["500 students", "20 users", "Priority support", "Custom branding", "API access", "Parent portal"],
-  premium: ["Unlimited students", "Unlimited users", "24/7 support", "White-label", "SLA + SSO", "Parent portal", "Calendar & planner"],
+  basic: ["200 students", "3 users", "Core modules (students, teachers, courses, groups, payments, reports)"],
+  standard: ["500 students", "20 users", "Priority support", "Custom branding", "Parent portal", "Teacher portal"],
+  premium: ["Unlimited students", "Unlimited users", "24/7 support", "White-label", "Parent portal", "Teacher portal", "Student badges", "Calendar & planner"],
 };
 const POPULAR_KEY = "standard";
 

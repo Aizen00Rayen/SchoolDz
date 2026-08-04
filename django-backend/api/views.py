@@ -37,7 +37,7 @@ PLANS_CONFIG = {
             'name': 'Basic',
             'monthly': 2499,
             'annual_discount_pct': 15,
-            'max_students': 50,
+            'max_students': 200,
             'max_users': 3,
             'custom_branding': False,
             'parent_portal': False,
@@ -45,7 +45,7 @@ PLANS_CONFIG = {
         },
         'standard': {
             'name': 'Standard',
-            'monthly': 6799,
+            'monthly': 5900,
             'annual_discount_pct': 20,
             'max_students': 500,
             'max_users': 20,
@@ -55,7 +55,7 @@ PLANS_CONFIG = {
         },
         'premium': {
             'name': 'Premium',
-            'monthly': 14900,
+            'monthly': 84900,
             'annual_discount_pct': 25,
             'max_students': None,
             'max_users': None,
