@@ -55,7 +55,7 @@ PLANS_CONFIG = {
         },
         'premium': {
             'name': 'Premium',
-            'monthly': 84900,
+            'monthly': 8490,
             'annual_discount_pct': 25,
             'max_students': None,
             'max_users': None,
