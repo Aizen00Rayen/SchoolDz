@@ -21,6 +21,23 @@ export async function openInvoicePdf(paymentId) {
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
+/** Downloads a CSV/XLSX export of a resource list (students/parents/teachers) —
+ * same auth'd-blob approach as openInvoicePdf, since a plain <a href> can't
+ * carry the Bearer token. Query param is named "type", not "format" — DRF
+ * reserves ?format=... for its own content-negotiation and 404s when no
+ * renderer matches "csv"/"xlsx". */
+export async function downloadExport(resource, format) {
+  const res = await api.get(`/${resource}/export`, { params: { type: format }, responseType: "blob" });
+  const url = URL.createObjectURL(res.data);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${resource}.${format}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
 // In-memory access token (also cookies are set httpOnly by backend)
 let accessToken = null;
 export const setAccessToken = (t) => {

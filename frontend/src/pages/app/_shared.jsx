@@ -6,7 +6,7 @@ import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval,
   isSameMonth, isToday, format, addMonths, subMonths,
 } from "date-fns";
-import { ChevronLeft, ChevronRight, Copy, Repeat, Send } from "lucide-react";
+import { ChevronLeft, ChevronRight, Copy, Download, Repeat, Send } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -18,7 +18,10 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { api, extractError } from "@/lib/api";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
+import { api, extractError, downloadExport } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
 export function Field({ label, required, children }) {
@@ -56,6 +59,39 @@ export function EmptyState({ icon: Icon, title, description, action }) {
       {description && <p className="text-sm text-muted-foreground max-w-md mx-auto">{description}</p>}
       {action && <div className="mt-6">{action}</div>}
     </div>
+  );
+}
+
+/** "Export" dropdown (CSV / Excel) for a list page — hits GET /{resource}/export
+ * on the backend, which streams every record the current user can see for
+ * that module (not just the currently-paginated/searched page). */
+export function ExportMenu({ resource }) {
+  const { t } = useI18n();
+  const [busy, setBusy] = useState(false);
+
+  const download = async (format) => {
+    setBusy(true);
+    try {
+      await downloadExport(resource, format);
+    } catch (e) {
+      toast.error(extractError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" disabled={busy}>
+          <Download className="w-4 h-4 me-2" /> {t("export.button")}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="bg-popover">
+        <DropdownMenuItem onClick={() => download("csv")}>{t("export.csv")}</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => download("xlsx")}>{t("export.excel")}</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

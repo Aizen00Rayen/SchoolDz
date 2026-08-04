@@ -6,7 +6,7 @@ import { GraduationCap, Upload } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Field } from "./_shared";
+import { Field, ExportMenu } from "./_shared";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
@@ -124,7 +124,12 @@ export default function StudentsPage() {
       defaultForm={DEFAULT_FORM}
       canEdit={canEdit}
       canCreate={canEdit}
-      extraActions={canEdit ? <ImportCsvDialog /> : null}
+      extraActions={(
+        <>
+          {canEdit && <ImportCsvDialog />}
+          <ExportMenu resource="students" />
+        </>
+      )}
       columns={[
         {
           key: "name", label: t("field.full_name"),

@@ -298,6 +298,10 @@ const TRANSLATIONS = {
     "import.result": "{created} sur {total} étudiants créés",
     "import.row": "Ligne {row}",
 
+    "export.button": "Exporter",
+    "export.csv": "Exporter en CSV",
+    "export.excel": "Exporter en Excel",
+
     "subtitle.students": "Gérez les apprenants, profils et statut d'inscription.",
     "subtitle.teachers": "Gérez les enseignants, matières et rémunération.",
     "subtitle.parents": "Gérez les parents et leurs enfants inscrits.",
@@ -760,6 +764,10 @@ const TRANSLATIONS = {
     "import.result": "{created} of {total} students created",
     "import.row": "Row {row}",
 
+    "export.button": "Export",
+    "export.csv": "Export as CSV",
+    "export.excel": "Export as Excel",
+
     "subtitle.students": "Manage learners, profiles, and enrollment status.",
     "subtitle.teachers": "Manage teachers, subjects, and pay.",
     "subtitle.parents": "Manage parents and their enrolled children.",
@@ -1221,6 +1229,10 @@ const TRANSLATIONS = {
     "import.choose_file": "اختر ملف CSV",
     "import.result": "تم إنشاء {created} من أصل {total} طالب",
     "import.row": "السطر {row}",
+
+    "export.button": "تصدير",
+    "export.csv": "تصدير كـ CSV",
+    "export.excel": "تصدير كـ Excel",
 
     "subtitle.students": "إدارة المتعلمين والملفات الشخصية وحالة التسجيل.",
     "subtitle.teachers": "إدارة المعلمين والمواد والرواتب.",

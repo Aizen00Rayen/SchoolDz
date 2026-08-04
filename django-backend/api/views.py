@@ -1,7 +1,6 @@
 import csv
 import io
 import json
-import math
 import os
 import time
 import secrets
@@ -9,6 +8,7 @@ import uuid
 import base64
 import mimetypes
 import requests
+import openpyxl
 from datetime import datetime, timedelta
 from django.conf import settings
 from django.db import transaction
@@ -35,8 +35,8 @@ PLANS_CONFIG = {
     'tiers': {
         'basic': {
             'name': 'Basic',
-            'monthly': 2499,
-            'annual_discount_pct': 15,
+            'monthly': 2500,
+            'annual': 25000,
             'max_students': 200,
             'max_users': 3,
             'custom_branding': False,
@@ -45,8 +45,8 @@ PLANS_CONFIG = {
         },
         'standard': {
             'name': 'Standard',
-            'monthly': 5900,
-            'annual_discount_pct': 20,
+            'monthly': 6000,
+            'annual': 60000,
             'max_students': 500,
             'max_users': 20,
             'custom_branding': True,
@@ -55,8 +55,8 @@ PLANS_CONFIG = {
         },
         'premium': {
             'name': 'Premium',
-            'monthly': 8490,
-            'annual_discount_pct': 25,
+            'monthly': 9000,
+            'annual': 75000,
             'max_students': None,
             'max_users': None,
             'custom_branding': True,
@@ -71,8 +71,11 @@ def resolve_amount(plan_key, billing_cycle):
     if not tier:
         raise ValidationError('Invalid plan')
     if billing_cycle == 'annual':
-        return int(math.floor(tier['monthly'] * 12 * (1 - tier['annual_discount_pct'] / 100) / 1000) * 1000)
+        return tier['annual']
     return tier['monthly']
+
+def annual_discount_pct(tier):
+    return round((1 - tier['annual'] / (tier['monthly'] * 12)) * 100)
 
 def prorate_upgrade_amount(tenant, new_plan):
     PLAN_RANK = {'basic': 1, 'standard': 2, 'premium': 3}
@@ -99,6 +102,36 @@ def prorate_upgrade_amount(tenant, new_plan):
     new_remaining_cost = (new_price / cycle_days) * days_remaining
 
     return max(0, int(round(new_remaining_cost - unused_credit)))
+
+
+def export_rows(headers, rows, filename, fmt):
+    """Builds a downloadable CSV or XLSX response from a header row + data rows."""
+    fmt = (fmt or 'csv').lower()
+    if fmt not in ('csv', 'xlsx'):
+        raise ValidationError('format must be csv or xlsx')
+
+    if fmt == 'csv':
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(headers)
+        writer.writerows(rows)
+        response = HttpResponse(buffer.getvalue(), content_type='text/csv')
+        response['Content-Disposition'] = f'attachment; filename="{filename}.csv"'
+        return response
+
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.append(headers)
+    for row in rows:
+        sheet.append(row)
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    response = HttpResponse(
+        buffer.getvalue(),
+        content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    response['Content-Disposition'] = f'attachment; filename="{filename}.xlsx"'
+    return response
 
 
 # Base Tenant-Scoped ViewSet
@@ -923,7 +956,7 @@ def billing_plans(request):
             'name': tier['name'],
             'monthly': tier['monthly'],
             'annual': resolve_amount(key, 'annual'),
-            'annual_discount_pct': tier['annual_discount_pct'],
+            'annual_discount_pct': annual_discount_pct(tier),
             'currency': currency,
             'custom_branding': tier['custom_branding'],
             'parent_portal': tier['parent_portal'],
@@ -2015,6 +2048,16 @@ class GuardianViewSet(TenantScopedViewSet):
         serializer = self.get_serializer(queryset, many=True)
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
+    @action(detail=False, methods=['get'])
+    def export(self, request):
+        queryset = self.filter_queryset(self.get_queryset()).prefetch_related('students').order_by('-created_at')
+        headers = ['Name', 'Email', 'Phone', 'Address', 'Occupation', 'Relationship', 'Emergency Contact', 'Students']
+        rows = [[
+            g.name, g.email or '', g.phone or '', g.address or '', g.occupation or '', g.relationship,
+            g.emergency_contact or '', ', '.join(f"{s.first_name} {s.last_name}" for s in g.students.all()),
+        ] for g in queryset]
+        return export_rows(headers, rows, 'parents', request.GET.get('type'))
+
     def create(self, request, *args, **kwargs):
         self.check_module_edit()
         data = request.data.copy()
@@ -2111,6 +2154,17 @@ class TeacherViewSet(TenantScopedViewSet):
         serializer = self.get_serializer(queryset, many=True)
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
+    @action(detail=False, methods=['get'])
+    def export(self, request):
+        queryset = self.filter_queryset(self.get_queryset()).order_by('-created_at')
+        headers = ['First Name', 'Last Name', 'Email', 'Phone', 'Address', 'Subjects', 'Hourly Rate', 'Monthly Salary', 'Status', 'Hire Date']
+        rows = [[
+            t.first_name, t.last_name, t.email or '', t.phone or '', t.address or '',
+            ', '.join(t.subjects) if t.subjects else '', t.hourly_rate, t.monthly_salary, t.status,
+            t.hire_date.isoformat() if t.hire_date else '',
+        ] for t in queryset]
+        return export_rows(headers, rows, 'teachers', request.GET.get('type'))
+
     def create(self, request, *args, **kwargs):
         self.check_module_edit()
         data = request.data.copy()
@@ -2186,6 +2240,22 @@ class StudentViewSet(TenantScopedViewSet):
         queryset = queryset.order_by('-created_at')[:500]
         serializer = self.get_serializer(queryset, many=True)
         return Response({'items': serializer.data, 'total': len(serializer.data)})
+
+    @action(detail=False, methods=['get'])
+    def export(self, request):
+        queryset = self.filter_queryset(self.get_queryset()).select_related('parent').order_by('-created_at')
+        headers = [
+            'Student Code', 'First Name', 'Last Name', 'Gender', 'Birth Date', 'Email', 'Phone', 'Address',
+            'Emergency Contact', 'Status', 'Parent Name', 'Parent Email', 'Parent Phone', 'Enrollment Date',
+        ]
+        rows = [[
+            s.student_code or '', s.first_name, s.last_name, s.gender or '',
+            s.birth_date.isoformat() if s.birth_date else '', s.email or '', s.phone or '', s.address or '',
+            s.emergency_contact or '', s.status, s.parent.name if s.parent else '',
+            s.parent.email if s.parent and s.parent.email else '', s.parent.phone if s.parent and s.parent.phone else '',
+            s.enrollment_date.date().isoformat() if s.enrollment_date else '',
+        ] for s in queryset]
+        return export_rows(headers, rows, 'students', request.GET.get('type'))
 
     def create(self, request, *args, **kwargs):
         self.check_module_edit()

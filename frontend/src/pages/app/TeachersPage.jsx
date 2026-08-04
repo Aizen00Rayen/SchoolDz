@@ -3,7 +3,7 @@ import CrudPanel, { StatusPill } from "./CrudPanel";
 import { Users } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Field, InviteButton } from "./_shared";
+import { Field, InviteButton, ExportMenu } from "./_shared";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -71,6 +71,7 @@ export default function TeachersPage() {
       defaultForm={DEFAULT_FORM}
       canEdit={canEdit}
       canCreate={canEdit}
+      extraActions={<ExportMenu resource="teachers" />}
       columns={[
         {
           key: "name", label: t("field.full_name"),

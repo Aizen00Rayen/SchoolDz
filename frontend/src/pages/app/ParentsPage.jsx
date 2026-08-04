@@ -4,7 +4,7 @@ import { UserRound } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
-import { Field, InviteButton } from "./_shared";
+import { Field, InviteButton, ExportMenu } from "./_shared";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -68,6 +68,7 @@ export default function ParentsPage() {
       subtitle={t("subtitle.parents")}
       emptyIcon={UserRound}
       defaultForm={DEFAULT_FORM}
+      extraActions={<ExportMenu resource="parents" />}
       columns={[
         { key: "name", label: t("field.full_name"), render: (r) => <span className="font-medium">{r.name}</span> },
         { key: "phone", label: t("field.phone"), render: (r) => <span className="font-mono text-xs">{r.phone || "—"}</span> },
