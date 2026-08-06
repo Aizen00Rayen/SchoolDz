@@ -4,7 +4,7 @@ import {
 } from "recharts";
 import { motion } from "framer-motion";
 import {
-  ArrowUpRight, GraduationCap, Wallet, Users, ClipboardCheck, Clock, BookOpen,
+  ArrowUpRight, GraduationCap, Wallet, Users, ClipboardCheck, Clock, BookOpen, TriangleAlert,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -153,8 +153,8 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Recent students + payments */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {/* Recent students + payments + at-risk */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="surface-card p-5">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-display font-semibold text-lg">{t("dashboard.recent_students")}</h3>
@@ -193,6 +193,37 @@ export default function DashboardPage() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+
+        <div className="surface-card p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-display font-semibold text-lg">{t("dashboard.at_risk")}</h3>
+            <TriangleAlert className="w-4 h-4 text-warning" />
+          </div>
+          <div className="space-y-1">
+            {(data?.at_risk_students || []).slice(0, 6).map((s) => (
+              <div key={s.id} className="flex items-center justify-between py-2 border-b border-border last:border-0 gap-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium truncate">{s.first_name} {s.last_name}</div>
+                  <div className="flex flex-wrap gap-1 mt-1">
+                    {s.reasons.includes("low_attendance") && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-warning/10 text-warning">
+                        {t("dashboard.reason_low_attendance")}
+                      </span>
+                    )}
+                    {s.reasons.includes("overdue_payment") && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-destructive/10 text-destructive">
+                        {t("dashboard.reason_overdue")}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+            {(!data?.at_risk_students || data.at_risk_students.length === 0) && !isLoading && (
+              <div className="text-sm text-muted-foreground text-center py-8">{t("dashboard.no_at_risk")}</div>
+            )}
           </div>
         </div>
       </div>

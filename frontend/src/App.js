@@ -32,6 +32,10 @@ import CalendarPage from "@/pages/app/CalendarPage";
 import AttendancePage from "@/pages/app/AttendancePage";
 import PaymentsPage from "@/pages/app/PaymentsPage";
 import GradesPage from "@/pages/app/GradesPage";
+import QuizzesPage from "@/pages/app/QuizzesPage";
+import QuizBuilderPage from "@/pages/app/QuizBuilderPage";
+import TakeQuizPage from "@/pages/quiz/TakeQuizPage";
+import WebsitePage from "@/pages/app/WebsitePage";
 import ReportsPage from "@/pages/app/ReportsPage";
 import SettingsPage from "@/pages/app/SettingsPage";
 import UsersPage from "@/pages/app/UsersPage";
@@ -125,6 +129,9 @@ function App() {
                   <Route path="/enroll/:slug/success" element={<RequireAuth><EnrollSuccessPage /></RequireAuth>} />
                   <Route path="/enroll/:slug/failure" element={<RequireAuth><EnrollFailurePage /></RequireAuth>} />
 
+                  {/* Public quiz-taking link (no login — see TakeQuizPage) */}
+                  <Route path="/quiz/take/:token" element={<TakeQuizPage />} />
+
                   {/* Admin */}
                   <Route path="/admin/login" element={<AdminLoginPage />} />
                   <Route
@@ -157,6 +164,9 @@ function App() {
                     <Route path="attendance" element={<AttendancePage />} />
                     <Route path="payments" element={<PaymentsPage />} />
                     <Route path="grades" element={<GradesPage />} />
+                    <Route path="quizzes" element={<QuizzesPage />} />
+                    <Route path="quizzes/:id" element={<QuizBuilderPage />} />
+                    <Route path="website" element={<WebsitePage />} />
                     <Route path="reports" element={<ReportsPage />} />
                     <Route path="messages" element={<MessagesPage />} />
                     <Route path="settings" element={<SettingsPage />} />

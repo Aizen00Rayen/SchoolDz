@@ -214,7 +214,7 @@ export default function SettingsPage() {
         <p className="text-sm text-muted-foreground mb-4">
           {t("settings.public_enrollment_desc")}
         </p>
-        <div className="flex items-center gap-2 mb-4">
+        <div className="flex items-center gap-2">
           <Input readOnly value={enrollUrl} className="font-mono text-xs bg-muted/40" />
           <Button
             type="button" variant="outline" size="icon"
@@ -226,15 +226,11 @@ export default function SettingsPage() {
             <a href={enrollUrl} target="_blank" rel="noreferrer"><ExternalLink className="w-3.5 h-3.5" /></a>
           </Button>
         </div>
-        <Field label={t("field.description_enrollment")}>
-          <Textarea
-            value={form.enrollment_description || ""}
-            onChange={(e) => setForm({ ...form, enrollment_description: e.target.value })}
-            disabled={!canEdit}
-            rows={3}
-            placeholder={t("settings.enrollment_welcome_placeholder")}
-          />
-        </Field>
+        {tenant.plan === "premium" && (
+          <p className="text-xs text-muted-foreground mt-3">
+            {t("settings.website_builder_hint")}
+          </p>
+        )}
       </div>
 
       <div className="surface-card p-6">

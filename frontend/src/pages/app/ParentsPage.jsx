@@ -18,7 +18,12 @@ const DEFAULT_FORM = {
   emergency_contact: "", student_ids: [],
 };
 
-export function StudentPicker({ selected, onChange }) {
+/** `max` (optional) caps how many students can be checked — used by
+ * GroupsPage to keep enrollment from exceeding the group's capacity field.
+ * Selecting fewer is always fine; once at max, unchecked rows just disable
+ * until something is unchecked again. Omit `max` for unlimited pickers
+ * (e.g. linking a guardian's own children, which has no such ceiling). */
+export function StudentPicker({ selected, onChange, max }) {
   const { t } = useI18n();
   const { data: students, isLoading } = useQuery({
     queryKey: ["students-list"],
@@ -26,29 +31,50 @@ export function StudentPicker({ selected, onChange }) {
   });
   const items = students?.items || [];
   const ids = selected || [];
+  const hasMax = typeof max === "number" && !Number.isNaN(max);
+  const atMax = hasMax && ids.length >= max;
 
   const toggle = (studentId, checked) => {
+    if (checked && atMax) return;
     onChange(checked ? [...ids, studentId] : ids.filter((id) => id !== studentId));
   };
 
   return (
-    <div className="border border-border rounded-lg max-h-48 overflow-y-auto p-2 space-y-1 bg-background">
-      {isLoading ? (
-        <div className="text-xs text-muted-foreground p-2">{t("picker.loading_students")}</div>
-      ) : items.length === 0 ? (
-        <div className="text-xs text-muted-foreground p-2">{t("picker.no_students")}</div>
-      ) : (
-        items.map((s) => (
-          <label key={s.id} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted/60 cursor-pointer text-sm">
-            <Checkbox
-              checked={ids.includes(s.id)}
-              onCheckedChange={(checked) => toggle(s.id, !!checked)}
-            />
-            <span>{s.first_name} {s.last_name}</span>
-            <span className="text-[11px] font-mono text-muted-foreground ms-auto">{s.student_code}</span>
-          </label>
-        ))
+    <div>
+      {hasMax && (
+        <div className="flex items-center justify-between text-xs mb-1.5">
+          <span className="text-muted-foreground">{t("picker.selected_count", { count: ids.length, max })}</span>
+          {atMax && <span className="text-warning font-medium">{t("picker.max_reached")}</span>}
+        </div>
       )}
+      <div className="border border-border rounded-lg max-h-48 overflow-y-auto p-2 space-y-1 bg-background">
+        {isLoading ? (
+          <div className="text-xs text-muted-foreground p-2">{t("picker.loading_students")}</div>
+        ) : items.length === 0 ? (
+          <div className="text-xs text-muted-foreground p-2">{t("picker.no_students")}</div>
+        ) : (
+          items.map((s) => {
+            const checked = ids.includes(s.id);
+            const disabled = !checked && atMax;
+            return (
+              <label
+                key={s.id}
+                className={`flex items-center gap-2 px-2 py-1.5 rounded text-sm ${
+                  disabled ? "opacity-40 cursor-not-allowed" : "hover:bg-muted/60 cursor-pointer"
+                }`}
+              >
+                <Checkbox
+                  checked={checked}
+                  disabled={disabled}
+                  onCheckedChange={(c) => toggle(s.id, !!c)}
+                />
+                <span>{s.first_name} {s.last_name}</span>
+                <span className="text-[11px] font-mono text-muted-foreground ms-auto">{s.student_code}</span>
+              </label>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }

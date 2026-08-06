@@ -186,9 +186,14 @@ info "Starting backend on http://localhost:$BACKEND_PORT …"
 docker rm -f "$BACKEND_CONTAINER" >/dev/null 2>&1 || true
 docker ps -q --filter "ancestor=$BACKEND_IMAGE:$REQ_HASH" | xargs -r docker rm -f >/dev/null 2>&1 || true
 run_backend_container() {
+  # GUNICORN_CMD_ARGS=--reload is set here (dev only), not in the Dockerfile:
+  # the source tree is bind-mounted below so code edits apply without a
+  # rebuild, but --reload must never ship to production, where it would stat
+  # the entire tree on a loop for no benefit.
   docker run -d --name "$BACKEND_CONTAINER" \
     --network host \
     --env-file "$BACKEND_DIR/.env" \
+    -e GUNICORN_CMD_ARGS=--reload \
     -v "$BACKEND_DIR":/app \
     "$BACKEND_IMAGE:$REQ_HASH" >/dev/null
 }

@@ -25,4 +25,26 @@ COPY . .
 
 EXPOSE 8002
 
-CMD ["gunicorn", "schooldz.wsgi:application", "--bind", "0.0.0.0:8002", "--workers", "3", "--timeout", "60", "--reload", "--access-logfile", "-", "--error-logfile", "-"]
+# Production-safe defaults. Tunables come from the environment so the same
+# image serves both local dev and the VPS:
+#   GUNICORN_WORKERS   — rule of thumb (2 x CPU cores) + 1; KVM1 (1 vCPU) -> 3
+#   GUNICORN_THREADS   — threads per worker; this app is I/O-bound (DB +
+#                        Chargily HTTP), so threads add throughput cheaply
+#                        without the memory cost of more processes
+#   GUNICORN_CMD_ARGS  — read natively by gunicorn; launch.sh sets --reload
+#                        here for local dev. NOT set in production, where
+#                        --reload would stat the whole tree continuously.
+ENV GUNICORN_WORKERS=3 \
+    GUNICORN_THREADS=4
+
+CMD gunicorn schooldz.wsgi:application \
+    --bind 0.0.0.0:8002 \
+    --workers "$GUNICORN_WORKERS" \
+    --threads "$GUNICORN_THREADS" \
+    --worker-class gthread \
+    --timeout 60 \
+    --graceful-timeout 30 \
+    --max-requests 1000 \
+    --max-requests-jitter 100 \
+    --access-logfile - \
+    --error-logfile -

@@ -4,8 +4,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import {
-  ArrowUpRight, Building2, GraduationCap, LogOut, Moon, Sun,
-  ShieldCheck, Trash2, Users, Wallet, PowerOff, Power, Pencil,
+  ArrowUpRight, Building2, GraduationCap, LogOut, Moon, Sun, Tag,
+  ShieldCheck, Trash2, Users, Wallet, PowerOff, Power, Pencil, Plus,
 } from "lucide-react";
 
 import { api, extractError } from "@/lib/api";
@@ -16,13 +16,32 @@ import { useConfirm } from "@/lib/confirm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { StatusPill } from "@/pages/app/_shared";
+import { StatusPill, isoToLocalInput, localInputToIso } from "@/pages/app/_shared";
+
+const COUPON_PLANS = ["basic", "standard", "premium"];
+const EMPTY_COUPON_FORM = {
+  code: "", description: "", discount_type: "percent", discount_value: 10,
+  applicable_plans: [], max_redemptions: "", starts_at: "", expires_at: "", active: true,
+};
+
+const DURATION_PRESETS = [
+  { label: "7 days", days: 7 },
+  { label: "30 days", days: 30 },
+  { label: "90 days", days: 90 },
+  { label: "1 year", days: 365 },
+];
+const EMPTY_TENANT_FORM = {
+  name: "", slug: "", center_type: "tutoring",
+  owner_name: "", owner_email: "", owner_password: "",
+  plan: "premium", duration_days: 30,
+};
 
 const USER_ROLES = [
   { value: "owner", label: "Owner" },
@@ -74,6 +93,33 @@ export default function AdminDashboardPage() {
     onError: (e) => toast.error(extractError(e)),
   });
 
+  const [tenantOpen, setTenantOpen] = useState(false);
+  const [tenantForm, setTenantForm] = useState(EMPTY_TENANT_FORM);
+
+  const openNewTenant = () => {
+    setTenantForm(EMPTY_TENANT_FORM);
+    setTenantOpen(true);
+  };
+
+  const createTenantMut = useMutation({
+    mutationFn: (payload) => api.post("/tenants", payload).then((r) => r.data),
+    onSuccess: () => {
+      toast.success("Workspace created");
+      qc.invalidateQueries({ queryKey: ["admin-platform"] });
+      setTenantOpen(false);
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
+  const submitTenant = (e) => {
+    e.preventDefault();
+    createTenantMut.mutate({
+      ...tenantForm,
+      slug: tenantForm.slug.trim().toLowerCase(),
+      duration_days: parseInt(tenantForm.duration_days, 10) || 30,
+    });
+  };
+
   const { data: usersData, isLoading: usersLoading } = useQuery({
     queryKey: ["admin-users"],
     queryFn: async () => (await api.get("/users")).data,
@@ -112,12 +158,83 @@ export default function AdminDashboardPage() {
     onError: (e) => toast.error(extractError(e)),
   });
 
+  const { data: couponsData, isLoading: couponsLoading } = useQuery({
+    queryKey: ["admin-coupons"],
+    queryFn: async () => (await api.get("/coupons")).data,
+    enabled: user?.role === "super_admin",
+  });
+
+  const [couponOpen, setCouponOpen] = useState(false);
+  const [editingCoupon, setEditingCoupon] = useState(null);
+  const [couponForm, setCouponForm] = useState(EMPTY_COUPON_FORM);
+
+  const openNewCoupon = () => {
+    setEditingCoupon(null);
+    setCouponForm(EMPTY_COUPON_FORM);
+    setCouponOpen(true);
+  };
+
+  const openEditCoupon = (c) => {
+    setEditingCoupon(c);
+    setCouponForm({
+      code: c.code, description: c.description || "", discount_type: c.discount_type,
+      discount_value: c.discount_value, applicable_plans: c.applicable_plans || [],
+      max_redemptions: c.max_redemptions ?? "", starts_at: isoToLocalInput(c.starts_at),
+      expires_at: isoToLocalInput(c.expires_at), active: c.active,
+    });
+    setCouponOpen(true);
+  };
+
+  const saveCouponMut = useMutation({
+    mutationFn: (payload) =>
+      editingCoupon
+        ? api.patch(`/coupons/${editingCoupon.id}`, payload).then((r) => r.data)
+        : api.post("/coupons", payload).then((r) => r.data),
+    onSuccess: () => {
+      toast.success(editingCoupon ? "Coupon updated" : "Coupon created");
+      qc.invalidateQueries({ queryKey: ["admin-coupons"] });
+      setCouponOpen(false);
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
+  const deleteCouponMut = useMutation({
+    mutationFn: (id) => api.delete(`/coupons/${id}`).then((r) => r.data),
+    onSuccess: () => {
+      toast.success("Coupon deleted");
+      qc.invalidateQueries({ queryKey: ["admin-coupons"] });
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
+  const toggleCouponActiveMut = useMutation({
+    mutationFn: ({ id, active }) => api.patch(`/coupons/${id}`, { active }).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin-coupons"] });
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
+  const submitCoupon = (e) => {
+    e.preventDefault();
+    const payload = {
+      ...couponForm,
+      code: couponForm.code.trim().toUpperCase(),
+      discount_value: parseFloat(couponForm.discount_value) || 0,
+      max_redemptions: couponForm.max_redemptions === "" ? null : parseInt(couponForm.max_redemptions, 10),
+      starts_at: localInputToIso(couponForm.starts_at) || null,
+      expires_at: localInputToIso(couponForm.expires_at) || null,
+    };
+    saveCouponMut.mutate(payload);
+  };
+
   if (!user || user.role !== "super_admin") return null;
 
   const kpis = data?.kpis || {};
   const tenants = data?.tenants || [];
   const tenantNameById = Object.fromEntries(tenants.map((tt) => [tt.id, tt.name]));
   const platformUsers = (usersData?.items || []).filter((u) => u.role !== "super_admin");
+  const coupons = couponsData?.items || [];
 
   const openEdit = (u) => {
     setEditingUser(u);
@@ -213,6 +330,9 @@ export default function AdminDashboardPage() {
                 {tenants.length} {tenants.length === 1 ? "workspace" : "workspaces"} on the platform
               </p>
             </div>
+            <Button size="sm" onClick={openNewTenant} data-testid="admin-tenant-new" className="bg-accent hover:bg-accent/90 text-accent-foreground">
+              <Plus className="w-3.5 h-3.5 me-1.5" /> New workspace
+            </Button>
           </div>
 
           {isLoading ? (
@@ -431,6 +551,124 @@ export default function AdminDashboardPage() {
             </div>
           )}
         </div>
+
+        {/* Coupons */}
+        <div className="surface-card overflow-hidden mt-8">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <div>
+              <h3 className="font-display font-semibold text-lg">Coupons</h3>
+              <p className="text-xs text-muted-foreground">
+                {coupons.length} {coupons.length === 1 ? "coupon" : "coupons"} · redeemable at signup checkout
+              </p>
+            </div>
+            <Button size="sm" onClick={openNewCoupon} data-testid="admin-coupon-new" className="bg-accent hover:bg-accent/90 text-accent-foreground">
+              <Plus className="w-3.5 h-3.5 me-1.5" /> New coupon
+            </Button>
+          </div>
+
+          {couponsLoading ? (
+            <div className="p-8 text-center text-muted-foreground text-sm">{t("actions.loading")}</div>
+          ) : coupons.length === 0 ? (
+            <div className="p-12 text-center">
+              <Tag className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
+              <div className="text-sm text-muted-foreground">No coupons yet</div>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/40 border-b border-border">
+                  <tr>
+                    <Th>Code</Th>
+                    <Th>Discount</Th>
+                    <Th>Plans</Th>
+                    <Th>Redeemed</Th>
+                    <Th>Window</Th>
+                    <Th>Status</Th>
+                    <Th className="text-end">Actions</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {coupons.map((c, i) => (
+                    <motion.tr
+                      key={c.id}
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.03 }}
+                      data-testid={`admin-coupon-row-${c.id}`}
+                      className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors"
+                    >
+                      <td className="px-4 py-3 font-mono font-medium">{c.code}</td>
+                      <td className="px-4 py-3 font-mono text-xs">
+                        {c.discount_type === "percent" ? `${c.discount_value}%` : `${Number(c.discount_value).toLocaleString()} DZD`}
+                      </td>
+                      <td className="px-4 py-3">
+                        {c.applicable_plans && c.applicable_plans.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {c.applicable_plans.map((p) => (
+                              <span key={p} className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted capitalize">{p}</span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">All plans</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs">
+                        {c.times_redeemed}{c.max_redemptions != null ? ` / ${c.max_redemptions}` : ""}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                        {c.starts_at || c.expires_at ? (
+                          <>
+                            {c.starts_at ? new Date(c.starts_at).toLocaleDateString() : "…"}
+                            {" → "}
+                            {c.expires_at ? new Date(c.expires_at).toLocaleDateString() : "…"}
+                          </>
+                        ) : (
+                          "Always"
+                        )}
+                      </td>
+                      <td className="px-4 py-3"><StatusPill status={c.active ? "active" : "inactive"} /></td>
+                      <td className="px-4 py-2 text-end">
+                        <div className="inline-flex items-center gap-1">
+                          {c.active ? (
+                            <Button
+                              size="sm" variant="outline"
+                              onClick={() => toggleCouponActiveMut.mutate({ id: c.id, active: false })}
+                              className="h-8 text-xs text-warning border-warning/30 hover:bg-warning/10"
+                            >
+                              <PowerOff className="w-3 h-3 me-1" /> Disable
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm" variant="outline"
+                              onClick={() => toggleCouponActiveMut.mutate({ id: c.id, active: true })}
+                              className="h-8 text-xs text-success border-success/30 hover:bg-success/10"
+                            >
+                              <Power className="w-3 h-3 me-1" /> Enable
+                            </Button>
+                          )}
+                          <Button size="icon" variant="ghost" onClick={() => openEditCoupon(c)} className="h-8 w-8">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            size="icon" variant="ghost"
+                            onClick={async () => {
+                              if (await confirm({ title: `Delete coupon ${c.code}?`, confirmLabel: "Delete", destructive: true })) {
+                                deleteCouponMut.mutate(c.id);
+                              }
+                            }}
+                            className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </td>
+                    </motion.tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </main>
 
       {/* Edit user dialog */}
@@ -501,6 +739,282 @@ export default function AdminDashboardPage() {
                 type="submit"
                 disabled={updateUserMut.isPending}
                 data-testid="admin-user-form-submit"
+                className="bg-accent hover:bg-accent/90 text-accent-foreground"
+              >
+                {t("actions.save")}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* New workspace dialog — creates the tenant + owner account directly
+          (bypasses Chargily entirely), optionally granting a plan for a
+          duration you pick. The tenant's existing renew/upgrade flows work
+          unmodified afterwards since this just populates the same
+          plan/status/plan_expires_at fields Chargily checkouts would. */}
+      <Dialog open={tenantOpen} onOpenChange={setTenantOpen}>
+        <DialogContent className="max-w-lg bg-card">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl">New workspace</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Creates the workspace and owner account directly — no payment required.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={submitTenant} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="tenant-name">Workspace name</Label>
+                <Input
+                  id="tenant-name"
+                  value={tenantForm.name}
+                  onChange={(e) => setTenantForm({ ...tenantForm, name: e.target.value })}
+                  required
+                  data-testid="admin-tenant-form-name"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="tenant-slug">Slug</Label>
+                <Input
+                  id="tenant-slug"
+                  value={tenantForm.slug}
+                  onChange={(e) => setTenantForm({ ...tenantForm, slug: e.target.value })}
+                  placeholder="my-school"
+                  required
+                  data-testid="admin-tenant-form-slug"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="tenant-owner-name">Owner name</Label>
+                <Input
+                  id="tenant-owner-name"
+                  value={tenantForm.owner_name}
+                  onChange={(e) => setTenantForm({ ...tenantForm, owner_name: e.target.value })}
+                  required
+                  data-testid="admin-tenant-form-owner-name"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="tenant-owner-email">Owner email</Label>
+                <Input
+                  id="tenant-owner-email"
+                  type="email"
+                  value={tenantForm.owner_email}
+                  onChange={(e) => setTenantForm({ ...tenantForm, owner_email: e.target.value })}
+                  required
+                  data-testid="admin-tenant-form-owner-email"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="tenant-owner-password">Owner password</Label>
+              <Input
+                id="tenant-owner-password"
+                type="password"
+                minLength={8}
+                value={tenantForm.owner_password}
+                onChange={(e) => setTenantForm({ ...tenantForm, owner_password: e.target.value })}
+                placeholder="At least 8 characters"
+                required
+                data-testid="admin-tenant-form-owner-password"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Plan</Label>
+                <Select
+                  value={tenantForm.plan}
+                  onValueChange={(v) => setTenantForm({ ...tenantForm, plan: v })}
+                >
+                  <SelectTrigger className="bg-background" data-testid="admin-tenant-form-plan"><SelectValue /></SelectTrigger>
+                  <SelectContent className="bg-popover">
+                    <SelectItem value="basic">Basic</SelectItem>
+                    <SelectItem value="standard">Standard</SelectItem>
+                    <SelectItem value="premium">Premium</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="tenant-duration">Duration (days)</Label>
+                <Input
+                  id="tenant-duration"
+                  type="number" min={1}
+                  value={tenantForm.duration_days}
+                  onChange={(e) => setTenantForm({ ...tenantForm, duration_days: e.target.value })}
+                  data-testid="admin-tenant-form-duration"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5">
+              {DURATION_PRESETS.map((p) => (
+                <Button
+                  key={p.days} type="button" size="sm" variant="outline"
+                  className="h-7 text-xs"
+                  onClick={() => setTenantForm({ ...tenantForm, duration_days: p.days })}
+                >
+                  {p.label}
+                </Button>
+              ))}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setTenantOpen(false)}>
+                {t("actions.cancel")}
+              </Button>
+              <Button
+                type="submit"
+                disabled={createTenantMut.isPending}
+                data-testid="admin-tenant-form-submit"
+                className="bg-accent hover:bg-accent/90 text-accent-foreground"
+              >
+                {createTenantMut.isPending ? "Creating…" : "Create workspace"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Create/edit coupon dialog */}
+      <Dialog open={couponOpen} onOpenChange={setCouponOpen}>
+        <DialogContent className="max-w-lg bg-card">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl">
+              {editingCoupon ? "Edit coupon" : "New coupon"}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Redeemable by any workspace at signup checkout.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={submitCoupon} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="coupon-code">Code</Label>
+                <Input
+                  id="coupon-code"
+                  value={couponForm.code}
+                  onChange={(e) => setCouponForm({ ...couponForm, code: e.target.value })}
+                  placeholder="WELCOME20"
+                  required
+                  data-testid="admin-coupon-form-code"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="coupon-description">Description</Label>
+                <Input
+                  id="coupon-description"
+                  value={couponForm.description}
+                  onChange={(e) => setCouponForm({ ...couponForm, description: e.target.value })}
+                  placeholder="Marketing campaign"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Discount type</Label>
+                <Select
+                  value={couponForm.discount_type}
+                  onValueChange={(v) => setCouponForm({ ...couponForm, discount_type: v })}
+                >
+                  <SelectTrigger className="bg-background" data-testid="admin-coupon-form-discount-type"><SelectValue /></SelectTrigger>
+                  <SelectContent className="bg-popover">
+                    <SelectItem value="percent">Percent off</SelectItem>
+                    <SelectItem value="fixed">Fixed amount (DZD)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="coupon-value">
+                  {couponForm.discount_type === "percent" ? "Percent (0-100)" : "Amount (DZD)"}
+                </Label>
+                <Input
+                  id="coupon-value"
+                  type="number" min={0} step="0.01"
+                  value={couponForm.discount_value}
+                  onChange={(e) => setCouponForm({ ...couponForm, discount_value: e.target.value })}
+                  required
+                  data-testid="admin-coupon-form-value"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Applicable plans (none checked = all plans)</Label>
+              <div className="flex items-center gap-4">
+                {COUPON_PLANS.map((p) => (
+                  <label key={p} className="flex items-center gap-2 text-sm capitalize cursor-pointer">
+                    <Checkbox
+                      checked={couponForm.applicable_plans.includes(p)}
+                      onCheckedChange={(checked) =>
+                        setCouponForm({
+                          ...couponForm,
+                          applicable_plans: checked
+                            ? [...couponForm.applicable_plans, p]
+                            : couponForm.applicable_plans.filter((x) => x !== p),
+                        })
+                      }
+                      data-testid={`admin-coupon-form-plan-${p}`}
+                    />
+                    {p}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="coupon-max">Max redemptions</Label>
+                <Input
+                  id="coupon-max"
+                  type="number" min={1}
+                  value={couponForm.max_redemptions}
+                  onChange={(e) => setCouponForm({ ...couponForm, max_redemptions: e.target.value })}
+                  placeholder="Unlimited"
+                  data-testid="admin-coupon-form-max"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="coupon-starts">Starts</Label>
+                <Input
+                  id="coupon-starts"
+                  type="datetime-local"
+                  value={couponForm.starts_at}
+                  onChange={(e) => setCouponForm({ ...couponForm, starts_at: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="coupon-expires">Expires</Label>
+                <Input
+                  id="coupon-expires"
+                  type="datetime-local"
+                  value={couponForm.expires_at}
+                  onChange={(e) => setCouponForm({ ...couponForm, expires_at: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox
+                checked={couponForm.active}
+                onCheckedChange={(checked) => setCouponForm({ ...couponForm, active: !!checked })}
+                data-testid="admin-coupon-form-active"
+              />
+              Active
+            </label>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setCouponOpen(false)}>
+                {t("actions.cancel")}
+              </Button>
+              <Button
+                type="submit"
+                disabled={saveCouponMut.isPending}
+                data-testid="admin-coupon-form-submit"
                 className="bg-accent hover:bg-accent/90 text-accent-foreground"
               >
                 {t("actions.save")}

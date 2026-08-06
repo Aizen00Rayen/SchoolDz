@@ -22,6 +22,8 @@ router.register('sessions', views.ClassSessionViewSet, basename='session')
 router.register('payments', views.PaymentViewSet, basename='payment')
 router.register('grades', views.GradeViewSet, basename='grade')
 router.register('conversations', views.ConversationViewSet, basename='conversation')
+router.register('quizzes', views.QuizViewSet, basename='quiz')
+router.register('coupons', views.CouponViewSet, basename='coupon')
 
 def _both(route, view, name):
     """Return URL patterns for route both with and without trailing slash."""
@@ -46,6 +48,11 @@ urlpatterns = [
 
     # Public student-badge lookup (student mobile app — no login, see docstring)
     *_both('public/student-lookup', views.public_student_lookup, 'public_student_lookup'),
+
+    # Public quiz-taking link (no student login, see docstring)
+    path('public/quiz-attempts/<str:token>/', views.public_quiz_attempt, name='public_quiz_attempt'),
+    path('public/quiz-attempts/<str:token>', views.public_quiz_attempt, name='public_quiz_attempt_noslash'),
+    *_both('public/quiz-attempts/<str:token>/submit', views.public_quiz_attempt_submit, 'public_quiz_attempt_submit'),
 
     # Public self-enrollment page (per-school, unauthenticated)
     path('public/schools/<str:slug>/enroll/', views.public_school_enroll, name='public_school_enroll'),
@@ -83,6 +90,11 @@ urlpatterns = [
     *_both('payments/overdue', views.payments_overdue, 'payments_overdue'),
     path('payments/<str:payment_id>/invoice/', views.payment_invoice_pdf, name='payment_invoice_pdf'),
     path('payments/<str:payment_id>/invoice', views.payment_invoice_pdf, name='payment_invoice_pdf_noslash'),
+
+    # Website builder — gallery photo delete/reorder (needs a second id
+    # beyond the tenant pk, so it's a plain path rather than a router action)
+    path('tenants/<str:tenant_id>/gallery/<str:photo_id>/', views.gallery_photo_detail, name='gallery_photo_detail'),
+    path('tenants/<str:tenant_id>/gallery/<str:photo_id>', views.gallery_photo_detail, name='gallery_photo_detail_noslash'),
 
     # Parent portal
     *_both('portal/children', views.portal_children, 'portal_children'),

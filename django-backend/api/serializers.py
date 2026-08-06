@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Attendance, Payment, Grade, ChargilyCheckout, Conversation, Message
+from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Attendance, Payment, Grade, ChargilyCheckout, Conversation, Message, Coupon, Quiz, Question, Choice, QuizAttempt, SchoolGalleryPhoto
 
 class TenantSerializer(serializers.ModelSerializer):
     class Meta:
@@ -35,7 +35,10 @@ class GuardianSerializer(serializers.ModelSerializer):
         exclude = ['tenant', 'user']
 
     def get_student_ids(self, obj):
-        return list(obj.students.values_list('id', flat=True))
+        # .all() reuses prefetch_related('students') from the view; using
+        # .values_list() here silently bypasses that cache and fires one
+        # extra query per row (a 500-row page = 500 extra queries).
+        return [s.id for s in obj.students.all()]
 
 
 class TeacherSerializer(serializers.ModelSerializer):
@@ -91,7 +94,9 @@ class GroupSerializer(serializers.ModelSerializer):
         exclude = ['tenant', 'course', 'teacher', 'students']
 
     def get_student_ids(self, obj):
-        return list(obj.students.values_list('id', flat=True))
+        # See GuardianSerializer.get_student_ids — .all() hits the
+        # prefetch cache, .values_list() would re-query per row.
+        return [s.id for s in obj.students.all()]
 
 
 class ClassSessionSerializer(serializers.ModelSerializer):
@@ -205,3 +210,84 @@ class ConversationSerializer(serializers.ModelSerializer):
 
     def get_unread_by_guardian(self, obj):
         return bool(obj.last_message_at and (not obj.last_read_by_guardian_at or obj.last_message_at > obj.last_read_by_guardian_at))
+
+
+class CouponSerializer(serializers.ModelSerializer):
+    times_redeemed = serializers.SerializerMethodField()
+    redemptions_left = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Coupon
+        exclude = ['created_by']
+
+    def get_times_redeemed(self, obj):
+        return obj.checkouts.filter(status='paid').count()
+
+    def get_redemptions_left(self, obj):
+        if obj.max_redemptions is None:
+            return None
+        return max(0, obj.max_redemptions - self.get_times_redeemed(obj))
+
+
+# Teacher-facing choice/question serializers — includes is_correct, unlike
+# the public take-quiz payload (built by hand in views.py) which must never
+# leak the answer key to a student.
+class ChoiceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Choice
+        exclude = ['tenant', 'question']
+
+
+class QuestionSerializer(serializers.ModelSerializer):
+    choices = ChoiceSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Question
+        exclude = ['tenant', 'quiz']
+
+
+class QuizSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.PrimaryKeyRelatedField(
+        queryset=Tenant.objects.all(), source='tenant', required=False, allow_null=True
+    )
+    course_id = serializers.PrimaryKeyRelatedField(
+        queryset=Course.objects.all(), source='course', allow_null=True, required=False
+    )
+    group_id = serializers.PrimaryKeyRelatedField(
+        queryset=Group.objects.all(), source='group', allow_null=True, required=False
+    )
+    questions = QuestionSerializer(many=True, read_only=True)
+    question_count = serializers.SerializerMethodField()
+    group_name = serializers.CharField(source='group.name', read_only=True, default=None)
+    # Every QuizAttempt row is a completed submission now (the shared-link
+    # flow only ever creates one at submit time — see
+    # public_quiz_attempt_submit) — just the one count, no submitted/total
+    # split like the old per-student-link model had.
+    attempts_total = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Quiz
+        exclude = ['tenant', 'course', 'group']
+
+    def get_question_count(self, obj):
+        return obj.questions.count()
+
+    def get_attempts_total(self, obj):
+        return obj.attempts.count()
+
+
+class QuizAttemptSerializer(serializers.ModelSerializer):
+    student_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = QuizAttempt
+        exclude = ['tenant']
+
+    def get_student_name(self, obj):
+        return f"{obj.student.first_name} {obj.student.last_name}" if obj.student else None
+
+
+class SchoolGalleryPhotoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SchoolGalleryPhoto
+        exclude = ['tenant']

@@ -8,16 +8,39 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Load environment variables
 load_dotenv(os.path.join(BASE_DIR, '.env'))
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get('APP_KEY', 'django-insecure-%q(fy0te%gstq%wv2pevrtwm^9h%7!xitq5ny2!qan#331^&pd').replace('base64:', '')
-
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('APP_DEBUG', 'true').lower() == 'true'
+# Defaults to False so a missing/typo'd APP_DEBUG can never silently expose
+# tracebacks (which leak settings, SQL and env vars) on a live server.
+# launch.sh writes APP_DEBUG=true into the local .env, so dev is unaffected.
+DEBUG = os.environ.get('APP_DEBUG', 'false').lower() == 'true'
 
-# Comma-separated in production (e.g. ALLOWED_HOSTS=scolarisdz.duckdns.org);
-# defaults to '*' only for local dev, where the host is never attacker-controlled.
+# SECURITY WARNING: keep the secret key used in production secret!
+# Falling back to a hardcoded key in production would let anyone who has read
+# this repo forge session cookies and signed tokens, so outside DEBUG we
+# refuse to boot rather than come up quietly insecure.
+SECRET_KEY = os.environ.get('APP_KEY', '').replace('base64:', '')
+if not SECRET_KEY:
+    if DEBUG:
+        SECRET_KEY = 'django-insecure-local-dev-only-not-for-production'
+    else:
+        raise RuntimeError(
+            'APP_KEY is not set. Refusing to start with an insecure fallback secret key. '
+            'Generate one with: python -c "import secrets; print(secrets.token_urlsafe(50))"'
+        )
+
+# Comma-separated in production (e.g. ALLOWED_HOSTS=scolarisdz.duckdns.org).
+# '*' is allowed only in DEBUG; in production an unset value is a
+# misconfiguration we want to fail loudly on, not paper over.
 _allowed_hosts = os.environ.get('ALLOWED_HOSTS', '')
-ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts.split(',') if h.strip()] or ['*']
+ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts.split(',') if h.strip()]
+if not ALLOWED_HOSTS:
+    if DEBUG:
+        ALLOWED_HOSTS = ['*']
+    else:
+        raise RuntimeError(
+            'ALLOWED_HOSTS is not set. Set it to your domain, e.g. '
+            'ALLOWED_HOSTS=scolarisdz.duckdns.org'
+        )
 
 
 # Application definition
@@ -104,6 +127,11 @@ else:
             'PASSWORD': os.environ.get('DB_PASSWORD', 'schooldzpass'),
             'HOST': os.environ.get('DB_HOST', '127.0.0.1'),
             'PORT': os.environ.get('DB_PORT', '3306'),
+            # Reuse each worker's DB connection across requests instead of
+            # doing a TCP + auth handshake per request. Kept under MySQL's
+            # default wait_timeout so we never hand a stale socket to a query.
+            'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', '60')),
+            'CONN_HEALTH_CHECKS': True,
             'OPTIONS': {
                 'charset': 'utf8mb4',
             }
@@ -169,12 +197,28 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 
 # CORS Configuration
+# CORS_ALLOW_ALL_ORIGINS together with CORS_ALLOW_CREDENTIALS lets *any*
+# website read authenticated API responses in a logged-in user's browser, so
+# the wildcard is confined to DEBUG. In production an unset CORS_ORIGINS
+# yields an empty allow-list (same-origin only) rather than "allow everyone".
 cors_origins = os.environ.get('CORS_ORIGINS', '')
-if cors_origins:
-    CORS_ALLOWED_ORIGINS = [origin.strip() for origin in cors_origins.split(',') if origin.strip()]
-else:
+CORS_ALLOWED_ORIGINS = [o.strip() for o in cors_origins.split(',') if o.strip()]
+if not CORS_ALLOWED_ORIGINS and DEBUG:
     CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
+
+# Production hardening. Behind nginx+certbot (the live setup), these make the
+# browser enforce HTTPS and stop cookies leaking over plaintext.
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_SSL_REDIRECT = os.environ.get('SECURE_SSL_REDIRECT', 'true').lower() == 'true'
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    SECURE_REFERRER_POLICY = 'same-origin'
+    X_FRAME_OPTIONS = 'DENY'
 
 
 # Authentication
@@ -213,7 +257,15 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'uploads')
 
 
 # Local development settings & integrations
-DEV_EXPOSE_RESET_TOKENS = os.environ.get('DEV_EXPOSE_RESET_TOKENS', 'false').lower() == 'true'
+# Returns password-reset tokens directly in the API response — an
+# unauthenticated account-takeover primitive for any known email address.
+# `and DEBUG` is deliberate: launch.sh writes DEV_EXPOSE_RESET_TOKENS=true
+# into the generated .env, so if that file is ever copied to a server this
+# flag alone would hand out reset tokens. Gating it on DEBUG means production
+# cannot enable it even by misconfiguration.
+DEV_EXPOSE_RESET_TOKENS = (
+    os.environ.get('DEV_EXPOSE_RESET_TOKENS', 'false').lower() == 'true' and DEBUG
+)
 GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID', '')
 GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET', '')
 GOOGLE_REDIRECT_URI = os.environ.get('GOOGLE_REDIRECT_URI', 'http://localhost:8002/api/v1/auth/google/callback')

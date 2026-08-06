@@ -112,6 +112,7 @@ export default function GroupsPage() {
             <StudentPicker
               selected={form.student_ids}
               onChange={(ids) => setForm({ ...form, student_ids: ids })}
+              max={parseInt(form.capacity, 10) || 0}
             />
           </div>
         </div>

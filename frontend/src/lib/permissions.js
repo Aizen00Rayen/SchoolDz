@@ -3,7 +3,7 @@ import { useAuth } from "@/lib/auth";
 // Mirrors PERMISSION_MODULES/PERMISSION_LEVELS in django-backend/api/models.py.
 export const PERMISSION_MODULES = [
   "students", "teachers", "parents", "courses", "groups",
-  "sessions", "payments", "grades", "attendance", "messages",
+  "sessions", "payments", "grades", "attendance", "messages", "quizzes",
 ];
 export const PERMISSION_LEVELS = ["hidden", "view", "edit"];
 

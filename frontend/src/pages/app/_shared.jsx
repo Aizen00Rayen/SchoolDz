@@ -175,6 +175,11 @@ export function StatusPill({ status, tone = "default" }) {
     draft: "bg-muted text-muted-foreground",
     graduated: "bg-info/10 text-info",
     archived: "bg-muted text-muted-foreground",
+    published: "bg-success/10 text-success",
+    closed: "bg-muted text-muted-foreground",
+    not_started: "bg-muted text-muted-foreground",
+    in_progress: "bg-info/10 text-info",
+    submitted: "bg-success/10 text-success",
   };
   const cls = map[status] || "bg-muted text-muted-foreground";
   return (
@@ -301,6 +306,27 @@ const nowLocalIso = () => {
   return d.toISOString().slice(0, 16);
 };
 
+/** The backend stores everything in UTC (settings.TIME_ZONE='UTC'), but every
+ * date/time <input> in this app works in naive "local wall-clock" strings
+ * with no timezone marker (e.g. "2026-08-05T14:30"). Sending that string to
+ * the API as-is gets misread as 14:30 UTC instead of 14:30 local — wrong by
+ * the browser's UTC offset, and visibly so whenever it crosses midnight.
+ * These two convert at the boundary so every picker always shows/sends the
+ * user's actual local time regardless of server timezone. */
+export function isoToLocalInput(isoString) {
+  if (!isoString) return "";
+  const d = new Date(isoString);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+export function localInputToIso(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? "" : d.toISOString();
+}
+
 /** "Make recurring" dialog — generates up to 12 weeks of sessions for a
  * group in one call. Shared between SessionsPage and CalendarPage so both
  * surfaces stay wired to the same /sessions/generate-recurring mutation. */
@@ -311,7 +337,11 @@ export function RecurringDialog({ groups }) {
   const [form, setForm] = useState({ group_id: "", start_at: nowLocalIso(), end_at: nowLocalIso(), weeks: 8 });
 
   const mut = useMutation({
-    mutationFn: () => api.post("/sessions/generate-recurring", form).then((r) => r.data),
+    mutationFn: () => api.post("/sessions/generate-recurring", {
+      ...form,
+      start_at: localInputToIso(form.start_at),
+      end_at: localInputToIso(form.end_at),
+    }).then((r) => r.data),
     onSuccess: (data) => {
       toast.success(t("toast.sessions_created", { count: data.items?.length || 0 }));
       qc.invalidateQueries({ queryKey: ["sessions"] });

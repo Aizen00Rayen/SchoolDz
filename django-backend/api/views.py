@@ -9,6 +9,7 @@ import base64
 import mimetypes
 import requests
 import openpyxl
+from PIL import Image, ImageOps
 from datetime import datetime, timedelta
 from django.conf import settings
 from django.db import transaction
@@ -25,8 +26,8 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, PermissionDenied, NotFound, APIException
 from rest_framework.authtoken.models import Token
 
-from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Attendance, Payment, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, PERMISSION_MODULES, PERMISSION_LEVELS
-from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, AttendanceSerializer, PaymentSerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer
+from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Attendance, Payment, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, Question, Choice, QuizAttempt, Answer, SchoolGalleryPhoto, PERMISSION_MODULES, PERMISSION_LEVELS
+from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, AttendanceSerializer, PaymentSerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuestionSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer
 from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle, EnrollmentRateThrottle
 
 # Single source of truth for pricing:
@@ -42,6 +43,8 @@ PLANS_CONFIG = {
             'custom_branding': False,
             'parent_portal': False,
             'calendar_planner': False,
+            'quiz_builder': False,
+            'website_builder': False,
         },
         'standard': {
             'name': 'Standard',
@@ -52,6 +55,8 @@ PLANS_CONFIG = {
             'custom_branding': True,
             'parent_portal': True,
             'calendar_planner': False,
+            'quiz_builder': False,
+            'website_builder': False,
         },
         'premium': {
             'name': 'Premium',
@@ -62,6 +67,8 @@ PLANS_CONFIG = {
             'custom_branding': True,
             'parent_portal': True,
             'calendar_planner': True,
+            'quiz_builder': True,
+            'website_builder': True,
         },
     }
 }
@@ -104,6 +111,38 @@ def prorate_upgrade_amount(tenant, new_plan):
     return max(0, int(round(new_remaining_cost - unused_credit)))
 
 
+def validate_coupon(code, plan):
+    """Raises ValidationError with a specific reason, or returns the Coupon.
+    Redemption count is computed live from paid checkouts (Coupon.checkouts),
+    not a stored counter — see the Coupon model docstring."""
+    coupon = Coupon.objects.filter(code__iexact=(code or '').strip(), active=True).first()
+    if not coupon:
+        raise ValidationError('Invalid coupon code')
+    now = timezone.now()
+    if coupon.starts_at and now < coupon.starts_at:
+        raise ValidationError('This coupon is not active yet')
+    if coupon.expires_at and now > coupon.expires_at:
+        raise ValidationError('This coupon has expired')
+    if coupon.applicable_plans and plan not in coupon.applicable_plans:
+        raise ValidationError('This coupon is not valid for the selected plan')
+    if coupon.max_redemptions is not None:
+        used = ChargilyCheckout.objects.filter(coupon_id=coupon.id, status='paid').count()
+        if used >= coupon.max_redemptions:
+            raise ValidationError('This coupon has reached its usage limit')
+    return coupon
+
+
+def apply_coupon_discount(amount, coupon):
+    if not coupon:
+        return amount, 0
+    if coupon.discount_type == 'percent':
+        discount = int(round(amount * float(coupon.discount_value) / 100))
+    else:
+        discount = int(coupon.discount_value)
+    discount = min(discount, amount)
+    return max(0, amount - discount), discount
+
+
 def export_rows(headers, rows, filename, fmt):
     """Builds a downloadable CSV or XLSX response from a header row + data rows."""
     fmt = (fmt or 'csv').lower()
@@ -132,6 +171,96 @@ def export_rows(headers, rows, filename, fmt):
     )
     response['Content-Disposition'] = f'attachment; filename="{filename}.xlsx"'
     return response
+
+
+UPLOAD_SUBDIRS = {'logos', 'hero', 'teachers', 'courses', 'gallery'}
+IMAGE_UPLOAD_EXTS = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif'}
+
+
+# Longest-edge cap per upload purpose. Anything bigger is downscaled before
+# it ever touches disk — a modern phone photo is ~4000px/5MB, which is pure
+# waste for a 96px avatar and adds up fast across every tenant.
+UPLOAD_MAX_EDGE = {'logos': 512, 'teachers': 600, 'courses': 1280, 'gallery': 1600, 'hero': 2000}
+UPLOAD_JPEG_QUALITY = 82
+GALLERY_MAX_PHOTOS = 40
+
+# A ~1MB PNG can decompress to a multi-GB bitmap and OOM the worker
+# ("decompression bomb"). Pillow warns above ~89M pixels by default; make it
+# a hard error well below that since no legitimate upload here is that big.
+Image.MAX_IMAGE_PIXELS = 50_000_000
+
+
+def save_uploaded_image(file, subdir, id_prefix):
+    """Validates that the upload is a *real* image (not just a spoofed
+    Content-Type header), strips metadata, downscales it to the purpose's max
+    edge and recompresses it, then writes it to MEDIA_ROOT/<subdir>/.
+    Returns the relative /uploads/<subdir>/<file> path stored on the model.
+
+    Re-encoding through Pillow is what makes this safe: whatever bytes came
+    in, what lands on disk is a freshly-encoded image and nothing else — so a
+    payload disguised with an image Content-Type can't survive the round trip.
+    It also drops EXIF, which matters because phone photos of students and
+    staff routinely carry GPS coordinates."""
+    assert subdir in UPLOAD_SUBDIRS
+    if file.content_type not in IMAGE_UPLOAD_EXTS:
+        raise ValidationError('Only PNG, JPEG, WEBP or GIF images are allowed')
+    if file.size > 8 * 1024 * 1024:
+        # Generous inbound cap — what actually gets stored is far smaller
+        # after downscaling, so users aren't punished for straight-from-phone
+        # photos the way a hard 3MB limit did.
+        raise ValidationError('Image must be under 8MB')
+
+    try:
+        file.seek(0)
+        img = Image.open(file)
+        img.load()  # forces real decode — a spoofed/corrupt file fails here
+    except ValidationError:
+        raise
+    except Exception:
+        raise ValidationError('That file is not a valid image')
+
+    # Honour EXIF rotation before we discard EXIF, else portrait phone photos
+    # come out sideways.
+    try:
+        img = ImageOps.exif_transpose(img)
+    except Exception:
+        pass
+
+    has_alpha = img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info)
+    if has_alpha:
+        img = img.convert('RGBA')
+        ext, fmt, save_kwargs = 'png', 'PNG', {'optimize': True}
+    else:
+        img = img.convert('RGB')
+        ext, fmt, save_kwargs = 'jpg', 'JPEG', {'quality': UPLOAD_JPEG_QUALITY, 'optimize': True, 'progressive': True}
+
+    max_edge = UPLOAD_MAX_EDGE.get(subdir, 1280)
+    if max(img.size) > max_edge:
+        img.thumbnail((max_edge, max_edge), Image.LANCZOS)
+
+    filename = f"{id_prefix}-{secrets.token_urlsafe(12)}.{ext}"
+    upload_dir = os.path.join(settings.MEDIA_ROOT, subdir)
+    os.makedirs(upload_dir, exist_ok=True)
+    # Saving from the decoded image (never the raw upload stream) is what
+    # guarantees only re-encoded pixel data is written.
+    img.save(os.path.join(upload_dir, filename), fmt, **save_kwargs)
+    return f"/uploads/{subdir}/{filename}"
+
+
+def delete_uploaded_image(url, subdir):
+    if url and url.startswith(f'/uploads/{subdir}/'):
+        path = os.path.join(settings.MEDIA_ROOT, subdir, url.split('/')[-1])
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+
+
+def check_website_builder(user, tenant):
+    website_builder = bool(tenant.plan) and PLANS_CONFIG['tiers'][tenant.plan].get('website_builder', False)
+    if not user.is_super_admin() and not website_builder:
+        raise PermissionDenied('The website builder is available on the Premium plan. Upgrade your plan to use it.')
 
 
 # Base Tenant-Scoped ViewSet
@@ -375,6 +504,101 @@ def public_student_lookup(request):
     })
 
 
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def public_quiz_attempt(request, token):
+    """No-login quiz-taking link — ONE shared link per quiz for the whole
+    class (posted to a group chat, etc.), not one per student. There's no
+    pre-assigned identity behind the token; whoever opens it types their
+    own name right before answering (see public_quiz_attempt_submit)."""
+    quiz = Quiz.objects.filter(public_token=token, status='published').first()
+    if not quiz:
+        return Response({'error': 'Invalid or expired link'}, status=status.HTTP_404_NOT_FOUND)
+
+    questions = [{
+        'id': q.id,
+        'text': q.text,
+        'points': q.points,
+        'choices': [{'id': c.id, 'text': c.text} for c in q.choices.all()],
+    } for q in quiz.questions.all().prefetch_related('choices')]
+
+    return Response({
+        'quiz_title': quiz.title,
+        'description': quiz.description,
+        'time_limit_minutes': quiz.time_limit_minutes,
+        'questions': questions,
+    })
+
+
+def _match_student_by_name(group, typed_name):
+    """Best-effort, case/whitespace-insensitive full-name match against a
+    group's roster — the shared-link flow has no other way to know which
+    enrolled student is answering."""
+    if not group:
+        return None
+    normalized = ' '.join(typed_name.lower().split())
+    for s in group.students.all():
+        if ' '.join(f"{s.first_name} {s.last_name}".lower().split()) == normalized:
+            return s
+    return None
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def public_quiz_attempt_submit(request, token):
+    quiz = Quiz.objects.filter(public_token=token, status='published').select_related('group').first()
+    if not quiz:
+        return Response({'error': 'Invalid or expired link'}, status=status.HTTP_404_NOT_FOUND)
+
+    solver_name = (request.data.get('solver_name') or '').strip()
+    if not solver_name:
+        return Response({'error': 'Please enter your full name before submitting'}, status=status.HTTP_400_BAD_REQUEST)
+
+    answers_data = request.data.get('answers', [])
+    if not isinstance(answers_data, list):
+        return Response({'error': 'answers must be a list'}, status=status.HTTP_400_BAD_REQUEST)
+
+    questions = {q.id: q for q in quiz.questions.all().prefetch_related('choices')}
+    max_score = sum(float(q.points) for q in questions.values())
+    score = 0.0
+    matched_student = _match_student_by_name(quiz.group, solver_name)
+
+    with transaction.atomic():
+        attempt = QuizAttempt.objects.create(
+            tenant_id=quiz.tenant_id, quiz=quiz, student=matched_student,
+            solver_name=solver_name, max_score=max_score,
+        )
+        for a in answers_data:
+            question = questions.get(a.get('question_id'))
+            if not question:
+                continue
+            choice = None
+            choice_id = a.get('choice_id')
+            if choice_id:
+                choice = next((c for c in question.choices.all() if c.id == choice_id), None)
+            Answer.objects.create(tenant_id=quiz.tenant_id, attempt=attempt, question=question, choice=choice)
+            if choice and choice.is_correct:
+                score += float(question.points)
+
+        attempt.score = score
+        attempt.save(update_fields=['score'])
+
+        # Only when the typed name actually matched someone on the roster —
+        # an unmatched name has no student to attribute a grade to.
+        if matched_student:
+            Grade.objects.create(
+                tenant_id=quiz.tenant_id,
+                student=matched_student,
+                course=quiz.course,
+                title=quiz.title,
+                score=score,
+                max_score=max_score,
+                date=timezone.now().date(),
+            )
+
+    return Response({'score': score, 'max_score': max_score, 'matched': matched_student is not None})
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def auth_logout(request):
@@ -413,20 +637,37 @@ def public_school_info(request, slug):
             'duration_weeks': c.duration_weeks,
             'price': str(c.price),
             'color': c.color,
+            'image_url': c.image_url,
             'groups': groups,
         })
+
+    teachers = Teacher.objects.filter(tenant=tenant, show_on_website=True, status='active')
+    teacher_data = [{
+        'id': t.id, 'first_name': t.first_name, 'last_name': t.last_name,
+        'photo_url': t.photo_url, 'subjects': t.subjects,
+    } for t in teachers]
+
+    gallery = tenant.gallery_photos.all()
+    gallery_data = [{'id': p.id, 'image_url': p.image_url, 'caption': p.caption} for p in gallery]
 
     return Response({
         'id': tenant.id,
         'name': tenant.name,
         'slug': tenant.slug,
         'logo_url': tenant.logo_url,
+        'hero_image_url': tenant.hero_image_url,
         'primary_color': tenant.primary_color,
         'accent_color': tenant.accent_color,
         'language': tenant.language,
         'currency': tenant.currency,
         'enrollment_description': tenant.enrollment_description,
+        'address': tenant.address,
+        'phone': tenant.phone,
+        'map_url': tenant.map_url,
+        'social_links': tenant.social_links,
         'courses': course_data,
+        'teachers': teacher_data,
+        'gallery': gallery_data,
     })
 
 
@@ -961,6 +1202,8 @@ def billing_plans(request):
             'custom_branding': tier['custom_branding'],
             'parent_portal': tier['parent_portal'],
             'calendar_planner': tier['calendar_planner'],
+            'quiz_builder': tier['quiz_builder'],
+            'website_builder': tier['website_builder'],
         })
     return Response({'plans': plans})
 
@@ -987,12 +1230,19 @@ def billing_checkout(request):
     billing_cycle = request.data.get('billing_cycle')
     if plan not in ['basic', 'standard', 'premium'] or billing_cycle not in ['monthly', 'annual']:
         return Response({'error': 'Invalid plan or billing cycle'}, status=status.HTTP_400_BAD_REQUEST)
-        
+
     amount = resolve_amount(plan, billing_cycle)
     plan_name = PLANS_CONFIG['tiers'][plan]['name']
     description = f"Scolaris {plan_name} plan ({billing_cycle}) — {tenant.name}"
-    
-    return start_chargily_checkout(tenant, plan, billing_cycle, amount, 'signup', description)
+
+    coupon = None
+    discount_amount = 0
+    coupon_code = request.data.get('coupon_code')
+    if coupon_code:
+        coupon = validate_coupon(coupon_code, plan)
+        amount, discount_amount = apply_coupon_discount(amount, coupon)
+
+    return start_chargily_checkout(tenant, plan, billing_cycle, amount, 'signup', description, coupon=coupon, discount_amount=discount_amount)
 
 
 @api_view(['GET'])
@@ -1077,7 +1327,7 @@ def billing_upgrade(request):
     return start_chargily_checkout(tenant, new_plan, cycle, amount, 'upgrade', description)
 
 
-def start_chargily_checkout(tenant, plan, billing_cycle, amount, checkout_type, description):
+def start_chargily_checkout(tenant, plan, billing_cycle, amount, checkout_type, description, coupon=None, discount_amount=0):
     checkout = ChargilyCheckout.objects.create(
         tenant=tenant,
         plan=plan,
@@ -1085,6 +1335,8 @@ def start_chargily_checkout(tenant, plan, billing_cycle, amount, checkout_type, 
         type=checkout_type,
         amount=amount,
         currency=PLANS_CONFIG['currency'],
+        coupon=coupon,
+        discount_amount=discount_amount,
         status='pending'
     )
     
@@ -1350,7 +1602,9 @@ def dashboard_summary(request):
             'month': m_date.strftime('%b'),
             'revenue': round(m_total, 2)
         })
-        
+
+    at_risk_students = compute_at_risk_students(tid)
+
     return Response({
         'kpis': {
             'students_total': students_total,
@@ -1368,7 +1622,67 @@ def dashboard_summary(request):
         'recent_students': StudentSerializer(recent_students, many=True).data,
         'recent_payments': PaymentSerializer(recent_payments, many=True).data,
         'revenue_trend': trend,
+        'at_risk_students': at_risk_students,
     })
+
+
+def compute_at_risk_students(tid):
+    """Flags active students with overdue payments and/or a low attendance
+    rate over the last 30 days. Computed live on every dashboard/reports
+    load — this codebase has no persisted notification/alert model, and
+    every other "risk" signal (e.g. payments_overdue) already works this
+    way, so this matches the existing pattern rather than introducing new
+    stored state."""
+    today = timezone.now().date()
+    overdue_by_student = {}
+    for student_id, amount, discount in Payment.objects.filter(
+        tenant_id=tid, status__in=['pending', 'partial'], due_date__lt=today
+    ).values_list('student_id', 'amount', 'discount'):
+        overdue_by_student[student_id] = overdue_by_student.get(student_id, 0) + float(amount - discount)
+
+    cutoff = timezone.now() - timedelta(days=30)
+    session_ids = list(ClassSession.objects.filter(tenant_id=tid, start_at__gte=cutoff).values_list('id', flat=True))
+    totals = {}
+    presents = {}
+    if session_ids:
+        for student_id, mark_status in Attendance.objects.filter(
+            tenant_id=tid, session_id__in=session_ids
+        ).values_list('student_id', 'status'):
+            totals[student_id] = totals.get(student_id, 0) + 1
+            if mark_status in ('present', 'late'):
+                presents[student_id] = presents.get(student_id, 0) + 1
+
+    flagged_ids = set(overdue_by_student) | {
+        sid for sid, total in totals.items() if total >= 3 and (presents.get(sid, 0) / total) < 0.7
+    }
+    if not flagged_ids:
+        return []
+
+    results = []
+    for student in Student.objects.filter(tenant_id=tid, status='active', id__in=flagged_ids):
+        reasons = []
+        attendance_rate = None
+        total = totals.get(student.id, 0)
+        if total >= 3:
+            attendance_rate = round((presents.get(student.id, 0) / total) * 100, 1)
+            if attendance_rate < 70:
+                reasons.append('low_attendance')
+        overdue_amount = overdue_by_student.get(student.id)
+        if overdue_amount:
+            reasons.append('overdue_payment')
+        if not reasons:
+            continue
+        results.append({
+            'id': student.id,
+            'first_name': student.first_name,
+            'last_name': student.last_name,
+            'reasons': reasons,
+            'attendance_rate': attendance_rate,
+            'overdue_amount': round(overdue_amount, 2) if overdue_amount else 0,
+        })
+
+    results.sort(key=lambda r: (r['attendance_rate'] if r['attendance_rate'] is not None else 100, -r['overdue_amount']))
+    return results
 
 
 # Global Search View
@@ -1751,14 +2065,45 @@ class TenantViewSet(viewsets.ModelViewSet):
         email = request.data['owner_email'].strip().lower()
         if User.objects.filter(email=email).exists():
             return Response({'error': 'Owner email already registered'}, status=status.HTTP_409_CONFLICT)
-            
+
+        # Optional: grant a plan directly (skips Chargily entirely) for a
+        # duration the super admin picks — e.g. comping a school, running a
+        # trial, a sales demo. Once set, the tenant's existing renew/upgrade
+        # flows (billing_renew/billing_upgrade) already work unmodified off
+        # of plan/status/plan_expires_at, so "purchase and extend later"
+        # needs no extra wiring beyond populating those fields correctly here.
+        plan = request.data.get('plan') or None
+        if plan and plan not in PLANS_CONFIG['tiers']:
+            return Response({'error': 'Invalid plan'}, status=status.HTTP_400_BAD_REQUEST)
+
+        plan_expires_at = None
+        if plan:
+            try:
+                duration_days = int(request.data.get('duration_days') or 30)
+            except (TypeError, ValueError):
+                return Response({'error': 'duration_days must be an integer'}, status=status.HTTP_400_BAD_REQUEST)
+            if duration_days < 1:
+                return Response({'error': 'duration_days must be at least 1'}, status=status.HTTP_400_BAD_REQUEST)
+            plan_expires_at = timezone.now() + timedelta(days=duration_days)
+
         with transaction.atomic():
-            tenant = Tenant.objects.create(
+            tenant_fields = dict(
                 name=request.data['name'].strip(),
                 slug=slug,
                 center_type=request.data.get('center_type', 'tutoring') or 'tutoring',
-                status='active'
+                status='active',
             )
+            if plan:
+                tier = PLANS_CONFIG['tiers'][plan]
+                tenant_fields.update(
+                    plan=plan,
+                    billing_cycle='monthly',
+                    max_students=tier['max_students'],
+                    max_users=tier['max_users'],
+                    plan_started_at=timezone.now(),
+                    plan_expires_at=plan_expires_at,
+                )
+            tenant = Tenant.objects.create(**tenant_fields)
             owner = User.objects.create_user(
                 email=email,
                 password=request.data['owner_password'],
@@ -1767,7 +2112,7 @@ class TenantViewSet(viewsets.ModelViewSet):
                 role='owner',
                 email_verified=True
             )
-            
+
         return Response({
             'tenant': TenantSerializer(tenant).data,
             'owner': UserSerializer(owner).data
@@ -1786,11 +2131,13 @@ class TenantViewSet(viewsets.ModelViewSet):
         if not tenant:
             raise NotFound('Not found')
             
+        website_fields = {'enrollment_description', 'address', 'phone', 'map_url', 'social_links', 'hero_image_url'}
         owner_editable = [
             'name', 'center_type', 'logo_url', 'primary_color', 'accent_color',
-            'language', 'currency', 'timezone', 'invoice_prefix', 'student_prefix'
+            'language', 'currency', 'timezone', 'invoice_prefix', 'student_prefix',
+            *website_fields,
         ]
-        
+
         updates = {}
         for key, val in request.data.items():
             if user.is_super_admin():
@@ -1799,10 +2146,13 @@ class TenantViewSet(viewsets.ModelViewSet):
             else:
                 if key in owner_editable:
                     updates[key] = val
-                    
+
         if not updates:
             return Response({'error': 'No editable fields in payload'}, status=status.HTTP_400_BAD_REQUEST)
-            
+
+        if website_fields & updates.keys():
+            check_website_builder(user, tenant)
+
         for key, val in updates.items():
             setattr(tenant, key, val)
         tenant.save()
@@ -1819,62 +2169,82 @@ class TenantViewSet(viewsets.ModelViewSet):
             
         if 'file' not in request.FILES:
             return Response({'error': 'file is required'}, status=status.HTTP_400_BAD_REQUEST)
-            
-        logo_file = request.FILES['file']
-        
-        # Mime Type validation
-        # mimetypes.guess_type can guess, but let's check content type
-        content_type = logo_file.content_type
-        allowed_mimes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
-        if content_type not in allowed_mimes:
-            return Response({'error': 'Only PNG, JPEG, WEBP or GIF images are allowed'}, status=status.HTTP_400_BAD_REQUEST)
-            
-        if logo_file.size > 3 * 1024 * 1024:
-            return Response({'error': 'Logo must be under 3MB'}, status=status.HTTP_400_BAD_REQUEST)
-            
+
         tenant = Tenant.objects.filter(id=pk).first()
         if not tenant:
             raise NotFound('Tenant not found')
-            
+
         # Plan branding eligibility check
         custom_branding = False
         if tenant.plan:
             custom_branding = PLANS_CONFIG['tiers'][tenant.plan].get('custom_branding', False)
         if not user.is_super_admin() and not custom_branding:
             raise PermissionDenied('Custom branding (logo upload) is available on the Standard and Premium plans. Upgrade your plan to use it.')
-            
-        ext = {
-            'image/png': 'png',
-            'image/jpeg': 'jpg',
-            'image/webp': 'webp',
-            'image/gif': 'gif'
-        }.get(content_type, 'png')
-        
-        filename = f"{pk}-{secrets.token_urlsafe(12)}.{ext}"
-        
-        # Save file to uploads/logos
-        upload_dir = os.path.join(settings.MEDIA_ROOT, 'logos')
-        os.makedirs(upload_dir, exist_ok=True)
-        
-        file_path = os.path.join(upload_dir, filename)
-        with open(file_path, 'wb+') as destination:
-            for chunk in logo_file.chunks():
-                destination.write(chunk)
-                
-        # Clean up old logo
-        if tenant.logo_url and tenant.logo_url.startswith('/uploads/logos/'):
-            old_filename = tenant.logo_url.split('/')[-1]
-            old_path = os.path.join(upload_dir, old_filename)
-            if os.path.isfile(old_path):
-                try:
-                    os.remove(old_path)
-                except Exception:
-                    pass
-                    
-        tenant.logo_url = f"/uploads/logos/{filename}"
+
+        # Shared helper: validates it's a real image, strips EXIF, downscales
+        # and recompresses (see save_uploaded_image).
+        new_url = save_uploaded_image(request.FILES['file'], 'logos', pk)
+        delete_uploaded_image(tenant.logo_url, 'logos')
+        tenant.logo_url = new_url
         tenant.save()
-        
+
         return Response(TenantSerializer(tenant).data)
+
+    @action(detail=True, methods=['post'], url_path='hero-image')
+    def upload_hero_image(self, request, pk=None):
+        user = request.user
+        if not user.is_super_admin() and user.role != 'owner':
+            raise PermissionDenied('Forbidden')
+        if not user.is_super_admin() and pk != user.tenant_id:
+            raise PermissionDenied('Cannot edit another tenant')
+        if 'file' not in request.FILES:
+            return Response({'error': 'file is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        tenant = Tenant.objects.filter(id=pk).first()
+        if not tenant:
+            raise NotFound('Tenant not found')
+        check_website_builder(user, tenant)
+
+        new_url = save_uploaded_image(request.FILES['file'], 'hero', pk)
+        delete_uploaded_image(tenant.hero_image_url, 'hero')
+        tenant.hero_image_url = new_url
+        tenant.save()
+
+        return Response(TenantSerializer(tenant).data)
+
+    @action(detail=True, methods=['get', 'post'], url_path='gallery')
+    def gallery(self, request, pk=None):
+        user = request.user
+        if not user.is_super_admin() and pk != user.tenant_id:
+            raise PermissionDenied('Cannot access another tenant')
+
+        tenant = Tenant.objects.filter(id=pk).first()
+        if not tenant:
+            raise NotFound('Tenant not found')
+
+        if request.method == 'GET':
+            photos = tenant.gallery_photos.all()
+            return Response({'items': SchoolGalleryPhotoSerializer(photos, many=True).data})
+
+        if not user.is_super_admin() and user.role != 'owner':
+            raise PermissionDenied('Forbidden')
+        check_website_builder(user, tenant)
+        if 'file' not in request.FILES:
+            return Response({'error': 'file is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Hard cap — without one, a single tenant can fill the VPS disk one
+        # upload at a time (there's no per-tenant storage quota anywhere else).
+        next_order = tenant.gallery_photos.count()
+        if next_order >= GALLERY_MAX_PHOTOS:
+            raise ValidationError(f'A gallery can hold up to {GALLERY_MAX_PHOTOS} photos. Delete one to add another.')
+
+        image_url = save_uploaded_image(request.FILES['file'], 'gallery', pk)
+        photo = SchoolGalleryPhoto.objects.create(
+            tenant=tenant, image_url=image_url,
+            caption=(request.data.get('caption') or '').strip() or None,
+            order=next_order,
+        )
+        return Response(SchoolGalleryPhotoSerializer(photo).data, status=status.HTTP_200_OK)
 
 
 def _clean_permissions(raw):
@@ -1892,6 +2262,45 @@ def _clean_permissions(raw):
             raise ValidationError({'permissions': f"Invalid level '{level}' for '{module_key}'"})
         cleaned[module_key] = level
     return cleaned
+
+
+class CouponViewSet(viewsets.ModelViewSet):
+    # Platform-wide resource (Coupon has no tenant) — every action is
+    # super-admin-only, same gating style as TenantViewSet's list/create.
+    queryset = Coupon.objects.all().order_by('-created_at')
+    serializer_class = CouponSerializer
+
+    def _require_super_admin(self, request):
+        if not request.user.is_super_admin():
+            raise PermissionDenied('Forbidden')
+
+    def list(self, request, *args, **kwargs):
+        self._require_super_admin(request)
+        serializer = self.get_serializer(self.get_queryset(), many=True)
+        return Response({'items': serializer.data, 'total': len(serializer.data)})
+
+    def retrieve(self, request, *args, **kwargs):
+        self._require_super_admin(request)
+        return super().retrieve(request, *args, **kwargs)
+
+    def create(self, request, *args, **kwargs):
+        self._require_super_admin(request)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(created_by=request.user)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def update(self, request, *args, **kwargs):
+        self._require_super_admin(request)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        self._require_super_admin(request)
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        self._require_super_admin(request)
+        return super().destroy(request, *args, **kwargs)
 
 
 class UserViewSet(TenantScopedViewSet):
@@ -2165,6 +2574,21 @@ class TeacherViewSet(TenantScopedViewSet):
         ] for t in queryset]
         return export_rows(headers, rows, 'teachers', request.GET.get('type'))
 
+    @action(detail=True, methods=['post'], url_path='photo')
+    def upload_photo(self, request, pk=None):
+        self.check_module_edit()
+        teacher = self.get_object()
+        tenant = Tenant.objects.filter(id=teacher.tenant_id).first()
+        check_website_builder(request.user, tenant)
+        if 'file' not in request.FILES:
+            return Response({'error': 'file is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        new_url = save_uploaded_image(request.FILES['file'], 'teachers', teacher.id)
+        delete_uploaded_image(teacher.photo_url, 'teachers')
+        teacher.photo_url = new_url
+        teacher.save(update_fields=['photo_url', 'updated_at'])
+        return Response(TeacherSerializer(teacher).data)
+
     def create(self, request, *args, **kwargs):
         self.check_module_edit()
         data = request.data.copy()
@@ -2398,6 +2822,21 @@ class CourseViewSet(TenantScopedViewSet):
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='photo')
+    def upload_photo(self, request, pk=None):
+        self.check_module_edit()
+        course = self.get_object()
+        tenant = Tenant.objects.filter(id=course.tenant_id).first()
+        check_website_builder(request.user, tenant)
+        if 'file' not in request.FILES:
+            return Response({'error': 'file is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        new_url = save_uploaded_image(request.FILES['file'], 'courses', course.id)
+        delete_uploaded_image(course.image_url, 'courses')
+        course.image_url = new_url
+        course.save(update_fields=['image_url', 'updated_at'])
+        return Response(CourseSerializer(course).data)
 
 
 class GroupViewSet(TenantScopedViewSet):
@@ -2689,6 +3128,103 @@ class GradeViewSet(TenantScopedViewSet):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+class QuizViewSet(TenantScopedViewSet):
+    queryset = Quiz.objects.all()
+    serializer_class = QuizSerializer
+    module_key = 'quizzes'
+
+    def _check_quiz_builder(self, tenant):
+        quiz_builder = bool(tenant.plan) and PLANS_CONFIG['tiers'][tenant.plan].get('quiz_builder', False)
+        if not self.request.user.is_super_admin() and not quiz_builder:
+            raise PermissionDenied('The quiz builder is available on the Premium plan. Upgrade your plan to use it.')
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset()).order_by('-created_at')[:500]
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({'items': serializer.data, 'total': len(serializer.data)})
+
+    def create(self, request, *args, **kwargs):
+        self.check_module_edit()
+        user = request.user
+        tenant = Tenant.objects.filter(id=user.tenant_id).first()
+        if not tenant:
+            raise ValidationError('Tenant not found')
+        self._check_quiz_builder(tenant)
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        serializer.instance.created_by = user
+        serializer.instance.save(update_fields=['created_by'])
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def update(self, request, *args, **kwargs):
+        self.check_module_edit()
+        quiz = self.get_object()
+        self._check_quiz_builder(quiz.tenant)
+        return super().update(request, *args, **kwargs)
+
+    @action(detail=True, methods=['post'])
+    def save_questions(self, request, pk=None):
+        self.check_module_edit()
+        quiz = self.get_object()
+        self._check_quiz_builder(quiz.tenant)
+
+        questions_data = request.data.get('questions', [])
+        if not isinstance(questions_data, list):
+            raise ValidationError('questions must be a list')
+
+        with transaction.atomic():
+            quiz.questions.all().delete()  # cascades to choices
+            for qi, q in enumerate(questions_data):
+                text = (q.get('text') or '').strip()
+                if not text:
+                    continue
+                question = Question.objects.create(
+                    tenant_id=quiz.tenant_id, quiz=quiz, text=text,
+                    points=q.get('points') or 1, order=q.get('order', qi),
+                )
+                for ci, c in enumerate(q.get('choices') or []):
+                    c_text = (c.get('text') or '').strip()
+                    if not c_text:
+                        continue
+                    Choice.objects.create(
+                        tenant_id=quiz.tenant_id, question=question, text=c_text,
+                        is_correct=bool(c.get('is_correct')), order=c.get('order', ci),
+                    )
+        return Response(QuizSerializer(quiz).data)
+
+    @action(detail=True, methods=['post'])
+    def publish(self, request, pk=None):
+        self.check_module_edit()
+        quiz = self.get_object()
+        self._check_quiz_builder(quiz.tenant)
+        if not quiz.group_id:
+            raise ValidationError('Assign a group to this quiz before publishing.')
+        if not quiz.questions.exists():
+            raise ValidationError('Add at least one question before publishing.')
+
+        # ONE shared link for the whole class — generated once and reused on
+        # every re-publish, so a link already shared with students doesn't
+        # go stale if the teacher edits questions and republishes.
+        if not quiz.public_token:
+            quiz.public_token = secrets.token_urlsafe(24)
+        quiz.status = 'published'
+        quiz.save(update_fields=['status', 'public_token', 'updated_at'])
+
+        frontend = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000').rstrip('/')
+        return Response({
+            'quiz': QuizSerializer(quiz).data,
+            'take_url': f"{frontend}/quiz/take/{quiz.public_token}",
+        })
+
+    @action(detail=True, methods=['get'])
+    def results(self, request, pk=None):
+        quiz = self.get_object()
+        attempts = quiz.attempts.select_related('student').order_by('-created_at')
+        return Response({'items': QuizAttemptSerializer(attempts, many=True).data})
+
+
 class ConversationViewSet(TenantScopedViewSet):
     queryset = Conversation.objects.all()
     serializer_class = ConversationSerializer
@@ -2811,6 +3347,7 @@ def _delete_tenant_cascade(tenant):
         ClassSession.objects.filter(tenant_id=tenant_id).delete()
         Attendance.objects.filter(tenant_id=tenant_id).delete()
         Payment.objects.filter(tenant_id=tenant_id).delete()
+        SchoolGalleryPhoto.objects.filter(tenant_id=tenant_id).delete()
 
         tenant.delete()
 
@@ -2839,19 +3376,59 @@ def admin_destroy_tenant(request, tenant_id):
     return Response({'ok': True})
 
 
-# Serves static tenant logos directly
+@api_view(['DELETE', 'PATCH'])
+@permission_classes([IsAuthenticated])
+def gallery_photo_detail(request, tenant_id, photo_id):
+    user = request.user
+    if not user.is_super_admin() and tenant_id != user.tenant_id:
+        raise PermissionDenied('Cannot edit another tenant')
+
+    photo = SchoolGalleryPhoto.objects.filter(id=photo_id, tenant_id=tenant_id).first()
+    if not photo:
+        raise NotFound('Photo not found')
+
+    if not user.is_super_admin() and user.role != 'owner':
+        raise PermissionDenied('Forbidden')
+    tenant = Tenant.objects.filter(id=tenant_id).first()
+    check_website_builder(user, tenant)
+
+    if request.method == 'DELETE':
+        delete_uploaded_image(photo.image_url, 'gallery')
+        photo.delete()
+        return Response({'ok': True})
+
+    # PATCH: edit caption, or swap `order` with an adjacent photo to reorder
+    # (simple up/down buttons client-side — no drag-and-drop needed).
+    if 'caption' in request.data:
+        photo.caption = (request.data.get('caption') or '').strip() or None
+        photo.save(update_fields=['caption'])
+    swap_with = request.data.get('swap_with_id')
+    if swap_with:
+        other = SchoolGalleryPhoto.objects.filter(id=swap_with, tenant_id=tenant_id).first()
+        if other:
+            photo.order, other.order = other.order, photo.order
+            photo.save(update_fields=['order'])
+            other.save(update_fields=['order'])
+
+    return Response(SchoolGalleryPhotoSerializer(photo).data)
+
+
+# Serves uploaded tenant/teacher/course/gallery images directly.
 @api_view(['GET'])
 @permission_classes([AllowAny])
-def serve_logo(request, filename):
-    logo_path = os.path.join(settings.MEDIA_ROOT, 'logos', filename)
-    if not os.path.isfile(logo_path):
-        raise Http404("Logo not found")
-        
-    content_type, _ = mimetypes.guess_type(logo_path)
+def serve_upload(request, subdir, filename):
+    if subdir not in UPLOAD_SUBDIRS:
+        raise Http404("Not found")
+
+    file_path = os.path.join(settings.MEDIA_ROOT, subdir, filename)
+    if not os.path.isfile(file_path):
+        raise Http404("Not found")
+
+    content_type, _ = mimetypes.guess_type(file_path)
     if not content_type:
         content_type = 'application/octet-stream'
 
-    return FileResponse(open(logo_path, 'rb'), content_type=content_type)
+    return FileResponse(open(file_path, 'rb'), content_type=content_type)
 
 
 # Serves the built React SPA for any non-API route, so a single WSGI app

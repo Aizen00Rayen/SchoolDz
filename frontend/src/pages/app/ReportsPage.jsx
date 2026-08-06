@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { FileBarChart2, TrendingUp, TrendingDown, Users, Wallet } from "lucide-react";
+import { FileBarChart2, TrendingUp, TrendingDown, Users, Wallet, TriangleAlert } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
 import { api } from "@/lib/api";
 import { PageHeader } from "./_shared";
@@ -56,6 +56,52 @@ export default function ReportsPage() {
             </ResponsiveContainer>
           )}
         </div>
+      </div>
+
+      <div className="surface-card p-5 mt-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-display font-semibold text-lg">{t("dashboard.at_risk")}</h3>
+          <TriangleAlert className="w-4 h-4 text-warning" />
+        </div>
+        {(data?.at_risk_students || []).length === 0 ? (
+          <div className="text-sm text-muted-foreground text-center py-8">{t("dashboard.no_at_risk")}</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="border-b border-border">
+                <tr>
+                  <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("field.full_name")}</th>
+                  <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("dashboard.attendance_rate")}</th>
+                  <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("dashboard.overdue_amount")}</th>
+                  <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("dashboard.reasons")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.at_risk_students.map((s) => (
+                  <tr key={s.id} className="border-b border-border last:border-0">
+                    <td className="px-3 py-2 font-medium">{s.first_name} {s.last_name}</td>
+                    <td className="px-3 py-2 font-mono text-xs">{s.attendance_rate != null ? `${s.attendance_rate}%` : "—"}</td>
+                    <td className="px-3 py-2 font-mono text-xs">{s.overdue_amount ? `${s.overdue_amount.toLocaleString()} ${tenant?.currency || "DZD"}` : "—"}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-1">
+                        {s.reasons.includes("low_attendance") && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-warning/10 text-warning">
+                            {t("dashboard.reason_low_attendance")}
+                          </span>
+                        )}
+                        {s.reasons.includes("overdue_payment") && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-destructive/10 text-destructive">
+                            {t("dashboard.reason_overdue")}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { LogOut } from "lucide-react";
+import { LogOut, Tag } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { api, extractError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import PlanCards from "@/components/PlanCards";
 
 /**
@@ -16,11 +17,16 @@ export default function BillingGatePage() {
   const { tenant, user, logout } = useAuth();
   const { t } = useI18n();
   const [busyPlan, setBusyPlan] = useState(null);
+  const [couponCode, setCouponCode] = useState("");
 
   const onSelectPlan = async (plan, billingCycle) => {
     setBusyPlan(plan);
     try {
-      const { data } = await api.post("/billing/checkout", { plan, billing_cycle: billingCycle });
+      const { data } = await api.post("/billing/checkout", {
+        plan,
+        billing_cycle: billingCycle,
+        ...(couponCode.trim() ? { coupon_code: couponCode.trim() } : {}),
+      });
       window.location.href = data.checkout_url;
     } catch (err) {
       toast.error(extractError(err));
@@ -66,6 +72,19 @@ export default function BillingGatePage() {
           <p className="text-muted-foreground">
             Signed in as {user?.email}. Pick a plan below to complete setup — payment is required before you can access your workspace.
           </p>
+        </div>
+
+        <div className="max-w-xs mx-auto mb-8">
+          <div className="relative">
+            <Tag className="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              value={couponCode}
+              onChange={(e) => setCouponCode(e.target.value)}
+              placeholder={t("billing.coupon_placeholder")}
+              className="ps-9 text-center font-mono uppercase"
+              data-testid="billing-coupon-input"
+            />
+          </div>
         </div>
 
         <PlanCards mode="checkout" onSelectPlan={onSelectPlan} busyPlan={busyPlan} t={t} />

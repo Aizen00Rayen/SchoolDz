@@ -159,6 +159,10 @@ function HeroLogoAnimation() {
       <style>{`
         .logo-animation-box {
           perspective: 1000px;
+          /* The brand mark is a fixed graphic, not language content — force
+             LTR so Arabic's dir="rtl" (set on <html>) can't flip SVG
+             text-anchor and send the "scolaris" wordmark off the left edge. */
+          direction: ltr;
         }
 
         /* Shifts the icon left, in sync with the wordmark reveal, so the

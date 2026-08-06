@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import CrudPanel, { StatusPill } from "./CrudPanel";
 import { CalendarClock, Repeat } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Field, RecurringDialog } from "./_shared";
+import { Field, RecurringDialog, isoToLocalInput, localInputToIso } from "./_shared";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -11,38 +11,36 @@ import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
 
-const nowLocalIso = () => {
-  const d = new Date();
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-  return d.toISOString().slice(0, 16);
-};
-
 const DEFAULT_FORM = {
-  group_id: "", teacher_id: "", room: "", start_at: nowLocalIso(), end_at: nowLocalIso(),
+  group_id: "", teacher_id: "", room: "", start_at: new Date().toISOString(), end_at: new Date().toISOString(),
   topic: "", status: "scheduled",
 };
 
-/** Combined date + start/end time range picker for a session.
- * Keeps start_at/end_at as local ISO datetime strings ("YYYY-MM-DDTHH:mm")
- * so the payload shape sent to the API is unchanged. */
+/** Combined date + start/end time range picker for a session. form.start_at/
+ * end_at always hold real UTC ISO strings (freshly defaulted, or loaded
+ * from the API when editing) — converted to/from naive local values only
+ * at the edges, right where the <input> fields read and write them, so the
+ * displayed date/time always matches the user's own clock. */
 function SessionRangePicker({ form, setForm }) {
   const { t } = useI18n();
-  const date = (form.start_at || "").slice(0, 10);
-  const startTime = (form.start_at || "").slice(11, 16);
-  const endTime = (form.end_at || "").slice(11, 16);
+  const startLocal = isoToLocalInput(form.start_at);
+  const endLocal = isoToLocalInput(form.end_at);
+  const date = startLocal.slice(0, 10);
+  const startTime = startLocal.slice(11, 16);
+  const endTime = endLocal.slice(11, 16);
 
   const onDate = (newDate) => {
     setForm({
       ...form,
-      start_at: `${newDate}T${startTime || "00:00"}`,
-      end_at: `${newDate}T${endTime || "00:00"}`,
+      start_at: localInputToIso(`${newDate}T${startTime || "00:00"}`),
+      end_at: localInputToIso(`${newDate}T${endTime || "00:00"}`),
     });
   };
   const onStartTime = (newTime) => {
-    setForm({ ...form, start_at: `${date}T${newTime}` });
+    setForm({ ...form, start_at: localInputToIso(`${date}T${newTime}`) });
   };
   const onEndTime = (newTime) => {
-    setForm({ ...form, end_at: `${date}T${newTime}` });
+    setForm({ ...form, end_at: localInputToIso(`${date}T${newTime}`) });
   };
 
   return (

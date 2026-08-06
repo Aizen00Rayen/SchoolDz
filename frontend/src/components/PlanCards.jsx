@@ -9,7 +9,7 @@ import { Switch } from "@/components/ui/switch";
 const FEATURES = {
   basic: ["200 students", "3 users", "Core modules (students, teachers, courses, groups, payments, reports)"],
   standard: ["500 students", "20 users", "Priority support", "Custom branding", "Parent portal", "Teacher portal"],
-  premium: ["Unlimited students", "Unlimited users", "24/7 support", "White-label", "Parent portal", "Teacher portal", "Student badges", "Calendar & planner"],
+  premium: ["Unlimited students", "Unlimited users", "24/7 support", "White-label", "Parent portal", "Teacher portal", "Student badges", "Calendar & planner", "Quiz & exam builder"],
 };
 const POPULAR_KEY = "standard";
 

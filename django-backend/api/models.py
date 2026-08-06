@@ -10,7 +10,7 @@ def generate_uuid():
 # frontend) so serializers/views validate against the same source of truth.
 PERMISSION_MODULES = [
     'students', 'teachers', 'parents', 'courses', 'groups',
-    'sessions', 'payments', 'grades', 'attendance', 'messages',
+    'sessions', 'payments', 'grades', 'attendance', 'messages', 'quizzes',
 ]
 PERMISSION_LEVELS = ['hidden', 'view', 'edit']
 
@@ -55,6 +55,14 @@ class Tenant(models.Model):
     max_users = models.IntegerField(null=True, blank=True)
     trial_ends_at = models.DateTimeField(null=True, blank=True)
     enrollment_description = models.TextField(null=True, blank=True)
+    # Premium "Website" builder fields — public landing page content.
+    hero_image_url = models.CharField(max_length=255, null=True, blank=True)
+    address = models.CharField(max_length=255, null=True, blank=True)
+    phone = models.CharField(max_length=50, null=True, blank=True)
+    map_url = models.CharField(max_length=500, null=True, blank=True)
+    # Free-form {facebook, instagram, twitter, youtube, linkedin, tiktok} —
+    # missing/empty keys just don't render a link on the public page.
+    social_links = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -180,6 +188,9 @@ class Teacher(models.Model):
     hourly_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     monthly_salary = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     photo_url = models.CharField(max_length=255, null=True, blank=True)
+    # Whether this teacher appears on the tenant's public website — same
+    # semantics as Course.show_on_enrollment.
+    show_on_website = models.BooleanField(default=False)
     STATUS_CHOICES = [
         ('active', 'active'),
         ('inactive', 'inactive'),
@@ -414,6 +425,11 @@ class ChargilyCheckout(models.Model):
     payment = models.ForeignKey('Payment', on_delete=models.SET_NULL, null=True, blank=True, related_name='chargily_checkouts')
     amount = models.PositiveIntegerField()
     currency = models.CharField(max_length=8, default='dzd')
+    # Coupon applied at checkout creation time, if any — kept even if the
+    # coupon is later deleted (SET_NULL) so past checkouts still show what
+    # was actually charged via discount_amount.
+    coupon = models.ForeignKey('Coupon', on_delete=models.SET_NULL, null=True, blank=True, related_name='checkouts')
+    discount_amount = models.PositiveIntegerField(default=0)
     chargily_checkout_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
     checkout_url = models.CharField(max_length=255, null=True, blank=True)
     STATUS_CHOICES = [
@@ -470,3 +486,132 @@ class Message(models.Model):
 
     class Meta:
         db_table = 'messages'
+
+
+class Coupon(models.Model):
+    # Platform-wide, not tenant-scoped — only the super admin manages these.
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    code = models.CharField(max_length=32, unique=True)
+    description = models.CharField(max_length=255, null=True, blank=True)
+    DISCOUNT_TYPE_CHOICES = [
+        ('percent', 'percent'),
+        ('fixed', 'fixed'),
+    ]
+    discount_type = models.CharField(max_length=20, choices=DISCOUNT_TYPE_CHOICES, default='percent')
+    discount_value = models.DecimalField(max_digits=10, decimal_places=2)
+    # List of plan keys ('basic'/'standard'/'premium') this coupon applies
+    # to — an empty list means "any plan".
+    applicable_plans = models.JSONField(default=list, blank=True)
+    # Total number of paid checkouts this coupon may be used for, platform-
+    # wide — null means unlimited. Redemption count is computed on demand
+    # from ChargilyCheckout(status='paid'), not stored here, so an abandoned
+    # checkout never eats into the limit.
+    max_redemptions = models.IntegerField(null=True, blank=True)
+    starts_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    active = models.BooleanField(default=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'coupons'
+
+
+class Quiz(models.Model):
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='quizzes')
+    course = models.ForeignKey(Course, on_delete=models.SET_NULL, null=True, blank=True, db_column='course_id', related_name='quizzes')
+    group = models.ForeignKey(Group, on_delete=models.SET_NULL, null=True, blank=True, db_column='group_id', related_name='quizzes')
+    title = models.CharField(max_length=255)
+    description = models.TextField(null=True, blank=True)
+    time_limit_minutes = models.IntegerField(null=True, blank=True)
+    STATUS_CHOICES = [
+        ('draft', 'draft'),
+        ('published', 'published'),
+        ('closed', 'closed'),
+    ]
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft')
+    # ONE shared take-link for the whole class, set the first time the quiz
+    # is published — not per-student. Whoever opens it types their own name
+    # (see QuizAttempt.solver_name); there's no student pre-assigned to it.
+    public_token = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'quizzes'
+
+
+class Question(models.Model):
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='+')
+    quiz = models.ForeignKey(Quiz, on_delete=models.CASCADE, db_column='quiz_id', related_name='questions')
+    text = models.TextField()
+    points = models.DecimalField(max_digits=6, decimal_places=2, default=1)
+    order = models.IntegerField(default=0)
+
+    class Meta:
+        db_table = 'quiz_questions'
+        ordering = ['order']
+
+
+class Choice(models.Model):
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='+')
+    question = models.ForeignKey(Question, on_delete=models.CASCADE, db_column='question_id', related_name='choices')
+    text = models.CharField(max_length=500)
+    is_correct = models.BooleanField(default=False)
+    order = models.IntegerField(default=0)
+
+    class Meta:
+        db_table = 'quiz_choices'
+        ordering = ['order']
+
+
+class QuizAttempt(models.Model):
+    """One row per submission on the quiz's single shared link — created
+    only at submit time (there's no "started but not submitted" state to
+    track anymore, since the link isn't tied to a specific person ahead of
+    time). `student` is a best-effort match of `solver_name` against the
+    quiz's group roster (see public_quiz_attempt_submit); it's null when
+    nobody on the roster matched what was typed (typo, not on this group,
+    etc.) — the attempt is still recorded either way."""
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='+')
+    quiz = models.ForeignKey(Quiz, on_delete=models.CASCADE, db_column='quiz_id', related_name='attempts')
+    student = models.ForeignKey(Student, on_delete=models.SET_NULL, null=True, blank=True, db_column='student_id', related_name='quiz_attempts')
+    solver_name = models.CharField(max_length=255)
+    score = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    max_score = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'quiz_attempts'
+        ordering = ['-created_at']
+
+
+class Answer(models.Model):
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='+')
+    attempt = models.ForeignKey(QuizAttempt, on_delete=models.CASCADE, db_column='attempt_id', related_name='answers')
+    question = models.ForeignKey(Question, on_delete=models.CASCADE, db_column='question_id', related_name='+')
+    choice = models.ForeignKey(Choice, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+
+    class Meta:
+        db_table = 'quiz_answers'
+        unique_together = ('attempt', 'question')
+
+
+class SchoolGalleryPhoto(models.Model):
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='gallery_photos')
+    image_url = models.CharField(max_length=255)
+    caption = models.CharField(max_length=255, null=True, blank=True)
+    order = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'school_gallery_photos'
+        ordering = ['order']
