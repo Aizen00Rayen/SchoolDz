@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { LogOut, Tag } from "lucide-react";
 import { useAuth } from "@/lib/auth";
@@ -16,6 +17,7 @@ import PlanCards from "@/components/PlanCards";
 export default function BillingGatePage() {
   const { tenant, user, logout, refreshTenant } = useAuth();
   const { t } = useI18n();
+  const navigate = useNavigate();
   const [busyPlan, setBusyPlan] = useState(null);
   const [couponCode, setCouponCode] = useState("");
 
@@ -29,12 +31,16 @@ export default function BillingGatePage() {
       });
       if (data.checkout_url) {
         window.location.href = data.checkout_url;
-      } else if (data.applied_immediately) {
+        return;
+      }
+      if (data.applied_immediately) {
         toast.success(t("toast.plan_upgraded"));
         await refreshTenant();
+        navigate("/app", { replace: true });
       }
     } catch (err) {
       toast.error(extractError(err));
+    } finally {
       setBusyPlan(null);
     }
   };
