@@ -41,6 +41,11 @@ export default function SettingsPage() {
 
   const higherPlans = PLAN_ORDER.slice(PLAN_ORDER.indexOf(tenant?.plan) + 1);
   const enrollUrl = `${window.location.origin}/enroll/${tenant?.slug || ""}`;
+  const MOBILE_APPS = [
+    { key: "parent", file: "scolaris-parent.apk" },
+    { key: "student", file: "scolaris-student.apk" },
+    { key: "teacher", file: "scolaris-teacher.apk" },
+  ].map((app) => ({ ...app, url: `${window.location.origin}/downloads/${app.file}` }));
 
   const renewQuoteQuery = useQuery({
     queryKey: ["billing-renew-quote", renewCycle],
@@ -231,6 +236,34 @@ export default function SettingsPage() {
             {t("settings.website_builder_hint")}
           </p>
         )}
+      </div>
+
+      <div className="surface-card p-6 mb-4">
+        <h3 className="font-display font-semibold text-lg mb-1">{t("settings.mobile_apps")}</h3>
+        <p className="text-sm text-muted-foreground mb-4">
+          {t("settings.mobile_apps_desc")}
+        </p>
+        <div className="space-y-3">
+          {MOBILE_APPS.map((app) => (
+            <div key={app.key}>
+              <div className="text-xs font-medium text-muted-foreground mb-1">
+                {t(`settings.${app.key}_app`)}
+              </div>
+              <div className="flex items-center gap-2">
+                <Input readOnly value={app.url} className="font-mono text-xs bg-muted/40" />
+                <Button
+                  type="button" variant="outline" size="icon"
+                  onClick={() => { navigator.clipboard.writeText(app.url); toast.success(t("settings.link_copied")); }}
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                </Button>
+                <Button type="button" variant="outline" size="icon" asChild>
+                  <a href={app.url} target="_blank" rel="noreferrer"><ExternalLink className="w-3.5 h-3.5" /></a>
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="surface-card p-6">
