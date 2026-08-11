@@ -14,7 +14,7 @@ import PlanCards from "@/components/PlanCards";
  * RequireActiveTenant in App.js) will let them through.
  */
 export default function BillingGatePage() {
-  const { tenant, user, logout } = useAuth();
+  const { tenant, user, logout, refreshTenant } = useAuth();
   const { t } = useI18n();
   const [busyPlan, setBusyPlan] = useState(null);
   const [couponCode, setCouponCode] = useState("");
@@ -27,7 +27,12 @@ export default function BillingGatePage() {
         billing_cycle: billingCycle,
         ...(couponCode.trim() ? { coupon_code: couponCode.trim() } : {}),
       });
-      window.location.href = data.checkout_url;
+      if (data.checkout_url) {
+        window.location.href = data.checkout_url;
+      } else if (data.applied_immediately) {
+        toast.success(t("toast.plan_upgraded"));
+        await refreshTenant();
+      }
     } catch (err) {
       toast.error(extractError(err));
       setBusyPlan(null);

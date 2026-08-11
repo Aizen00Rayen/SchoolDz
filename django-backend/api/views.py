@@ -1339,7 +1339,19 @@ def start_chargily_checkout(tenant, plan, billing_cycle, amount, checkout_type, 
         discount_amount=discount_amount,
         status='pending'
     )
-    
+
+    # A coupon can discount the price to zero — Chargily has no "free" checkout
+    # (it rejects amount=0 with "Either items or amount must be provided"), so
+    # apply the plan directly instead of ever calling out to them.
+    if amount <= 0:
+        apply_remote_status(checkout, 'paid')
+        tenant.refresh_from_db()
+        return Response({
+            'checkout_url': None,
+            'applied_immediately': True,
+            'tenant': TenantSerializer(tenant).data,
+        })
+
     frontend = getattr(settings, 'FRONTEND_URL', 'http://localhost:3000').rstrip('/')
     app_url = getattr(settings, 'APP_URL', 'http://localhost:8002').rstrip('/')
     locale = tenant.language if tenant.language in ['ar', 'fr'] else 'en'
