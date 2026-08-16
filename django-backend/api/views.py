@@ -2692,11 +2692,13 @@ class StudentViewSet(TenantScopedViewSet):
     def export(self, request):
         queryset = self.filter_queryset(self.get_queryset()).select_related('parent').order_by('-created_at')
         headers = [
-            'Student Code', 'First Name', 'Last Name', 'Gender', 'Birth Date', 'Email', 'Phone', 'Address',
+            'Student Code', 'First Name', 'Last Name', 'Gender', 'School Level', 'School Year', 'Specialty',
+            'Birth Date', 'Email', 'Phone', 'Address',
             'Emergency Contact', 'Status', 'Parent Name', 'Parent Email', 'Parent Phone', 'Enrollment Date',
         ]
         rows = [[
             s.student_code or '', s.first_name, s.last_name, s.gender or '',
+            s.school_level or '', s.school_year or '', s.specialty or '',
             s.birth_date.isoformat() if s.birth_date else '', s.email or '', s.phone or '', s.address or '',
             s.emergency_contact or '', s.status, s.parent.name if s.parent else '',
             s.parent.email if s.parent and s.parent.email else '', s.parent.phone if s.parent and s.parent.phone else '',
@@ -2765,6 +2767,20 @@ class StudentViewSet(TenantScopedViewSet):
                 failed.append({'row': i, 'error': f'Your {tenant.plan} plan allows up to {max_students} students'})
                 continue
 
+            school_level = (row.get('school_level') or '').strip().lower()
+            if school_level and school_level not in ('primary', 'middle', 'high'):
+                failed.append({'row': i, 'error': 'school_level must be primary, middle, or high'})
+                continue
+
+            school_year_raw = (row.get('school_year') or '').strip()
+            school_year = None
+            if school_year_raw:
+                try:
+                    school_year = int(school_year_raw)
+                except ValueError:
+                    failed.append({'row': i, 'error': 'school_year must be a number'})
+                    continue
+
             try:
                 with transaction.atomic():
                     guardian = None
@@ -2784,6 +2800,9 @@ class StudentViewSet(TenantScopedViewSet):
                         email=(row.get('email') or '').strip() or None,
                         phone=(row.get('phone') or '').strip() or None,
                         gender=(row.get('gender') or '').strip() or None,
+                        school_level=school_level or None,
+                        school_year=school_year,
+                        specialty=(row.get('specialty') or '').strip() or None,
                         birth_date=(row.get('birth_date') or '').strip() or None,
                         address=(row.get('address') or '').strip() or None,
                         emergency_contact=(row.get('emergency_contact') or '').strip() or None,
