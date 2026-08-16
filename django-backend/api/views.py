@@ -1238,7 +1238,7 @@ def get_billable_tenant(user):
 @permission_classes([IsAuthenticated])
 def billing_checkout(request):
     tenant = get_billable_tenant(request.user)
-    if tenant.status != 'pending_payment':
+    if tenant.status not in ('pending_payment', 'expired'):
         return Response({'error': 'This workspace is already active. Use renew or upgrade instead.'}, status=status.HTTP_400_BAD_REQUEST)
 
     plan = request.data.get('plan')

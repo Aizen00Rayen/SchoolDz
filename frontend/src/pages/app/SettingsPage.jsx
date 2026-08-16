@@ -285,6 +285,10 @@ export default function SettingsPage() {
           })}
         </div>
 
+        <p className="text-xs text-muted-foreground mb-4">
+          {t("settings.expiry_policy_note")}
+        </p>
+
         {canEdit && tenant.status === "active" && (
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={() => setRenewOpen(true)} data-testid="settings-renew-button">

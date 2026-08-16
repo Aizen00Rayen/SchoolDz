@@ -61,12 +61,14 @@ function RequireAuth({ children }) {
   return children;
 }
 
-/** Same as RequireAuth, but also sends an unpaid tenant to the billing gate
- * instead of the dashboard — there is no free trial, so pending_payment
- * blocks the workspace entirely. Only wraps /app/*; /admin (super admin,
- * no tenant of its own) and /billing itself are unaffected. Also redirects
- * role='parent' users to /portal — they have no business in the staff CRUD
- * tree, and every /app/* endpoint would 403 them anyway. */
+/** Same as RequireAuth, but also sends an unpaid or expired tenant to the
+ * billing gate instead of the dashboard — there is no free trial, so
+ * pending_payment blocks the workspace entirely, and an expired subscription
+ * re-uses the same gate to prompt renewal (see BillingGatePage). Only wraps
+ * /app/*; /admin (super admin, no tenant of its own) and /billing itself are
+ * unaffected. Also redirects role='parent' users to /portal — they have no
+ * business in the staff CRUD tree, and every /app/* endpoint would 403 them
+ * anyway. */
 function RequireActiveTenant({ children }) {
   const { user, tenant, loading } = useAuth();
   const location = useLocation();
@@ -78,7 +80,7 @@ function RequireActiveTenant({ children }) {
     );
   if (!user) return <Navigate to="/login" state={{ from: location.pathname }} replace />;
   if (user.role === "parent") return <Navigate to="/portal" replace />;
-  if (tenant?.status === "pending_payment") return <Navigate to="/billing" replace />;
+  if (tenant?.status === "pending_payment" || tenant?.status === "expired") return <Navigate to="/billing" replace />;
   return children;
 }
 

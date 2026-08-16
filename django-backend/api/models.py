@@ -22,6 +22,7 @@ class Tenant(models.Model):
     STATUS_CHOICES = [
         ('pending_payment', 'pending_payment'),
         ('active', 'active'),
+        ('expired', 'expired'),
         ('suspended', 'suspended'),
     ]
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='pending_payment')

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { LogOut, Tag } from "lucide-react";
+import { AlertTriangle, LogOut, Tag } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { api, extractError } from "@/lib/api";
@@ -9,10 +9,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import PlanCards from "@/components/PlanCards";
 
+// Must match GRACE_PERIOD_DAYS in django-backend/api/management/commands/enforce_subscription_expiry.py
+const GRACE_PERIOD_DAYS = 15;
+
 /**
  * Shown right after registration instead of the dashboard — there is no free
  * trial, so a tenant must complete a Chargily checkout before AppShell (see
- * RequireActiveTenant in App.js) will let them through.
+ * RequireActiveTenant in App.js) will let them through. Also shown for an
+ * expired subscription (same gate, renewal instead of first activation) —
+ * enforce_subscription_expiry locks the tenant out here, then permanently
+ * erases it if unpaid for GRACE_PERIOD_DAYS.
  */
 export default function BillingGatePage() {
   const { tenant, user, logout, refreshTenant } = useAuth();
@@ -20,6 +26,13 @@ export default function BillingGatePage() {
   const navigate = useNavigate();
   const [busyPlan, setBusyPlan] = useState(null);
   const [couponCode, setCouponCode] = useState("");
+
+  const isExpired = tenant?.status === "expired";
+  const daysLeft = (() => {
+    if (!isExpired || !tenant?.plan_expires_at) return null;
+    const deadline = new Date(tenant.plan_expires_at).getTime() + GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000;
+    return Math.max(0, Math.ceil((deadline - Date.now()) / (24 * 60 * 60 * 1000)));
+  })();
 
   const onSelectPlan = async (plan, billingCycle) => {
     setBusyPlan(plan);
@@ -73,15 +86,26 @@ export default function BillingGatePage() {
       </header>
 
       <main className="max-w-6xl mx-auto px-6 py-16">
+        {isExpired && (
+          <div className="max-w-2xl mx-auto mb-8 flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-start">
+            <AlertTriangle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-destructive">
+              {t("billing.expired_warning", { days: daysLeft })}
+            </p>
+          </div>
+        )}
+
         <div className="max-w-2xl mb-12 text-center mx-auto">
           <p className="text-xs font-bold uppercase tracking-[0.2em] text-accent mb-3">
             {t("nav.pricing")}
           </p>
           <h1 className="font-display text-3xl md:text-4xl font-bold tracking-tight mb-3">
-            Choose a plan to activate {tenant?.name}
+            {isExpired ? t("billing.renew_title", { name: tenant?.name }) : `Choose a plan to activate ${tenant?.name}`}
           </h1>
           <p className="text-muted-foreground">
-            Signed in as {user?.email}. Pick a plan below to complete setup — payment is required before you can access your workspace.
+            {isExpired
+              ? t("billing.renew_subtitle", { email: user?.email })
+              : `Signed in as ${user?.email}. Pick a plan below to complete setup — payment is required before you can access your workspace.`}
           </p>
         </div>
 
