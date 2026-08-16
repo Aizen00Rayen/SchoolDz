@@ -111,6 +111,21 @@ def prorate_upgrade_amount(tenant, new_plan):
     return max(0, int(round(new_remaining_cost - unused_credit)))
 
 
+def name_search_q(q, *field_groups):
+    """Builds a Q for searching a first/last-name-split model by a free-typed
+    query. Matching a single field against the whole query (e.g.
+    first_name__icontains="John Smith") never matches once the query spans
+    both names, so instead each whitespace-separated word must independently
+    match at least one of the given fields."""
+    query = Q()
+    for word in q.split():
+        word_q = Q()
+        for field in field_groups:
+            word_q |= Q(**{f'{field}__icontains': word})
+        query &= word_q
+    return query
+
+
 def validate_coupon(code, plan):
     """Raises ValidationError with a specific reason, or returns the Coupon.
     Redemption count is computed live from paid checkouts (Coupon.checkouts),
@@ -1713,7 +1728,7 @@ def global_search(request):
     
     # Students
     students = Student.objects.filter(tenant_id=tid).filter(
-        Q(first_name__icontains=q) | Q(last_name__icontains=q) | Q(email__icontains=q)
+        name_search_q(q, 'first_name', 'last_name', 'email')
     )[:5]
     for s in students:
         results.append({
@@ -1725,7 +1740,7 @@ def global_search(request):
         
     # Teachers
     teachers = Teacher.objects.filter(tenant_id=tid).filter(
-        Q(first_name__icontains=q) | Q(last_name__icontains=q) | Q(email__icontains=q)
+        name_search_q(q, 'first_name', 'last_name', 'email')
     )[:5]
     for t in teachers:
         results.append({
@@ -2568,9 +2583,7 @@ class TeacherViewSet(TenantScopedViewSet):
         queryset = self.filter_queryset(self.get_queryset())
         q = request.GET.get('q')
         if q:
-            queryset = queryset.filter(
-                Q(first_name__icontains=q) | Q(last_name__icontains=q) | Q(email__icontains=q)
-            )
+            queryset = queryset.filter(name_search_q(q, 'first_name', 'last_name', 'email'))
         queryset = queryset.order_by('-created_at')[:500]
         serializer = self.get_serializer(queryset, many=True)
         return Response({'items': serializer.data, 'total': len(serializer.data)})
@@ -2670,9 +2683,7 @@ class StudentViewSet(TenantScopedViewSet):
             queryset = queryset.filter(status=status_val)
         q = request.GET.get('q')
         if q:
-            queryset = queryset.filter(
-                Q(first_name__icontains=q) | Q(last_name__icontains=q) | Q(email__icontains=q) | Q(phone__icontains=q)
-            )
+            queryset = queryset.filter(name_search_q(q, 'first_name', 'last_name', 'email', 'phone'))
         queryset = queryset.order_by('-created_at')[:500]
         serializer = self.get_serializer(queryset, many=True)
         return Response({'items': serializer.data, 'total': len(serializer.data)})

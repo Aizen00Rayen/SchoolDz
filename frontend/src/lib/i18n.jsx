@@ -187,6 +187,8 @@ const TRANSLATIONS = {
     "common.logout": "Se déconnecter",
     "common.upgrade": "Gérer l'abonnement",
     "common.plan_active": "Plan actif",
+    "common.collapse_sidebar": "Réduire le menu",
+    "common.expand_sidebar": "Agrandir le menu",
     "common.no_data": "Aucune donnée",
 
     "field.absent": "Absent",
@@ -740,6 +742,8 @@ const TRANSLATIONS = {
     "common.logout": "Log out",
     "common.upgrade": "Manage subscription",
     "common.plan_active": "Plan active",
+    "common.collapse_sidebar": "Collapse sidebar",
+    "common.expand_sidebar": "Expand sidebar",
     "common.no_data": "No data",
 
     "field.absent": "Absent",
@@ -1293,6 +1297,8 @@ const TRANSLATIONS = {
     "common.logout": "تسجيل الخروج",
     "common.upgrade": "إدارة الاشتراك",
     "common.plan_active": "الخطة نشطة",
+    "common.collapse_sidebar": "طي القائمة الجانبية",
+    "common.expand_sidebar": "توسيع القائمة الجانبية",
     "common.no_data": "لا توجد بيانات",
 
     "field.absent": "غائب",

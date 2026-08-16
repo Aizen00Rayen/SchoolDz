@@ -3,8 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Award, BarChart3, BookOpen, Building2, CalendarClock, CalendarDays, ChevronsUpDown, ClipboardCheck,
-  FileBarChart2, FileQuestion, GraduationCap, Globe, Languages, LogOut, MessageSquare, Moon, Search, Settings,
-  Sun, Users, UserRound, Wallet, Layers,
+  FileBarChart2, FileQuestion, GraduationCap, Globe, Languages, LogOut, MessageSquare, Moon, PanelLeft,
+  PanelLeftClose, Search, Settings, Sun, Users, UserRound, Wallet, Layers,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth";
@@ -55,6 +55,11 @@ export default function AppShell() {
   const [cmdQuery, setCmdQuery] = useState("");
   const [cmdResults, setCmdResults] = useState([]);
   const [cmdBusy, setCmdBusy] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem("sidebar_collapsed") === "1");
+
+  useEffect(() => {
+    localStorage.setItem("sidebar_collapsed", collapsed ? "1" : "0");
+  }, [collapsed]);
 
   useEffect(() => {
     const handler = (e) => {
@@ -120,18 +125,18 @@ export default function AppShell() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground grid grid-cols-[240px_1fr]">
+    <div className={`min-h-screen bg-background text-foreground grid ${collapsed ? "grid-cols-[68px_1fr]" : "grid-cols-[240px_1fr]"} transition-[grid-template-columns] duration-200`}>
       {/* Sidebar */}
       <aside
         data-testid={APPUI.sidebar}
-        className="border-e border-border bg-card/40 flex flex-col h-screen sticky top-0"
+        className="border-e border-border bg-card/40 flex flex-col h-screen sticky top-0 overflow-hidden"
       >
-        <div className="p-4 border-b border-border">
+        <div className={`p-4 border-b border-border flex items-center gap-1 ${collapsed ? "flex-col" : ""}`}>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 data-testid={APPUI.tenantSwitcher}
-                className="w-full flex items-center gap-2.5 p-2 rounded-lg hover:bg-muted transition-colors group"
+                className="flex-1 min-w-0 flex items-center gap-2.5 p-2 rounded-lg hover:bg-muted transition-colors group"
               >
                 <div className="w-8 h-8 rounded-md bg-primary grid place-items-center flex-shrink-0 overflow-hidden">
                   {tenant?.logo_url ? (
@@ -146,15 +151,19 @@ export default function AppShell() {
                     </span>
                   )}
                 </div>
-                <div className="min-w-0 flex-1 text-start">
-                  <div className="text-sm font-semibold truncate">
-                    {tenant?.name || "Scolaris"}
-                  </div>
-                  <div className="text-[10px] font-mono text-muted-foreground truncate">
-                    {tenant?.slug ? `${tenant.slug}.scolaris.com` : "workspace"}
-                  </div>
-                </div>
-                <ChevronsUpDown className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                {!collapsed && (
+                  <>
+                    <div className="min-w-0 flex-1 text-start">
+                      <div className="text-sm font-semibold truncate">
+                        {tenant?.name || "Scolaris"}
+                      </div>
+                      <div className="text-[10px] font-mono text-muted-foreground truncate">
+                        {tenant?.slug ? `${tenant.slug}.scolaris.com` : "workspace"}
+                      </div>
+                    </div>
+                    <ChevronsUpDown className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                  </>
+                )}
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent className="w-56 bg-popover" align="start">
@@ -177,6 +186,18 @@ export default function AppShell() {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            className="flex-shrink-0 h-8 w-8"
+            onClick={() => setCollapsed((v) => !v)}
+            data-testid="sidebar-collapse-toggle"
+            aria-label={t(collapsed ? "common.expand_sidebar" : "common.collapse_sidebar")}
+            title={t(collapsed ? "common.expand_sidebar" : "common.collapse_sidebar")}
+          >
+            {collapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+          </Button>
         </div>
 
         <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
@@ -190,8 +211,9 @@ export default function AppShell() {
               key={item.key}
               to={item.to}
               data-testid={APPUI.sidebarLink(item.key)}
+              title={collapsed ? t(`menu.${item.key}`) : undefined}
               className={({ isActive }) =>
-                `flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${
+                `flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${collapsed ? "justify-center" : ""} ${
                   isActive
                     ? "bg-primary text-primary-foreground font-semibold"
                     : "text-muted-foreground hover:text-foreground hover:bg-muted"
@@ -199,27 +221,32 @@ export default function AppShell() {
               }
             >
               <item.icon className="w-4 h-4 flex-shrink-0" />
-              <span className="truncate">{t(`menu.${item.key}`)}</span>
+              {!collapsed && <span className="truncate">{t(`menu.${item.key}`)}</span>}
             </NavLink>
           ))}
         </nav>
 
         <div className="p-3 border-t border-border">
-          <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2 px-2">
-            {t("common.plan_active")}
-          </div>
-          <div className="px-2 pb-3 text-xs text-muted-foreground capitalize">
-            {tenant?.plan ? t(`plan.${tenant.plan}`) : t("common.free")}
-            {tenant?.billing_cycle ? ` · ${t(`cycle.${tenant.billing_cycle}`)}` : ""}
-          </div>
+          {!collapsed && (
+            <>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2 px-2">
+                {t("common.plan_active")}
+              </div>
+              <div className="px-2 pb-3 text-xs text-muted-foreground capitalize">
+                {tenant?.plan ? t(`plan.${tenant.plan}`) : t("common.free")}
+                {tenant?.billing_cycle ? ` · ${t(`cycle.${tenant.billing_cycle}`)}` : ""}
+              </div>
+            </>
+          )}
           <Button
             variant="outline"
-            size="sm"
-            className="w-full text-xs"
+            size={collapsed ? "icon" : "sm"}
+            className={collapsed ? "w-full" : "w-full text-xs"}
             onClick={() => nav("/app/settings")}
             data-testid="sidebar-upgrade-button"
+            title={collapsed ? t("common.upgrade") : undefined}
           >
-            {t("common.upgrade")}
+            {collapsed ? <Layers className="w-4 h-4" /> : t("common.upgrade")}
           </Button>
         </div>
       </aside>
