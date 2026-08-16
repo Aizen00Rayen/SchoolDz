@@ -218,6 +218,20 @@ class Student(models.Model):
         ('other', 'other'),
     ]
     gender = models.CharField(max_length=50, choices=GENDER_CHOICES, null=True, blank=True)
+    SCHOOL_LEVEL_CHOICES = [
+        ('primary', 'primary'),
+        ('middle', 'middle'),
+        ('high', 'high'),
+    ]
+    school_level = models.CharField(max_length=20, choices=SCHOOL_LEVEL_CHOICES, null=True, blank=True)
+    # 1-5 for primary, 1-4 for middle, 1-3 for high — semantics depend on school_level.
+    school_year = models.IntegerField(null=True, blank=True)
+    # Only meaningful when school_level='high'. Year 1 (1AS) picks between the
+    # two common-core tracks; years 2-3 (2AS/3AS) pick a specialty branch —
+    # see SPECIALTY_CHOICES-equivalent list documented in the frontend, kept
+    # as a free CharField here since the set is Algeria-specific curriculum
+    # data, not a DB-level constraint.
+    specialty = models.CharField(max_length=50, null=True, blank=True)
     birth_date = models.DateField(null=True, blank=True)
     email = models.EmailField(null=True, blank=True)
     phone = models.CharField(max_length=255, null=True, blank=True)
