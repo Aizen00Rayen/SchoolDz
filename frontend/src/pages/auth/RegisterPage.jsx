@@ -143,7 +143,7 @@ export default function RegisterPage() {
                 placeholder="my-academy"
               />
               <span className="px-3 text-xs font-mono text-muted-foreground border-s border-border h-full grid place-items-center whitespace-nowrap">
-                .scolaris.com
+                .scolaris.cloud
               </span>
             </div>
           </div>

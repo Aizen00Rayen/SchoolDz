@@ -13,7 +13,7 @@ import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
 
-const DEFAULT_FORM = { title: "", description: "", course_id: "", group_id: "" };
+const DEFAULT_FORM = { title: "", description: "", course_id: "", group_id: "", max_score: 20 };
 
 export default function QuizzesPage() {
   const { t } = useI18n();
@@ -38,9 +38,9 @@ export default function QuizzesPage() {
       canEdit={canEdit}
       canCreate={canEdit}
       columns={[
-        { key: "title", label: t("field.title"), render: (r) => <span className="font-medium">{r.title}</span> },
+        { key: "title", label: t("field.quiz_title"), render: (r) => <span className="font-medium">{r.title}</span> },
         { key: "group", label: t("field.group"), render: (r) => r.group_name || <span className="text-muted-foreground">—</span> },
-        { key: "questions", label: t("quiz.questions"), render: (r) => <span className="font-mono text-xs">{r.question_count}</span> },
+        { key: "exercise", label: t("quiz.exercise"), render: (r) => <span className="text-xs">{r.exercise_file_url ? "✓" : <span className="text-muted-foreground">—</span>}</span> },
         {
           key: "attempts", label: t("quiz.attempts"),
           render: (r) => <span className="font-mono text-xs">{r.attempts_total}</span>,
@@ -60,7 +60,7 @@ export default function QuizzesPage() {
       renderForm={(form, setForm) => (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="md:col-span-2">
-            <Field label={t("field.title")} required>
+            <Field label={t("field.quiz_title")} required>
               <Input value={form.title || ""} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
             </Field>
           </div>
@@ -78,6 +78,13 @@ export default function QuizzesPage() {
                 ))}
               </SelectContent>
             </Select>
+          </Field>
+          <Field label={t("quiz.max_score")}>
+            <Input
+              type="number" min="1" step="0.5"
+              value={form.max_score ?? 20}
+              onChange={(e) => setForm({ ...form, max_score: parseFloat(e.target.value) || 0 })}
+            />
           </Field>
           <Field label={t("field.group")}>
             <Select value={form.group_id || ""} onValueChange={(v) => setForm({ ...form, group_id: v })}>

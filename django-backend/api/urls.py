@@ -24,6 +24,9 @@ router.register('grades', views.GradeViewSet, basename='grade')
 router.register('conversations', views.ConversationViewSet, basename='conversation')
 router.register('quizzes', views.QuizViewSet, basename='quiz')
 router.register('coupons', views.CouponViewSet, basename='coupon')
+router.register('expenses', views.ExpenseViewSet, basename='expense')
+router.register('expense-categories', views.ExpenseCategoryViewSet, basename='expense-category')
+router.register('teacher-payouts', views.TeacherPayoutViewSet, basename='teacher-payout')
 
 def _both(route, view, name):
     """Return URL patterns for route both with and without trailing slash."""
@@ -95,6 +98,11 @@ urlpatterns = [
     # beyond the tenant pk, so it's a plain path rather than a router action)
     path('tenants/<str:tenant_id>/gallery/<str:photo_id>/', views.gallery_photo_detail, name='gallery_photo_detail'),
     path('tenants/<str:tenant_id>/gallery/<str:photo_id>', views.gallery_photo_detail, name='gallery_photo_detail_noslash'),
+
+    # Expenses, teacher payments, reports & audit log
+    *_both('teacher-payments/summary', views.teacher_payments_summary, 'teacher_payments_summary'),
+    *_both('logs', views.activity_logs, 'activity_logs'),
+    *_both('reports/finance', views.finance_report, 'finance_report'),
 
     # Parent portal
     *_both('portal/children', views.portal_children, 'portal_children'),

@@ -6,7 +6,7 @@ import { GraduationCap, Upload } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { Field, ExportMenu } from "./_shared";
+import { Field, ExportMenu, SchoolLevelFields, SchoolLevelCell } from "./_shared";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
@@ -16,7 +16,6 @@ import {
 import { api, extractError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
-import { SCHOOL_LEVELS, SCHOOL_LEVEL_YEAR_COUNT, specialtiesFor } from "@/lib/schoolLevels";
 
 const DEFAULT_FORM = {
   first_name: "",
@@ -25,6 +24,9 @@ const DEFAULT_FORM = {
   school_level: "",
   school_year: "",
   specialty: "",
+  insurance_status: "",
+  health_condition: "",
+  id_card_number: "",
   birth_date: "",
   email: "",
   phone: "",
@@ -147,15 +149,7 @@ export default function StudentsPage() {
         { key: "email", label: t("field.email"), render: (r) => r.email || <span className="text-muted-foreground">—</span> },
         { key: "phone", label: t("field.phone"), render: (r) => <span className="font-mono text-xs">{r.phone || "—"}</span> },
         { key: "gender", label: t("field.gender"), render: (r) => <span className="capitalize text-xs">{r.gender ? t(`gender.${r.gender}`) : "—"}</span> },
-        {
-          key: "school_level", label: t("field.school_level"),
-          render: (r) => r.school_level ? (
-            <div className="text-xs">
-              <div>{t(`school_level.${r.school_level}`)}{r.school_year ? ` · ${t("common.year_n", { n: r.school_year })}` : ""}</div>
-              {r.specialty && <div className="text-muted-foreground">{t(`specialty.${r.specialty}`)}</div>}
-            </div>
-          ) : <span className="text-muted-foreground">—</span>,
-        },
+        { key: "school_level", label: t("field.school_level"), render: (r) => <SchoolLevelCell row={r} /> },
         { key: "status", label: t("field.status"), render: (r) => <StatusPill status={r.status} /> },
       ]}
       renderForm={(form, setForm) => (
@@ -176,53 +170,28 @@ export default function StudentsPage() {
               </SelectContent>
             </Select>
           </Field>
-          <Field label={t("field.school_level")}>
+          <SchoolLevelFields form={form} setForm={setForm} />
+          <Field label={t("field.insurance_status")}>
             <Select
-              value={form.school_level || "__none"}
-              onValueChange={(v) => setForm({ ...form, school_level: v === "__none" ? "" : v, school_year: "", specialty: "" })}
+              value={form.insurance_status || "__none"}
+              onValueChange={(v) => setForm({ ...form, insurance_status: v === "__none" ? "" : v })}
             >
               <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
               <SelectContent className="bg-popover">
                 <SelectItem value="__none">—</SelectItem>
-                {SCHOOL_LEVELS.map((lvl) => (
-                  <SelectItem key={lvl} value={lvl}>{t(`school_level.${lvl}`)}</SelectItem>
-                ))}
+                <SelectItem value="insured">{t("insurance.insured")}</SelectItem>
+                <SelectItem value="uninsured">{t("insurance.uninsured")}</SelectItem>
               </SelectContent>
             </Select>
           </Field>
-          <Field label={t("field.school_year")}>
-            <Select
-              value={form.school_year ? String(form.school_year) : "__none"}
-              onValueChange={(v) => setForm({ ...form, school_year: v === "__none" ? "" : Number(v), specialty: "" })}
-              disabled={!form.school_level}
-            >
-              <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
-              <SelectContent className="bg-popover">
-                <SelectItem value="__none">—</SelectItem>
-                {Array.from({ length: SCHOOL_LEVEL_YEAR_COUNT[form.school_level] || 0 }, (_, i) => i + 1).map((y) => (
-                  <SelectItem key={y} value={String(y)}>{t("common.year_n", { n: y })}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <Field label={t("field.id_card_number")}>
+            <Input value={form.id_card_number || ""} onChange={(e) => setForm({ ...form, id_card_number: e.target.value })} />
           </Field>
-          {specialtiesFor(form.school_level, form.school_year).length > 0 && (
-            <div className="md:col-span-2">
-              <Field label={t("field.specialty")}>
-                <Select
-                  value={form.specialty || "__none"}
-                  onValueChange={(v) => setForm({ ...form, specialty: v === "__none" ? "" : v })}
-                >
-                  <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
-                  <SelectContent className="bg-popover">
-                    <SelectItem value="__none">—</SelectItem>
-                    {specialtiesFor(form.school_level, form.school_year).map((sp) => (
-                      <SelectItem key={sp} value={sp}>{t(`specialty.${sp}`)}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-            </div>
-          )}
+          <div className="md:col-span-2">
+            <Field label={t("field.health_condition")}>
+              <Textarea value={form.health_condition || ""} onChange={(e) => setForm({ ...form, health_condition: e.target.value })} rows={2} />
+            </Field>
+          </div>
           <Field label={t("field.birth_date")}>
             <Input type="date" value={(form.birth_date || "").slice(0, 10)} onChange={(e) => setForm({ ...form, birth_date: e.target.value })} />
           </Field>

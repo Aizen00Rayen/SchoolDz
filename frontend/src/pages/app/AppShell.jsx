@@ -3,8 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Award, BarChart3, BookOpen, Building2, CalendarClock, CalendarDays, ChevronsUpDown, ClipboardCheck,
-  FileBarChart2, FileQuestion, GraduationCap, Globe, Languages, LogOut, MessageSquare, Moon, PanelLeft,
-  PanelLeftClose, Search, Settings, Sun, Users, UserRound, Wallet, Layers,
+  FileBarChart2, FileQuestion, GraduationCap, Globe, HandCoins, Languages, LogOut, MessageSquare, Moon,
+  PanelLeft, PanelLeftClose, Receipt, ScrollText, Search, Settings, Sun, Users, UserRound, Wallet, Layers,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth";
@@ -25,23 +25,26 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 const NAV = [
-  { key: "dashboard", to: "/app/dashboard", icon: BarChart3 },
+  { key: "dashboard", to: "/app/dashboard", icon: BarChart3, module: "dashboard" },
   { key: "students", to: "/app/students", icon: GraduationCap, module: "students" },
   { key: "parents", to: "/app/parents", icon: UserRound, module: "parents" },
   { key: "teachers", to: "/app/teachers", icon: Users, module: "teachers" },
   { key: "courses", to: "/app/courses", icon: BookOpen, module: "courses" },
   { key: "groups", to: "/app/groups", icon: Layers, module: "groups" },
   { key: "sessions", to: "/app/sessions", icon: CalendarClock, module: "sessions" },
-  { key: "calendar", to: "/app/calendar", icon: CalendarDays, premiumOnly: true, module: "sessions" },
+  { key: "calendar", to: "/app/calendar", icon: CalendarDays, premiumOnly: true, module: "calendar" },
   { key: "attendance", to: "/app/attendance", icon: ClipboardCheck, module: "attendance" },
   { key: "payments", to: "/app/payments", icon: Wallet, module: "payments" },
+  { key: "expenses", to: "/app/expenses", icon: Receipt, module: "expenses" },
+  { key: "teacher_payments", to: "/app/teacher-payments", icon: HandCoins, module: "teacher_payments" },
   { key: "grades", to: "/app/grades", icon: Award, module: "grades" },
   { key: "quizzes", to: "/app/quizzes", icon: FileQuestion, premiumOnly: true, module: "quizzes" },
-  { key: "website", to: "/app/website", icon: Globe, premiumOnly: true },
-  { key: "reports", to: "/app/reports", icon: FileBarChart2 },
+  { key: "website", to: "/app/website", icon: Globe, premiumOnly: true, module: "website" },
+  { key: "reports", to: "/app/reports", icon: FileBarChart2, module: "reports" },
+  { key: "logs", to: "/app/logs", icon: ScrollText, module: "logs" },
   { key: "messages", to: "/app/messages", icon: MessageSquare, standardPlusOnly: true, module: "messages" },
   { key: "users", to: "/app/users", icon: Users, adminOnly: true },
-  { key: "settings", to: "/app/settings", icon: Settings },
+  { key: "settings", to: "/app/settings", icon: Settings, module: "settings" },
 ];
 
 export default function AppShell() {
@@ -158,7 +161,7 @@ export default function AppShell() {
                         {tenant?.name || "Scolaris"}
                       </div>
                       <div className="text-[10px] font-mono text-muted-foreground truncate">
-                        {tenant?.slug ? `${tenant.slug}.scolaris.com` : "workspace"}
+                        {tenant?.slug ? `${tenant.slug}.scolaris.cloud` : "workspace"}
                       </div>
                     </div>
                     <ChevronsUpDown className="w-4 h-4 text-muted-foreground flex-shrink-0" />

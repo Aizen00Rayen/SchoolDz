@@ -9,10 +9,25 @@ def generate_uuid():
 # access to, and the levels each can be set to. Kept here (not just in the
 # frontend) so serializers/views validate against the same source of truth.
 PERMISSION_MODULES = [
-    'students', 'teachers', 'parents', 'courses', 'groups',
-    'sessions', 'payments', 'grades', 'attendance', 'messages', 'quizzes',
+    'dashboard', 'students', 'teachers', 'parents', 'courses', 'groups',
+    'sessions', 'calendar', 'payments', 'expenses', 'teacher_payments',
+    'grades', 'attendance', 'messages', 'quizzes', 'website', 'reports',
+    'logs', 'users', 'settings',
 ]
 PERMISSION_LEVELS = ['hidden', 'view', 'edit']
+
+# What a module resolves to for a limited role (secretary/accountant/teacher)
+# that has no explicit entry for it. Modules that were never permission-gated
+# before default to 'view' so extending PERMISSION_MODULES doesn't silently
+# take pages away from existing staff accounts; genuinely sensitive ones
+# (money, audit trail, user management) stay hidden until granted.
+DEFAULT_MODULE_PERMISSIONS = {
+    'dashboard': 'view',
+    'calendar': 'view',
+    'reports': 'view',
+    'settings': 'view',
+    'website': 'view',
+}
 
 class Tenant(models.Model):
     id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
@@ -139,7 +154,9 @@ class User(AbstractBaseUser):
         accountant/teacher are limited by the stored `permissions` map."""
         if self.is_super_admin() or self.role in ('owner', 'director'):
             return 'edit'
-        return (self.permissions or {}).get(module_key, 'hidden')
+        return (self.permissions or {}).get(
+            module_key, DEFAULT_MODULE_PERMISSIONS.get(module_key, 'hidden')
+        )
 
     @property
     def is_staff(self):
@@ -188,6 +205,9 @@ class Teacher(models.Model):
     subjects = models.JSONField(null=True, blank=True)
     hourly_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     monthly_salary = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    # Share of their students' payments this teacher earns, in percent — the
+    # basis for the Teacher payments page. 0 means nothing is owed.
+    payment_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     photo_url = models.CharField(max_length=255, null=True, blank=True)
     # Whether this teacher appears on the tenant's public website — same
     # semantics as Course.show_on_enrollment.
@@ -232,6 +252,13 @@ class Student(models.Model):
     # as a free CharField here since the set is Algeria-specific curriculum
     # data, not a DB-level constraint.
     specialty = models.CharField(max_length=50, null=True, blank=True)
+    INSURANCE_CHOICES = [
+        ('insured', 'insured'),
+        ('uninsured', 'uninsured'),
+    ]
+    insurance_status = models.CharField(max_length=20, choices=INSURANCE_CHOICES, null=True, blank=True)
+    health_condition = models.TextField(null=True, blank=True)
+    id_card_number = models.CharField(max_length=50, null=True, blank=True)
     birth_date = models.DateField(null=True, blank=True)
     email = models.EmailField(null=True, blank=True)
     phone = models.CharField(max_length=255, null=True, blank=True)
@@ -267,6 +294,11 @@ class Course(models.Model):
     max_students = models.IntegerField(default=20)
     color = models.CharField(max_length=16, default='#E53935')
     image_url = models.CharField(max_length=255, null=True, blank=True)
+    # Which class this course targets — same vocabulary as Student.school_level
+    # /school_year/specialty so a course can be matched to its audience.
+    school_level = models.CharField(max_length=20, choices=Student.SCHOOL_LEVEL_CHOICES, null=True, blank=True)
+    school_year = models.IntegerField(null=True, blank=True)
+    specialty = models.CharField(max_length=50, null=True, blank=True)
     STATUS_CHOICES = [
         ('active', 'active'),
         ('draft', 'draft'),
@@ -363,7 +395,7 @@ class Payment(models.Model):
         ('registration', 'registration'),
         ('monthly', 'monthly'),
         ('course', 'course'),
-        ('installment', 'installment'),
+        ('per_session', 'per_session'),
         ('other', 'other'),
     ]
     kind = models.CharField(max_length=50, choices=KIND_CHOICES, default='monthly')
@@ -541,6 +573,12 @@ class Quiz(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(null=True, blank=True)
     time_limit_minutes = models.IntegerField(null=True, blank=True)
+    # The exercise itself: a photo or PDF the teacher uploads. Students read
+    # it from the public take-link and upload photos of their worked answers
+    # (see QuizSubmissionFile) — there is no multiple-choice authoring.
+    exercise_file_url = models.CharField(max_length=255, null=True, blank=True)
+    exercise_file_name = models.CharField(max_length=255, null=True, blank=True)
+    max_score = models.DecimalField(max_digits=6, decimal_places=2, default=20)
     STATUS_CHOICES = [
         ('draft', 'draft'),
         ('published', 'published'),
@@ -559,32 +597,6 @@ class Quiz(models.Model):
         db_table = 'quizzes'
 
 
-class Question(models.Model):
-    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='+')
-    quiz = models.ForeignKey(Quiz, on_delete=models.CASCADE, db_column='quiz_id', related_name='questions')
-    text = models.TextField()
-    points = models.DecimalField(max_digits=6, decimal_places=2, default=1)
-    order = models.IntegerField(default=0)
-
-    class Meta:
-        db_table = 'quiz_questions'
-        ordering = ['order']
-
-
-class Choice(models.Model):
-    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='+')
-    question = models.ForeignKey(Question, on_delete=models.CASCADE, db_column='question_id', related_name='choices')
-    text = models.CharField(max_length=500)
-    is_correct = models.BooleanField(default=False)
-    order = models.IntegerField(default=0)
-
-    class Meta:
-        db_table = 'quiz_choices'
-        ordering = ['order']
-
-
 class QuizAttempt(models.Model):
     """One row per submission on the quiz's single shared link — created
     only at submit time (there's no "started but not submitted" state to
@@ -592,7 +604,8 @@ class QuizAttempt(models.Model):
     time). `student` is a best-effort match of `solver_name` against the
     quiz's group roster (see public_quiz_attempt_submit); it's null when
     nobody on the roster matched what was typed (typo, not on this group,
-    etc.) — the attempt is still recorded either way."""
+    etc.) — the attempt is still recorded either way. Scoring is manual:
+    the teacher reads the uploaded solution photos and sets `score`."""
     id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='+')
     quiz = models.ForeignKey(Quiz, on_delete=models.CASCADE, db_column='quiz_id', related_name='attempts')
@@ -600,6 +613,8 @@ class QuizAttempt(models.Model):
     solver_name = models.CharField(max_length=255)
     score = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
     max_score = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    feedback = models.TextField(null=True, blank=True)
+    graded_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -607,16 +622,19 @@ class QuizAttempt(models.Model):
         ordering = ['-created_at']
 
 
-class Answer(models.Model):
+class QuizSubmissionFile(models.Model):
+    """A photo (or PDF) of the student's handwritten solution, uploaded from
+    the public take-link. One attempt can carry several pages."""
     id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='+')
-    attempt = models.ForeignKey(QuizAttempt, on_delete=models.CASCADE, db_column='attempt_id', related_name='answers')
-    question = models.ForeignKey(Question, on_delete=models.CASCADE, db_column='question_id', related_name='+')
-    choice = models.ForeignKey(Choice, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    attempt = models.ForeignKey(QuizAttempt, on_delete=models.CASCADE, db_column='attempt_id', related_name='files')
+    file_url = models.CharField(max_length=255)
+    file_name = models.CharField(max_length=255, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        db_table = 'quiz_answers'
-        unique_together = ('attempt', 'question')
+        db_table = 'quiz_submission_files'
+        ordering = ['created_at']
 
 
 class SchoolGalleryPhoto(models.Model):
@@ -630,3 +648,102 @@ class SchoolGalleryPhoto(models.Model):
     class Meta:
         db_table = 'school_gallery_photos'
         ordering = ['order']
+
+
+# Seeded into ExpenseCategory the first time a tenant opens the Expenses page
+# (see ensure_default_expense_categories). Stored as `key` so the UI can
+# translate them; tenant-added categories carry a free-text `name` instead.
+DEFAULT_EXPENSE_CATEGORIES = [
+    'rent', 'salaries', 'utilities', 'supplies', 'maintenance',
+    'marketing', 'transport', 'taxes', 'equipment', 'other',
+]
+
+
+class ExpenseCategory(models.Model):
+    """Either one of DEFAULT_EXPENSE_CATEGORIES (`key` set, `name` blank — the
+    frontend translates it) or a tenant-created one (`name` set, `key` null)."""
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='expense_categories')
+    key = models.CharField(max_length=50, null=True, blank=True)
+    name = models.CharField(max_length=255, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'expense_categories'
+        ordering = ['created_at']
+
+
+class Expense(models.Model):
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='expenses')
+    category = models.ForeignKey(ExpenseCategory, on_delete=models.SET_NULL, null=True, blank=True, db_column='category_id', related_name='expenses')
+    title = models.CharField(max_length=255)
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    spent_at = models.DateField()
+    METHOD_CHOICES = [
+        ('cash', 'cash'),
+        ('card', 'card'),
+        ('bank_transfer', 'bank_transfer'),
+        ('cheque', 'cheque'),
+        ('other', 'other'),
+    ]
+    method = models.CharField(max_length=50, choices=METHOD_CHOICES, default='cash')
+    notes = models.TextField(null=True, blank=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'expenses'
+        ordering = ['-spent_at', '-created_at']
+
+
+class TeacherPayout(models.Model):
+    """A recorded settlement with a teacher. What they have *earned* is derived
+    live from paid student payments x Teacher.payment_percentage; this table
+    only records what has actually been handed over, so the page can show a
+    remaining balance."""
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='teacher_payouts')
+    teacher = models.ForeignKey(Teacher, on_delete=models.CASCADE, db_column='teacher_id', related_name='payouts')
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    paid_at = models.DateField()
+    period_start = models.DateField(null=True, blank=True)
+    period_end = models.DateField(null=True, blank=True)
+    notes = models.TextField(null=True, blank=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'teacher_payouts'
+        ordering = ['-paid_at', '-created_at']
+
+
+class ActivityLog(models.Model):
+    """Append-only audit trail of who did what inside a tenant. Written by
+    log_activity() in api/services.py — never edited or deleted through the
+    API, and scoped to the tenant so one workspace can't read another's."""
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='activity_logs')
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, db_column='user_id', related_name='+')
+    # Denormalised so the trail still reads correctly after a user is deleted.
+    user_label = models.CharField(max_length=255, null=True, blank=True)
+    CATEGORY_CHOICES = [
+        ('auth', 'auth'),
+        ('data', 'data'),
+        ('security', 'security'),
+        ('billing', 'billing'),
+    ]
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='data')
+    action = models.CharField(max_length=50)
+    entity_type = models.CharField(max_length=50, null=True, blank=True)
+    entity_id = models.CharField(max_length=36, null=True, blank=True)
+    description = models.CharField(max_length=500, null=True, blank=True)
+    ip_address = models.CharField(max_length=64, null=True, blank=True)
+    user_agent = models.CharField(max_length=255, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'activity_logs'
+        ordering = ['-created_at']
+        indexes = [models.Index(fields=['tenant', '-created_at'])]

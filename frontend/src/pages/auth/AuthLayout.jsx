@@ -33,7 +33,7 @@ export default function AuthLayout({ children, title, subtitle, footer }) {
         </div>
 
         <div className="relative z-10 font-mono text-xs text-primary-foreground/50">
-          <div className="mb-2">→ scolaris.com/&lt;yourschool&gt;</div>
+          <div className="mb-2">→ scolaris.cloud/&lt;yourschool&gt;</div>
           <div>© {new Date().getFullYear()} Scolaris</div>
         </div>
       </div>

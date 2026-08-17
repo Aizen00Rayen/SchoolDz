@@ -27,11 +27,20 @@ export async function openInvoicePdf(paymentId) {
  * reserves ?format=... for its own content-negotiation and 404s when no
  * renderer matches "csv"/"xlsx". */
 export async function downloadExport(resource, format) {
-  const res = await api.get(`/${resource}/export`, { params: { type: format }, responseType: "blob" });
+  return downloadFrom(`/${resource}/export`, format, resource);
+}
+
+/** Same download-a-blob dance as downloadExport, but for endpoints that
+ * aren't a `<resource>/export` route — the reports and teacher-payments
+ * summaries take their own filters and emit the file from the same URL the
+ * page already reads. `path` may already carry a query string. */
+export async function downloadFrom(path, format, filename) {
+  const sep = path.includes("?") ? "&" : "?";
+  const res = await api.get(`${path}${sep}type=${format}`, { responseType: "blob" });
   const url = URL.createObjectURL(res.data);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${resource}.${format}`;
+  a.download = `${filename}.${format}`;
   document.body.appendChild(a);
   a.click();
   a.remove();

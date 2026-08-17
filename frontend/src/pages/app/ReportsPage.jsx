@@ -1,38 +1,122 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FileBarChart2, TrendingUp, TrendingDown, Users, Wallet, TriangleAlert } from "lucide-react";
+import {
+  Download, TrendingUp, TrendingDown, Receipt, Wallet, TriangleAlert, HandCoins,
+} from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
-import { api } from "@/lib/api";
-import { PageHeader } from "./_shared";
+import { api, downloadFrom } from "@/lib/api";
+import { PageHeader, Field } from "./_shared";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
+import { categoryLabel } from "./ExpensesPage";
 
 export default function ReportsPage() {
   const { t } = useI18n();
   const { tenant } = useAuth();
+  const [filters, setFilters] = useState({ from: "", to: "", group_id: "", teacher_id: "" });
+
+  const query = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
+
   const { data } = useQuery({
     queryKey: ["dashboard"],
     queryFn: async () => (await api.get("/dashboard/summary")).data,
   });
-  const { data: payments } = useQuery({
-    queryKey: ["payments-list"],
-    queryFn: async () => (await api.get("/payments")).data,
+  const { data: finance } = useQuery({
+    queryKey: ["finance-report", filters],
+    queryFn: async () => (await api.get(`/reports/finance${query ? `?${query}` : ""}`)).data,
+  });
+  const { data: groups } = useQuery({
+    queryKey: ["groups"],
+    queryFn: async () => (await api.get("/groups")).data,
+  });
+  const { data: teachers } = useQuery({
+    queryKey: ["teachers"],
+    queryFn: async () => (await api.get("/teachers")).data,
   });
 
-  const stats = data?.kpis || {};
-  const items = payments?.items || [];
-  const paid = items.filter((p) => p.status === "paid").length;
-  const pending = items.filter((p) => p.status === "pending").length;
+  const currency = tenant?.currency || "DZD";
+  const money = (v) => `${Number(v || 0).toLocaleString()} ${currency}`;
+  const byCategory = Object.entries(finance?.expenses_by_category || {});
 
   return (
     <div>
-      <PageHeader title={t("menu.reports")} subtitle={t("reports.subtitle")} />
+      <PageHeader
+        title={t("menu.reports")}
+        subtitle={t("reports.subtitle")}
+        actions={
+          <Button variant="outline" onClick={() => downloadFrom(`/reports/finance?${query}`, "xlsx", "financial-report")}>
+            <Download className="w-4 h-4 me-2" /> {t("export.excel")}
+          </Button>
+        }
+      />
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-        <Card icon={Users} label={t("reports.active_students")} value={stats.students_total} />
-        <Card icon={Wallet} label={t("reports.revenue_month")} value={`${(stats.revenue_month || 0).toLocaleString()} ${tenant?.currency || "DZD"}`} />
-        <Card icon={TrendingUp} label={t("reports.paid_invoices")} value={paid} />
-        <Card icon={TrendingDown} label={t("reports.outstanding")} value={`${(stats.outstanding || 0).toLocaleString()} ${tenant?.currency || "DZD"}`} />
+      <div className="surface-card p-4 mb-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+        <Field label={t("reports.from")}>
+          <Input type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} data-testid="reports-from" />
+        </Field>
+        <Field label={t("reports.to")}>
+          <Input type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} data-testid="reports-to" />
+        </Field>
+        <Field label={t("menu.groups")}>
+          <Select
+            value={filters.group_id || "__all"}
+            onValueChange={(v) => setFilters({ ...filters, group_id: v === "__all" ? "" : v })}
+          >
+            <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+            <SelectContent className="bg-popover">
+              <SelectItem value="__all">{t("reports.all_groups")}</SelectItem>
+              {(groups?.items || []).map((g) => (
+                <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label={t("menu.teachers")}>
+          <Select
+            value={filters.teacher_id || "__all"}
+            onValueChange={(v) => setFilters({ ...filters, teacher_id: v === "__all" ? "" : v })}
+          >
+            <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+            <SelectContent className="bg-popover">
+              <SelectItem value="__all">{t("reports.all_teachers")}</SelectItem>
+              {(teachers?.items || []).map((x) => (
+                <SelectItem key={x.id} value={x.id}>{x.first_name} {x.last_name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
       </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+        <Card icon={Wallet} label={t("reports.collected")} value={money(finance?.collected)} />
+        <Card icon={TrendingDown} label={t("reports.outstanding")} value={money(finance?.outstanding)} />
+        <Card icon={Receipt} label={t("reports.expenses")} value={money(finance?.expenses)} />
+        <Card icon={HandCoins} label={t("reports.teacher_earnings")} value={money(finance?.teacher_earnings)} />
+        <Card icon={TrendingUp} label={t("reports.net")} value={money(finance?.net)} />
+      </div>
+
+      {finance?.expenses_scoped_out && (
+        <p className="text-xs text-muted-foreground mb-6 -mt-3">{t("reports.expenses_scoped_out")}</p>
+      )}
+
+      {byCategory.length > 0 && (
+        <div className="surface-card p-5 mb-6">
+          <h3 className="font-display font-semibold text-lg mb-4">{t("reports.by_category")}</h3>
+          <div className="space-y-2">
+            {byCategory.sort((a, b) => b[1] - a[1]).map(([key, value]) => (
+              <div key={key} className="flex items-center justify-between text-sm">
+                <span>{categoryLabel(key, t)}</span>
+                <span className="font-mono">{money(value)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="surface-card p-5">
         <h3 className="font-display font-semibold text-lg mb-4">{t("reports.revenue_by_month")}</h3>

@@ -411,6 +411,11 @@ export default function EnrollPage() {
             <div className="space-y-3">
               {courses.map((c) => {
                 const totalSeats = c.groups.reduce((s, g) => s + g.seats_left, 0);
+                // Availability is only worth saying out loud when it's scarce
+                // or gone — a comfortable "23 seats left" just tells people
+                // there's no reason to decide today.
+                const scarce = c.groups.some((g) => g.seats_left_is_low);
+                const allFull = totalSeats === 0;
                 return (
                   <button
                     key={c.id}
@@ -434,10 +439,12 @@ export default function EnrollPage() {
                         {Number(c.price).toLocaleString()} {school.currency}
                       </span>
                     </div>
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-1.5">
-                      <Users className="w-3 h-3" />
-                      {totalSeats > 0 ? `${totalSeats} seat${totalSeats > 1 ? "s" : ""} left` : "Full"}
-                    </div>
+                    {(scarce || allFull) && (
+                      <div className={`flex items-center gap-1.5 text-xs mt-1.5 font-medium ${allFull ? "text-muted-foreground" : "text-destructive"}`}>
+                        <Users className="w-3 h-3" />
+                        {allFull ? "Full" : `Only ${totalSeats} place${totalSeats > 1 ? "s" : ""} left!`}
+                      </div>
+                    )}
                   </button>
                 );
               })}
@@ -455,7 +462,8 @@ export default function EnrollPage() {
                   <SelectContent className="bg-popover">
                     {selectedCourse.groups.map((g) => (
                       <SelectItem key={g.id} value={g.id} disabled={g.seats_left === 0}>
-                        {g.name}{g.schedule ? ` · ${g.schedule}` : ""} — {g.seats_left === 0 ? "Full" : `${g.seats_left} left`}
+                        {g.name}{g.schedule ? ` · ${g.schedule}` : ""}
+                        {g.seats_left === 0 ? " — Full" : g.seats_left_is_low ? ` — only ${g.seats_left} left!` : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>

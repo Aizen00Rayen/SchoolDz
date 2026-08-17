@@ -26,9 +26,9 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, PermissionDenied, NotFound, APIException
 from rest_framework.authtoken.models import Token
 
-from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Attendance, Payment, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, Question, Choice, QuizAttempt, Answer, SchoolGalleryPhoto, PERMISSION_MODULES, PERMISSION_LEVELS
-from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, AttendanceSerializer, PaymentSerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuestionSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer
-from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle, EnrollmentRateThrottle
+from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Attendance, Payment, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_LEVELS
+from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, AttendanceSerializer, PaymentSerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer
+from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle, EnrollmentRateThrottle, log_activity
 
 # Single source of truth for pricing:
 PLANS_CONFIG = {
@@ -188,16 +188,33 @@ def export_rows(headers, rows, filename, fmt):
     return response
 
 
-UPLOAD_SUBDIRS = {'logos', 'hero', 'teachers', 'courses', 'gallery'}
+INVOICE_STATUS_AR = {
+    'paid': 'مدفوع',
+    'pending': 'قيد الانتظار',
+    'overdue': 'متأخر',
+    'partial': 'مدفوع جزئيًا',
+    'refunded': 'مسترد',
+    'cancelled': 'ملغى',
+    'due_on': 'يُستحق في',
+}
+
+UPLOAD_SUBDIRS = {'logos', 'hero', 'teachers', 'courses', 'gallery', 'quizzes', 'submissions'}
 IMAGE_UPLOAD_EXTS = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif'}
 
 
 # Longest-edge cap per upload purpose. Anything bigger is downscaled before
 # it ever touches disk — a modern phone photo is ~4000px/5MB, which is pure
 # waste for a 96px avatar and adds up fast across every tenant.
-UPLOAD_MAX_EDGE = {'logos': 512, 'teachers': 600, 'courses': 1280, 'gallery': 1600, 'hero': 2000}
+UPLOAD_MAX_EDGE = {
+    'logos': 512, 'teachers': 600, 'courses': 1280, 'gallery': 1600, 'hero': 2000,
+    # Exercise sheets and handwritten answers have to stay readable when
+    # zoomed, so they keep more detail than a decorative photo.
+    'quizzes': 2200, 'submissions': 2200,
+}
 UPLOAD_JPEG_QUALITY = 82
 GALLERY_MAX_PHOTOS = 40
+PUBLIC_LOW_SEATS_THRESHOLD = 5
+QUIZ_MAX_SUBMISSION_FILES = 10
 
 # A ~1MB PNG can decompress to a multi-GB bitmap and OOM the worker
 # ("decompression bomb"). Pillow warns above ~89M pixels by default; make it
@@ -259,6 +276,43 @@ def save_uploaded_image(file, subdir, id_prefix):
     # Saving from the decoded image (never the raw upload stream) is what
     # guarantees only re-encoded pixel data is written.
     img.save(os.path.join(upload_dir, filename), fmt, **save_kwargs)
+    return f"/uploads/{subdir}/{filename}"
+
+
+PDF_MAX_BYTES = 15 * 1024 * 1024
+
+
+def save_uploaded_document(file, subdir, id_prefix):
+    """Like save_uploaded_image but also accepts PDFs — what quizzes need,
+    since a teacher may photograph an exercise or scan it to PDF, and a
+    student may answer with either.
+
+    Images still go through the full re-encode pipeline. PDFs can't be
+    re-encoded that way, so they're accepted only after the magic header
+    confirms they really are PDFs and are stored under a generated name with
+    a forced .pdf extension — the original filename never reaches the
+    filesystem, so it can't be used to smuggle a different extension."""
+    assert subdir in UPLOAD_SUBDIRS
+    if file.content_type in IMAGE_UPLOAD_EXTS:
+        return save_uploaded_image(file, subdir, id_prefix)
+
+    if file.content_type != 'application/pdf':
+        raise ValidationError('Only images (PNG, JPEG, WEBP, GIF) or PDF files are allowed')
+    if file.size > PDF_MAX_BYTES:
+        raise ValidationError('PDF must be under 15MB')
+
+    file.seek(0)
+    header = file.read(5)
+    if header != b'%PDF-':
+        raise ValidationError('That file is not a valid PDF')
+
+    filename = f"{id_prefix}-{secrets.token_urlsafe(12)}.pdf"
+    upload_dir = os.path.join(settings.MEDIA_ROOT, subdir)
+    os.makedirs(upload_dir, exist_ok=True)
+    file.seek(0)
+    with open(os.path.join(upload_dir, filename), 'wb') as out:
+        for chunk in file.chunks():
+            out.write(chunk)
     return f"/uploads/{subdir}/{filename}"
 
 
@@ -476,12 +530,22 @@ def auth_login(request):
         
     user = query.first()
     if not user or not user.check_password(password):
+        # Logged against the tenant the address belongs to (when it resolves
+        # to one) so an owner can actually see brute-force attempts on their
+        # workspace — that's the whole point of a security log.
+        if user is not None:
+            log_activity(request, user.tenant_id, 'login_failed', category='security', user=user,
+                         description=f'Failed login for {email}')
         return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
         
     if not user.is_active:
+        log_activity(request, user.tenant_id, 'login_blocked', category='security', user=user,
+                     description='Login attempt on a disabled account')
         return Response({'error': 'Account disabled'}, status=status.HTTP_403_FORBIDDEN)
 
     token, _ = Token.objects.get_or_create(user=user)
+    log_activity(request, user.tenant_id, 'login', category='auth', user=user,
+                 description=f'{user.name or user.email} signed in')
     return Response({
         'access_token': token.key,
         'refresh_token': token.key,
@@ -530,18 +594,13 @@ def public_quiz_attempt(request, token):
     if not quiz:
         return Response({'error': 'Invalid or expired link'}, status=status.HTTP_404_NOT_FOUND)
 
-    questions = [{
-        'id': q.id,
-        'text': q.text,
-        'points': q.points,
-        'choices': [{'id': c.id, 'text': c.text} for c in q.choices.all()],
-    } for q in quiz.questions.all().prefetch_related('choices')]
-
     return Response({
         'quiz_title': quiz.title,
         'description': quiz.description,
         'time_limit_minutes': quiz.time_limit_minutes,
-        'questions': questions,
+        'exercise_file_url': quiz.exercise_file_url,
+        'exercise_file_name': quiz.exercise_file_name,
+        'max_score': quiz.max_score,
     })
 
 
@@ -569,54 +628,44 @@ def public_quiz_attempt_submit(request, token):
     if not solver_name:
         return Response({'error': 'Please enter your full name before submitting'}, status=status.HTTP_400_BAD_REQUEST)
 
-    answers_data = request.data.get('answers', [])
-    if not isinstance(answers_data, list):
-        return Response({'error': 'answers must be a list'}, status=status.HTTP_400_BAD_REQUEST)
+    files = request.FILES.getlist('files')
+    if not files:
+        return Response({'error': 'Attach at least one photo or PDF of your answers'}, status=status.HTTP_400_BAD_REQUEST)
+    if len(files) > QUIZ_MAX_SUBMISSION_FILES:
+        return Response(
+            {'error': f'You can attach at most {QUIZ_MAX_SUBMISSION_FILES} files'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
-    questions = {q.id: q for q in quiz.questions.all().prefetch_related('choices')}
-    max_score = sum(float(q.points) for q in questions.values())
-    score = 0.0
     matched_student = _match_student_by_name(quiz.group, solver_name)
+
+    # Validate/convert every upload before writing any DB row, so a bad file
+    # halfway through doesn't leave a half-submitted attempt behind.
+    saved = []
+    for f in files:
+        saved.append((save_uploaded_document(f, 'submissions', quiz.id), f.name))
 
     with transaction.atomic():
         attempt = QuizAttempt.objects.create(
             tenant_id=quiz.tenant_id, quiz=quiz, student=matched_student,
-            solver_name=solver_name, max_score=max_score,
+            solver_name=solver_name, max_score=quiz.max_score,
         )
-        for a in answers_data:
-            question = questions.get(a.get('question_id'))
-            if not question:
-                continue
-            choice = None
-            choice_id = a.get('choice_id')
-            if choice_id:
-                choice = next((c for c in question.choices.all() if c.id == choice_id), None)
-            Answer.objects.create(tenant_id=quiz.tenant_id, attempt=attempt, question=question, choice=choice)
-            if choice and choice.is_correct:
-                score += float(question.points)
-
-        attempt.score = score
-        attempt.save(update_fields=['score'])
-
-        # Only when the typed name actually matched someone on the roster —
-        # an unmatched name has no student to attribute a grade to.
-        if matched_student:
-            Grade.objects.create(
-                tenant_id=quiz.tenant_id,
-                student=matched_student,
-                course=quiz.course,
-                title=quiz.title,
-                score=score,
-                max_score=max_score,
-                date=timezone.now().date(),
+        for url, name in saved:
+            QuizSubmissionFile.objects.create(
+                tenant_id=quiz.tenant_id, attempt=attempt, file_url=url, file_name=name[:255],
             )
 
-    return Response({'score': score, 'max_score': max_score, 'matched': matched_student is not None})
+    # No auto-grading in the file flow — the teacher reads the pages and sets
+    # the score later (see QuizViewSet.grade), which is what also creates the
+    # Grade row.
+    return Response({'files': len(saved), 'matched': matched_student is not None})
 
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def auth_logout(request):
+    log_activity(request, request.user.tenant_id, 'logout', category='auth',
+                 description=f'{request.user.name or request.user.email} signed out')
     request.auth.delete()
     return Response({'ok': True})
 
@@ -643,6 +692,11 @@ def public_school_info(request, slug):
                 'room': g.room,
                 'capacity': g.capacity,
                 'seats_left': seats_left,
+                # Only surfaced publicly when it's genuinely scarce — "12
+                # places left" reads as "no rush"; showing nothing is the
+                # better default, and a low number then carries real urgency.
+                'seats_left_is_low': 0 < seats_left <= PUBLIC_LOW_SEATS_THRESHOLD,
+                'is_full': seats_left == 0,
             })
         course_data.append({
             'id': c.id,
@@ -888,17 +942,18 @@ def payment_invoice_pdf(request, payment_id):
     stamp_key = 'overdue' if is_overdue else payment.status
     stamp_color = STAMP_COLORS.get(stamp_key, '#8A8478')
 
+    # Invoices are handed to Algerian parents, so the status reads in Arabic.
     if payment.status == 'paid':
-        status_label = 'Paid'
-        status_line = f"Paid — {payment.paid_at.strftime('%d %b %Y')}" if payment.paid_at else 'Paid'
+        status_label = INVOICE_STATUS_AR['paid']
+        status_line = f"{INVOICE_STATUS_AR['paid']} — {payment.paid_at.strftime('%d/%m/%Y')}" if payment.paid_at else INVOICE_STATUS_AR['paid']
     elif is_overdue:
-        status_label = 'Overdue'
-        status_line = f"Overdue since {payment.due_date.strftime('%d %b %Y')}"
+        status_label = INVOICE_STATUS_AR['overdue']
+        status_line = f"{INVOICE_STATUS_AR['overdue']} — {payment.due_date.strftime('%d/%m/%Y')}"
     elif payment.status in ['pending', 'partial']:
-        status_label = 'Pending'
-        status_line = f"Due {payment.due_date.strftime('%d %b %Y')}" if payment.due_date else 'Pending'
+        status_label = INVOICE_STATUS_AR['pending']
+        status_line = f"{INVOICE_STATUS_AR['due_on']} {payment.due_date.strftime('%d/%m/%Y')}" if payment.due_date else INVOICE_STATUS_AR['pending']
     else:
-        status_label = payment.get_status_display().capitalize()
+        status_label = INVOICE_STATUS_AR.get(payment.status, payment.get_status_display())
         status_line = status_label
 
     item_sub_parts = []
@@ -2619,11 +2674,33 @@ class TeacherViewSet(TenantScopedViewSet):
         data = request.data.copy()
         # Auto hire date
         data['hire_date'] = timezone.now().date().isoformat()
+        self._guard_percentage_edit(request, data)
 
         serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def update(self, request, *args, **kwargs):
+        self.check_module_edit()
+        self._guard_percentage_edit(request, request.data)
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        self.check_module_edit()
+        self._guard_percentage_edit(request, request.data)
+        return super().partial_update(request, *args, **kwargs)
+
+    def _guard_percentage_edit(self, request, data):
+        """Teacher.payment_percentage decides real money owed at payout time,
+        so unlike the rest of this form it isn't something a secretary's
+        'edit' access to the Teachers tab should reach — only the workspace
+        owner/director (or super admin) may set it. The Teacher Payments
+        page is the only place the UI actually offers this field."""
+        if 'payment_percentage' in data:
+            user = request.user
+            if not user.is_super_admin() and user.role not in ('owner', 'director'):
+                raise PermissionDenied('Only the workspace owner or director can set teacher payment percentages.')
 
     @action(detail=True, methods=['post'])
     def invite(self, request, pk=None):
@@ -2693,12 +2770,14 @@ class StudentViewSet(TenantScopedViewSet):
         queryset = self.filter_queryset(self.get_queryset()).select_related('parent').order_by('-created_at')
         headers = [
             'Student Code', 'First Name', 'Last Name', 'Gender', 'School Level', 'School Year', 'Specialty',
+            'Insurance', 'Health Condition', 'ID Card Number',
             'Birth Date', 'Email', 'Phone', 'Address',
             'Emergency Contact', 'Status', 'Parent Name', 'Parent Email', 'Parent Phone', 'Enrollment Date',
         ]
         rows = [[
             s.student_code or '', s.first_name, s.last_name, s.gender or '',
             s.school_level or '', s.school_year or '', s.specialty or '',
+            s.insurance_status or '', s.health_condition or '', s.id_card_number or '',
             s.birth_date.isoformat() if s.birth_date else '', s.email or '', s.phone or '', s.address or '',
             s.emergency_contact or '', s.status, s.parent.name if s.parent else '',
             s.parent.email if s.parent and s.parent.email else '', s.parent.phone if s.parent and s.parent.phone else '',
@@ -2781,6 +2860,11 @@ class StudentViewSet(TenantScopedViewSet):
                     failed.append({'row': i, 'error': 'school_year must be a number'})
                     continue
 
+            insurance_status = (row.get('insurance_status') or '').strip().lower()
+            if insurance_status and insurance_status not in ('insured', 'uninsured'):
+                failed.append({'row': i, 'error': 'insurance_status must be insured or uninsured'})
+                continue
+
             try:
                 with transaction.atomic():
                     guardian = None
@@ -2803,6 +2887,9 @@ class StudentViewSet(TenantScopedViewSet):
                         school_level=school_level or None,
                         school_year=school_year,
                         specialty=(row.get('specialty') or '').strip() or None,
+                        insurance_status=insurance_status or None,
+                        health_condition=(row.get('health_condition') or '').strip() or None,
+                        id_card_number=(row.get('id_card_number') or '').strip() or None,
                         birth_date=(row.get('birth_date') or '').strip() or None,
                         address=(row.get('address') or '').strip() or None,
                         emergency_contact=(row.get('emergency_contact') or '').strip() or None,
@@ -2971,7 +3058,9 @@ class ClassSessionViewSet(TenantScopedViewSet):
     module_key = 'sessions'
 
     def list(self, request, *args, **kwargs):
-        queryset = self.filter_queryset(self.get_queryset())
+        # select_related keeps the serializer's group/course/teacher labels
+        # from firing a query per row in the planner's month view.
+        queryset = self.filter_queryset(self.get_queryset()).select_related('group', 'course', 'teacher')
         group_id = request.GET.get('group_id')
         if group_id:
             queryset = queryset.filter(group_id=group_id)
@@ -3206,35 +3295,65 @@ class QuizViewSet(TenantScopedViewSet):
         self._check_quiz_builder(quiz.tenant)
         return super().update(request, *args, **kwargs)
 
-    @action(detail=True, methods=['post'])
-    def save_questions(self, request, pk=None):
+    @action(detail=True, methods=['post'], url_path='exercise')
+    def exercise(self, request, pk=None):
+        """Upload the exercise sheet students will answer — a photo or a PDF."""
         self.check_module_edit()
         quiz = self.get_object()
         self._check_quiz_builder(quiz.tenant)
 
-        questions_data = request.data.get('questions', [])
-        if not isinstance(questions_data, list):
-            raise ValidationError('questions must be a list')
+        upload = request.FILES.get('file')
+        if not upload:
+            raise ValidationError('file is required')
+
+        old_url = quiz.exercise_file_url
+        quiz.exercise_file_url = save_uploaded_document(upload, 'quizzes', quiz.id)
+        quiz.exercise_file_name = upload.name[:255]
+        quiz.save(update_fields=['exercise_file_url', 'exercise_file_name', 'updated_at'])
+        if old_url and old_url != quiz.exercise_file_url:
+            delete_uploaded_image(old_url, 'quizzes')
+        return Response(QuizSerializer(quiz).data)
+
+    @action(detail=True, methods=['post'], url_path='grade')
+    def grade(self, request, pk=None):
+        """Score one submission by hand and mirror it into Grades. Re-grading
+        updates the existing Grade row rather than stacking duplicates."""
+        self.check_module_edit()
+        quiz = self.get_object()
+        self._check_quiz_builder(quiz.tenant)
+
+        attempt = quiz.attempts.filter(id=request.data.get('attempt_id')).select_related('student').first()
+        if not attempt:
+            raise NotFound('Submission not found')
+
+        try:
+            score = float(request.data.get('score'))
+        except (TypeError, ValueError):
+            raise ValidationError('score must be a number')
+        max_score = float(attempt.max_score or quiz.max_score or 20)
+        if score < 0 or score > max_score:
+            raise ValidationError(f'score must be between 0 and {max_score:g}')
 
         with transaction.atomic():
-            quiz.questions.all().delete()  # cascades to choices
-            for qi, q in enumerate(questions_data):
-                text = (q.get('text') or '').strip()
-                if not text:
-                    continue
-                question = Question.objects.create(
-                    tenant_id=quiz.tenant_id, quiz=quiz, text=text,
-                    points=q.get('points') or 1, order=q.get('order', qi),
+            attempt.score = score
+            attempt.max_score = max_score
+            attempt.feedback = (request.data.get('feedback') or '').strip() or None
+            attempt.graded_at = timezone.now()
+            attempt.save(update_fields=['score', 'max_score', 'feedback', 'graded_at'])
+
+            if attempt.student_id:
+                Grade.objects.update_or_create(
+                    tenant_id=quiz.tenant_id,
+                    student_id=attempt.student_id,
+                    title=quiz.title,
+                    defaults={
+                        'course': quiz.course,
+                        'score': score,
+                        'max_score': max_score,
+                        'date': timezone.now().date(),
+                    },
                 )
-                for ci, c in enumerate(q.get('choices') or []):
-                    c_text = (c.get('text') or '').strip()
-                    if not c_text:
-                        continue
-                    Choice.objects.create(
-                        tenant_id=quiz.tenant_id, question=question, text=c_text,
-                        is_correct=bool(c.get('is_correct')), order=c.get('order', ci),
-                    )
-        return Response(QuizSerializer(quiz).data)
+        return Response(QuizAttemptSerializer(attempt).data)
 
     @action(detail=True, methods=['post'])
     def publish(self, request, pk=None):
@@ -3243,12 +3362,12 @@ class QuizViewSet(TenantScopedViewSet):
         self._check_quiz_builder(quiz.tenant)
         if not quiz.group_id:
             raise ValidationError('Assign a group to this quiz before publishing.')
-        if not quiz.questions.exists():
-            raise ValidationError('Add at least one question before publishing.')
+        if not quiz.exercise_file_url:
+            raise ValidationError('Upload the exercise (photo or PDF) before publishing.')
 
         # ONE shared link for the whole class — generated once and reused on
         # every re-publish, so a link already shared with students doesn't
-        # go stale if the teacher edits questions and republishes.
+        # go stale if the teacher swaps the exercise and republishes.
         if not quiz.public_token:
             quiz.public_token = secrets.token_urlsafe(24)
         quiz.status = 'published'
@@ -3263,7 +3382,7 @@ class QuizViewSet(TenantScopedViewSet):
     @action(detail=True, methods=['get'])
     def results(self, request, pk=None):
         quiz = self.get_object()
-        attempts = quiz.attempts.select_related('student').order_by('-created_at')
+        attempts = quiz.attempts.select_related('student').prefetch_related('files').order_by('-created_at')
         return Response({'items': QuizAttemptSerializer(attempts, many=True).data})
 
 
@@ -3487,3 +3606,313 @@ def serve_frontend(request, path=''):
             "and make sure frontend/build/ exists next to django-backend/."
         )
     return FileResponse(open(index_path, 'rb'), content_type='text/html')
+
+
+# ---------------------------------------------------------------- Expenses
+
+def ensure_default_expense_categories(tenant_id):
+    """Seed DEFAULT_EXPENSE_CATEGORIES the first time a tenant touches
+    expenses. Stored per tenant (not global) so a tenant can rename or delete
+    the ones they don't use without affecting anyone else."""
+    if ExpenseCategory.objects.filter(tenant_id=tenant_id).exists():
+        return
+    ExpenseCategory.objects.bulk_create([
+        ExpenseCategory(tenant_id=tenant_id, key=key) for key in DEFAULT_EXPENSE_CATEGORIES
+    ])
+
+
+class ExpenseCategoryViewSet(TenantScopedViewSet):
+    queryset = ExpenseCategory.objects.all()
+    serializer_class = ExpenseCategorySerializer
+    module_key = 'expenses'
+
+    def list(self, request, *args, **kwargs):
+        ensure_default_expense_categories(request.user.tenant_id)
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({'items': serializer.data, 'total': len(serializer.data)})
+
+    def create(self, request, *args, **kwargs):
+        self.check_module_edit()
+        name = (request.data.get('name') or '').strip()
+        if not name:
+            raise ValidationError('name is required')
+        category = ExpenseCategory.objects.create(tenant_id=request.user.tenant_id, name=name)
+        log_activity(request, request.user.tenant_id, 'create', entity_type='expense_category',
+                     entity_id=category.id, description=f'Added expense category "{name}"')
+        return Response(ExpenseCategorySerializer(category).data)
+
+    def destroy(self, request, *args, **kwargs):
+        self.check_module_edit()
+        category = self.get_object()
+        log_activity(request, request.user.tenant_id, 'delete', entity_type='expense_category',
+                     entity_id=category.id, description=f'Deleted expense category "{category.key or category.name}"')
+        return super().destroy(request, *args, **kwargs)
+
+
+class ExpenseViewSet(TenantScopedViewSet):
+    queryset = Expense.objects.all()
+    serializer_class = ExpenseSerializer
+    module_key = 'expenses'
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset()).select_related('category')
+        queryset = filter_by_date_range(queryset, request, 'spent_at')
+        category_id = request.GET.get('category_id')
+        if category_id:
+            queryset = queryset.filter(category_id=category_id)
+        q = request.GET.get('q')
+        if q:
+            queryset = queryset.filter(Q(title__icontains=q) | Q(notes__icontains=q))
+        queryset = queryset.order_by('-spent_at', '-created_at')[:1000]
+        serializer = self.get_serializer(queryset, many=True)
+        total = sum(float(e.amount) for e in queryset)
+        return Response({'items': serializer.data, 'total': len(serializer.data), 'total_amount': total})
+
+    def create(self, request, *args, **kwargs):
+        self.check_module_edit()
+        response = super().create(request, *args, **kwargs)
+        log_activity(request, request.user.tenant_id, 'create', entity_type='expense',
+                     entity_id=response.data.get('id'),
+                     description=f"Recorded expense {response.data.get('title')} ({response.data.get('amount')})")
+        return response
+
+    @action(detail=False, methods=['get'])
+    def export(self, request):
+        queryset = self.filter_queryset(self.get_queryset()).select_related('category')
+        queryset = filter_by_date_range(queryset, request, 'spent_at').order_by('-spent_at')
+        headers = ['Date', 'Title', 'Category', 'Amount', 'Method', 'Notes']
+        rows = [[
+            e.spent_at.isoformat() if e.spent_at else '', e.title,
+            e.category.key or e.category.name if e.category else '',
+            float(e.amount), e.method, e.notes or '',
+        ] for e in queryset]
+        return export_rows(headers, rows, 'expenses', request.GET.get('type'))
+
+
+# ------------------------------------------------------- Teacher payments
+
+def filter_by_date_range(queryset, request, field):
+    """Shared ?from=YYYY-MM-DD&to=YYYY-MM-DD filter used by expenses,
+    teacher payments and reports."""
+    date_from = request.GET.get('from')
+    date_to = request.GET.get('to')
+    if date_from:
+        queryset = queryset.filter(**{f'{field}__gte': date_from})
+    if date_to:
+        queryset = queryset.filter(**{f'{field}__lte': date_to})
+    return queryset
+
+
+def compute_teacher_earnings(tenant_id, request):
+    """What each teacher has earned = their percentage of the *paid* student
+    payments on groups they teach, minus what's already been paid out.
+
+    Only 'paid' payments count — billing a student doesn't mean the money
+    arrived, and paying a teacher a share of an unpaid invoice would put the
+    school out of pocket."""
+    teachers = Teacher.objects.filter(tenant_id=tenant_id).order_by('first_name', 'last_name')
+    teacher_id = request.GET.get('teacher_id')
+    if teacher_id:
+        teachers = teachers.filter(id=teacher_id)
+
+    payments = Payment.objects.filter(tenant_id=tenant_id, status='paid').select_related('group')
+    payments = filter_by_date_range(payments, request, 'paid_at__date')
+    group_id = request.GET.get('group_id')
+    if group_id:
+        payments = payments.filter(group_id=group_id)
+
+    # group -> teacher, resolved once so we don't hit the DB per payment
+    group_teacher = dict(
+        Group.objects.filter(tenant_id=tenant_id).exclude(teacher_id=None).values_list('id', 'teacher_id')
+    )
+    collected = {}
+    for p in payments:
+        tid = group_teacher.get(p.group_id)
+        if tid:
+            collected[tid] = collected.get(tid, 0.0) + float(p.amount) - float(p.discount or 0)
+
+    payouts = TeacherPayout.objects.filter(tenant_id=tenant_id)
+    payouts = filter_by_date_range(payouts, request, 'paid_at')
+    paid_out = {}
+    for po in payouts:
+        paid_out[po.teacher_id] = paid_out.get(po.teacher_id, 0.0) + float(po.amount)
+
+    rows = []
+    for t in teachers:
+        base = collected.get(t.id, 0.0)
+        pct = float(t.payment_percentage or 0)
+        earned = round(base * pct / 100, 2)
+        already = round(paid_out.get(t.id, 0.0), 2)
+        rows.append({
+            'teacher_id': t.id,
+            'teacher_name': f'{t.first_name} {t.last_name}',
+            'percentage': pct,
+            'collected': round(base, 2),
+            'earned': earned,
+            'paid_out': already,
+            'balance': round(earned - already, 2),
+        })
+    return rows
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def teacher_payments_summary(request):
+    user = request.user
+    if not user.tenant_id:
+        raise PermissionDenied('User has no tenant')
+    if user.get_permission('teacher_payments') == 'hidden':
+        raise PermissionDenied('Forbidden')
+
+    rows = compute_teacher_earnings(user.tenant_id, request)
+    if request.GET.get('type') in ('csv', 'xlsx'):
+        headers = ['Teacher', 'Percentage', 'Collected', 'Earned', 'Paid out', 'Balance']
+        return export_rows(
+            headers,
+            [[r['teacher_name'], r['percentage'], r['collected'], r['earned'], r['paid_out'], r['balance']] for r in rows],
+            'teacher-payments', request.GET.get('type'),
+        )
+    return Response({
+        'items': rows,
+        'totals': {
+            'collected': round(sum(r['collected'] for r in rows), 2),
+            'earned': round(sum(r['earned'] for r in rows), 2),
+            'paid_out': round(sum(r['paid_out'] for r in rows), 2),
+            'balance': round(sum(r['balance'] for r in rows), 2),
+        },
+    })
+
+
+class TeacherPayoutViewSet(TenantScopedViewSet):
+    queryset = TeacherPayout.objects.all()
+    serializer_class = TeacherPayoutSerializer
+    module_key = 'teacher_payments'
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset()).select_related('teacher')
+        queryset = filter_by_date_range(queryset, request, 'paid_at')
+        teacher_id = request.GET.get('teacher_id')
+        if teacher_id:
+            queryset = queryset.filter(teacher_id=teacher_id)
+        queryset = queryset.order_by('-paid_at')[:500]
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({'items': serializer.data, 'total': len(serializer.data)})
+
+    def create(self, request, *args, **kwargs):
+        self.check_module_edit()
+        response = super().create(request, *args, **kwargs)
+        log_activity(request, request.user.tenant_id, 'create', entity_type='teacher_payout',
+                     entity_id=response.data.get('id'),
+                     description=f"Paid teacher {response.data.get('teacher_name')} {response.data.get('amount')}")
+        return response
+
+
+# ------------------------------------------------------------ Activity log
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def activity_logs(request):
+    user = request.user
+    if not user.tenant_id:
+        raise PermissionDenied('User has no tenant')
+    if user.get_permission('logs') == 'hidden':
+        raise PermissionDenied('Forbidden')
+
+    logs = ActivityLog.objects.filter(tenant_id=user.tenant_id)
+    category = request.GET.get('category')
+    if category:
+        logs = logs.filter(category=category)
+    log_user = request.GET.get('user_id')
+    if log_user:
+        logs = logs.filter(user_id=log_user)
+    q = request.GET.get('q')
+    if q:
+        logs = logs.filter(
+            Q(description__icontains=q) | Q(user_label__icontains=q) | Q(action__icontains=q)
+        )
+    date_from = request.GET.get('from')
+    date_to = request.GET.get('to')
+    if date_from:
+        logs = logs.filter(created_at__date__gte=date_from)
+    if date_to:
+        logs = logs.filter(created_at__date__lte=date_to)
+
+    logs = logs.order_by('-created_at')[:500]
+    if request.GET.get('type') in ('csv', 'xlsx'):
+        headers = ['When', 'User', 'Category', 'Action', 'Entity', 'Description', 'IP']
+        rows = [[
+            l.created_at.strftime('%Y-%m-%d %H:%M:%S'), l.user_label or '', l.category,
+            l.action, l.entity_type or '', l.description or '', l.ip_address or '',
+        ] for l in logs]
+        return export_rows(headers, rows, 'activity-logs', request.GET.get('type'))
+    return Response({'items': ActivityLogSerializer(logs, many=True).data, 'total': len(logs)})
+
+
+# ------------------------------------------------------------ Finance report
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def finance_report(request):
+    """Payments + expenses + net for a date range, optionally narrowed to one
+    group or teacher. Backs the Reports page and its Excel export."""
+    user = request.user
+    if not user.tenant_id:
+        raise PermissionDenied('User has no tenant')
+    if user.get_permission('reports') == 'hidden':
+        raise PermissionDenied('Forbidden')
+    tid = user.tenant_id
+
+    payments = Payment.objects.filter(tenant_id=tid).select_related('student', 'group', 'course')
+    payments = filter_by_date_range(payments, request, 'due_date')
+    group_id = request.GET.get('group_id')
+    if group_id:
+        payments = payments.filter(group_id=group_id)
+    teacher_id = request.GET.get('teacher_id')
+    if teacher_id:
+        payments = payments.filter(group__teacher_id=teacher_id)
+
+    paid = [p for p in payments if p.status == 'paid']
+    outstanding = [p for p in payments if p.status in ('pending', 'partial')]
+    collected = round(sum(float(p.amount) - float(p.discount or 0) for p in paid), 2)
+    pending_amount = round(sum(float(p.amount) - float(p.discount or 0) for p in outstanding), 2)
+
+    expenses = Expense.objects.filter(tenant_id=tid).select_related('category')
+    expenses = filter_by_date_range(expenses, request, 'spent_at')
+    # An expense belongs to the school as a whole, not to a group or teacher,
+    # so narrowing by those would silently mix a filtered income figure with
+    # an unfiltered cost one. Report zero instead of a misleading net.
+    scoped_to_subset = bool(group_id or teacher_id)
+    expense_total = 0.0 if scoped_to_subset else round(sum(float(e.amount) for e in expenses), 2)
+
+    by_category = {}
+    if not scoped_to_subset:
+        for e in expenses:
+            label = (e.category.key or e.category.name) if e.category else 'uncategorized'
+            by_category[label] = round(by_category.get(label, 0.0) + float(e.amount), 2)
+
+    teacher_rows = compute_teacher_earnings(tid, request)
+    teacher_total = round(sum(r['earned'] for r in teacher_rows), 2)
+
+    if request.GET.get('type') in ('csv', 'xlsx'):
+        headers = ['Metric', 'Amount']
+        rows = [
+            ['Collected', collected],
+            ['Outstanding', pending_amount],
+            ['Expenses', expense_total],
+            ['Teacher earnings', teacher_total],
+            ['Net', round(collected - expense_total - teacher_total, 2)],
+        ] + [[f'Expenses — {k}', v] for k, v in sorted(by_category.items())]
+        return export_rows(headers, rows, 'financial-report', request.GET.get('type'))
+
+    return Response({
+        'collected': collected,
+        'outstanding': pending_amount,
+        'expenses': expense_total,
+        'expenses_by_category': by_category,
+        'teacher_earnings': teacher_total,
+        'net': round(collected - expense_total - teacher_total, 2),
+        'payments_count': len(paid),
+        'expenses_scoped_out': scoped_to_subset,
+        'teachers': teacher_rows,
+    })

@@ -136,7 +136,7 @@ export default function PaymentsPage() {
                 <SelectItem value="registration">{t("kind.registration")}</SelectItem>
                 <SelectItem value="monthly">{t("kind.monthly")}</SelectItem>
                 <SelectItem value="course">{t("kind.course")}</SelectItem>
-                <SelectItem value="installment">{t("kind.installment")}</SelectItem>
+                <SelectItem value="per_session">{t("kind.per_session")}</SelectItem>
                 <SelectItem value="other">{t("kind.other")}</SelectItem>
               </SelectContent>
             </Select>

@@ -37,6 +37,9 @@ import QuizBuilderPage from "@/pages/app/QuizBuilderPage";
 import TakeQuizPage from "@/pages/quiz/TakeQuizPage";
 import WebsitePage from "@/pages/app/WebsitePage";
 import ReportsPage from "@/pages/app/ReportsPage";
+import ExpensesPage from "@/pages/app/ExpensesPage";
+import TeacherPaymentsPage from "@/pages/app/TeacherPaymentsPage";
+import LogsPage from "@/pages/app/LogsPage";
 import SettingsPage from "@/pages/app/SettingsPage";
 import UsersPage from "@/pages/app/UsersPage";
 import MessagesPage from "@/pages/app/MessagesPage";
@@ -170,6 +173,9 @@ function App() {
                     <Route path="quizzes/:id" element={<QuizBuilderPage />} />
                     <Route path="website" element={<WebsitePage />} />
                     <Route path="reports" element={<ReportsPage />} />
+                    <Route path="expenses" element={<ExpensesPage />} />
+                    <Route path="teacher-payments" element={<TeacherPaymentsPage />} />
+                    <Route path="logs" element={<LogsPage />} />
                     <Route path="messages" element={<MessagesPage />} />
                     <Route path="settings" element={<SettingsPage />} />
                     <Route path="users" element={<UsersPage />} />

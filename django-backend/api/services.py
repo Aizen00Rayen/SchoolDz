@@ -152,3 +152,40 @@ class GoogleOAuthService:
             return payload
         except Exception:
             return None
+
+
+def client_ip(request):
+    """Real client IP behind nginx — X-Forwarded-For's first hop, since
+    REMOTE_ADDR is the proxy itself on the live setup."""
+    forwarded = request.META.get('HTTP_X_FORWARDED_FOR')
+    if forwarded:
+        return forwarded.split(',')[0].strip()[:64]
+    return (request.META.get('REMOTE_ADDR') or '')[:64]
+
+
+def log_activity(request, tenant_id, action, *, category='data', user=None,
+                 entity_type=None, entity_id=None, description=None):
+    """Append one row to the tenant's audit trail. Deliberately swallows its
+    own errors: an audit write must never be the reason a user's action
+    fails, and the alternative (500s on every request if the table is mid
+    migration) is far worse than a missing log line."""
+    from .models import ActivityLog
+    try:
+        if not tenant_id:
+            return
+        actor = user if user is not None else getattr(request, 'user', None)
+        actor = actor if getattr(actor, 'is_authenticated', False) else None
+        ActivityLog.objects.create(
+            tenant_id=tenant_id,
+            user=actor,
+            user_label=(getattr(actor, 'name', None) or getattr(actor, 'email', None) or 'Anonymous')[:255],
+            category=category,
+            action=action[:50],
+            entity_type=(entity_type or None) and entity_type[:50],
+            entity_id=(entity_id or None) and str(entity_id)[:36],
+            description=(description or None) and description[:500],
+            ip_address=client_ip(request) if request is not None else None,
+            user_agent=(request.META.get('HTTP_USER_AGENT', '')[:255] or None) if request is not None else None,
+        )
+    except Exception:
+        pass

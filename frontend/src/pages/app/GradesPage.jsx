@@ -47,7 +47,7 @@ export default function GradesPage() {
             return s ? `${s.first_name} ${s.last_name}` : "—";
           },
         },
-        { key: "title", label: t("field.title"), render: (r) => <span className="font-medium">{r.title}</span> },
+        { key: "title", label: t("field.exam_subject"), render: (r) => <span className="font-medium">{r.title}</span> },
         {
           key: "course", label: t("field.course"),
           render: (r) => courseMap[r.course_id]?.title || <span className="text-muted-foreground">—</span>,
@@ -81,7 +81,7 @@ export default function GradesPage() {
             </Select>
           </Field>
           <div className="md:col-span-2">
-            <Field label={t("field.title")} required>
+            <Field label={t("field.exam_subject")} required>
               <Input value={form.title || ""} onChange={(e) => setForm({ ...form, title: e.target.value })} required placeholder="Midterm exam" />
             </Field>
           </div>

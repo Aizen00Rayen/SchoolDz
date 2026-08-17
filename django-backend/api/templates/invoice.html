@@ -4,117 +4,119 @@
 <meta charset="utf-8">
 <style>
   @page {
-    size: A4;
-    margin: 20mm 18mm;
+    /* A5 = A4 folded in half, portrait. Every pt below is scaled to match so
+       the layout stays proportional instead of overflowing the smaller page. */
+    size: A5;
+    margin: 11mm 10mm;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0;
     color: #1c1b19;
     font-family: "DejaVu Sans", sans-serif;
-    font-size: 11pt;
+    font-size: 7.92pt;
   }
   .band {
     height: 5mm;
     background: {{ primary_color }};
-    margin: -20mm -18mm 14mm;
+    margin: -11mm -10mm 9mm;
   }
 
   .head {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
-    gap: 16pt;
-    padding-bottom: 16pt;
-    margin-bottom: 16pt;
-    border-bottom: 1pt solid #dedad2;
+    gap: 11.52pt;
+    padding-bottom: 11.52pt;
+    margin-bottom: 11.52pt;
+    border-bottom: 0.72pt solid #dedad2;
   }
-  .brand { display: flex; align-items: center; gap: 10pt; }
+  .brand { display: flex; align-items: center; gap: 7.2pt; }
   .brand-mark {
-    width: 34pt; height: 34pt; border-radius: 6pt;
+    width: 24.48pt; height: 24.48pt; border-radius: 4.32pt;
     background: {{ primary_color }};
     color: #ffffff;
     text-align: center;
-    line-height: 34pt;
+    line-height: 24.48pt;
     font-family: "DejaVu Serif", serif;
     font-weight: bold;
-    font-size: 15pt;
+    font-size: 10.8pt;
   }
-  .brand-mark img { width: 34pt; height: 34pt; border-radius: 6pt; object-fit: cover; display: block; }
+  .brand-mark img { width: 24.48pt; height: 24.48pt; border-radius: 4.32pt; object-fit: cover; display: block; }
   .brand-name {
     font-family: "DejaVu Serif", serif;
-    font-size: 15pt;
+    font-size: 10.8pt;
     font-weight: bold;
   }
-  .brand-sub { font-size: 8.5pt; color: #8a8478; margin-top: 2pt; }
+  .brand-sub { font-size: 6.12pt; color: #8a8478; margin-top: 1.44pt; }
 
   .doc-meta { text-align: right; }
   .doc-eyebrow {
-    font-size: 8pt; font-weight: bold; letter-spacing: 1.5pt; text-transform: uppercase;
-    color: {{ accent_color }}; margin-bottom: 4pt;
+    font-size: 5.76pt; font-weight: bold; letter-spacing: 1.08pt; text-transform: uppercase;
+    color: {{ accent_color }}; margin-bottom: 2.88pt;
   }
-  .doc-number { font-family: "DejaVu Sans Mono", monospace; font-size: 11pt; font-weight: bold; }
-  .doc-date { font-family: "DejaVu Sans Mono", monospace; font-size: 9pt; color: #8a8478; margin-top: 3pt; }
+  .doc-number { font-family: "DejaVu Sans Mono", monospace; font-size: 7.92pt; font-weight: bold; }
+  .doc-date { font-family: "DejaVu Sans Mono", monospace; font-size: 6.48pt; color: #8a8478; margin-top: 2.16pt; }
 
   .grid-meta {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 22pt;
+    margin-bottom: 15.84pt;
   }
   .grid-meta > div { width: 32%; }
   .meta-label {
-    font-size: 7.5pt; font-weight: bold; letter-spacing: 1pt; text-transform: uppercase; color: #8a8478;
-    margin-bottom: 5pt;
+    font-size: 5.4pt; font-weight: bold; letter-spacing: 0.72pt; text-transform: uppercase; color: #8a8478;
+    margin-bottom: 3.6pt;
   }
-  .meta-value { font-size: 10.5pt; font-weight: bold; }
-  .meta-sub { font-size: 9pt; color: #55504a; margin-top: 2pt; font-family: "DejaVu Sans Mono", monospace; }
+  .meta-value { font-size: 7.56pt; font-weight: bold; }
+  .meta-sub { font-size: 6.48pt; color: #55504a; margin-top: 1.44pt; font-family: "DejaVu Sans Mono", monospace; }
 
-  table.items { width: 100%; border-collapse: collapse; margin-bottom: 4pt; }
+  table.items { width: 100%; border-collapse: collapse; margin-bottom: 2.88pt; }
   table.items thead th {
-    text-align: left; font-size: 7.5pt; font-weight: bold; letter-spacing: 1pt; text-transform: uppercase;
-    color: #8a8478; padding: 0 0 8pt; border-bottom: 1.2pt solid #c7c1b6;
+    text-align: left; font-size: 5.4pt; font-weight: bold; letter-spacing: 0.72pt; text-transform: uppercase;
+    color: #8a8478; padding: 0 0 5.76pt; border-bottom: 0.86pt solid #c7c1b6;
   }
   table.items thead th.num { text-align: right; }
-  table.items tbody td { padding: 10pt 0; border-bottom: 1pt solid #dedad2; font-size: 10.5pt; vertical-align: top; }
+  table.items tbody td { padding: 7.2pt 0; border-bottom: 0.72pt solid #dedad2; font-size: 7.56pt; vertical-align: top; }
   table.items tbody td.num {
     text-align: right; font-family: "DejaVu Sans Mono", monospace; white-space: nowrap;
   }
   .item-title { font-weight: bold; }
-  .item-sub { font-size: 8.5pt; color: #8a8478; margin-top: 2pt; }
+  .item-sub { font-size: 6.12pt; color: #8a8478; margin-top: 1.44pt; }
 
-  .totals-wrap { display: flex; justify-content: flex-end; margin-top: 12pt; }
-  .totals { width: 200pt; }
-  .totals-row { display: flex; justify-content: space-between; font-size: 9.5pt; padding: 5pt 0; color: #55504a; }
+  .totals-wrap { display: flex; justify-content: flex-end; margin-top: 8.64pt; }
+  .totals { width: 144pt; }
+  .totals-row { display: flex; justify-content: space-between; font-size: 6.84pt; padding: 3.6pt 0; color: #55504a; }
   .totals-row .val { font-family: "DejaVu Sans Mono", monospace; }
   .totals-row.discount .val { color: {{ overdue_color }}; }
   .totals-row.grand {
-    border-top: 1.2pt solid #c7c1b6; margin-top: 4pt; padding-top: 10pt;
-    font-size: 12.5pt; font-weight: bold; color: #1c1b19;
+    border-top: 0.86pt solid #c7c1b6; margin-top: 2.88pt; padding-top: 7.2pt;
+    font-size: 9pt; font-weight: bold; color: #1c1b19;
   }
-  .totals-row.grand .val { font-family: "DejaVu Sans Mono", monospace; font-size: 13.5pt; }
+  .totals-row.grand .val { font-family: "DejaVu Sans Mono", monospace; font-size: 9.72pt; }
 
   .stamp {
     display: inline-block;
-    margin-top: 6pt;
+    margin-top: 4.32pt;
     transform: rotate(-6deg);
-    border: 1.6pt solid {{ stamp_color }};
+    border: 1.15pt solid {{ stamp_color }};
     color: {{ stamp_color }};
     font-family: "DejaVu Serif", serif;
     font-weight: bold;
-    font-size: 11pt;
-    letter-spacing: 1pt;
+    font-size: 7.92pt;
+    letter-spacing: 0.72pt;
     text-transform: uppercase;
-    padding: 2pt 9pt;
-    border-radius: 3pt;
+    padding: 1.44pt 6.48pt;
+    border-radius: 2.16pt;
   }
 
   .foot {
-    margin-top: 26pt; padding-top: 14pt; border-top: 1pt solid #dedad2;
-    display: flex; justify-content: space-between; align-items: flex-end; gap: 14pt;
+    margin-top: 18.72pt; padding-top: 10.08pt; border-top: 0.72pt solid #dedad2;
+    display: flex; justify-content: space-between; align-items: flex-end; gap: 10.08pt;
   }
-  .foot-note { font-size: 8.5pt; color: #55504a; line-height: 1.5; max-width: 320pt; }
+  .foot-note { font-size: 6.12pt; color: #55504a; line-height: 1.5; max-width: 230.4pt; }
   .foot-note strong { color: #1c1b19; }
-  .foot-currency { font-size: 7.5pt; color: #8a8478; text-align: right; font-family: "DejaVu Sans Mono", monospace; }
+  .foot-currency { font-size: 5.4pt; color: #8a8478; text-align: right; font-family: "DejaVu Sans Mono", monospace; }
 </style>
 </head>
 <body>

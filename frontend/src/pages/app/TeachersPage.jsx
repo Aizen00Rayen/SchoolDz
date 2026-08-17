@@ -13,7 +13,7 @@ import { usePermission } from "@/lib/permissions";
 
 const DEFAULT_FORM = {
   first_name: "", last_name: "", email: "", phone: "", subjects: [],
-  hourly_rate: 0, monthly_salary: 0, status: "active",
+  status: "active",
 };
 
 /** Multi-select for a teacher's subjects, sourced from the center's courses.
@@ -84,7 +84,6 @@ export default function TeachersPage() {
         },
         { key: "email", label: t("field.email"), render: (r) => r.email || <span className="text-muted-foreground">—</span> },
         { key: "phone", label: t("field.phone"), render: (r) => <span className="font-mono text-xs">{r.phone || "—"}</span> },
-        { key: "hourly_rate", label: t("field.rate_hr"), render: (r) => <span className="font-mono">{r.hourly_rate?.toLocaleString?.() ?? "—"}</span> },
         { key: "status", label: t("field.status"), render: (r) => <StatusPill status={r.status} /> },
         {
           key: "portal", label: t("field.portal"),
@@ -121,12 +120,6 @@ export default function TeachersPage() {
                 <SelectItem value="inactive">{t("status.inactive")}</SelectItem>
               </SelectContent>
             </Select>
-          </Field>
-          <Field label={t("field.hourly_rate")}>
-            <Input type="number" value={form.hourly_rate || 0} onChange={(e) => setForm({ ...form, hourly_rate: parseFloat(e.target.value) || 0 })} />
-          </Field>
-          <Field label={t("field.monthly_salary")}>
-            <Input type="number" value={form.monthly_salary || 0} onChange={(e) => setForm({ ...form, monthly_salary: parseFloat(e.target.value) || 0 })} />
           </Field>
         </div>
       )}

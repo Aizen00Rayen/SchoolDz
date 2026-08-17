@@ -379,7 +379,7 @@ function DashboardPreview({ lang }) {
             <div className="w-2.5 h-2.5 rounded-full bg-yellow-400" />
             <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
             <div className="ms-3 text-[11px] font-mono text-muted-foreground truncate">
-              https://myschool.scolaris.com
+              https://myschool.scolaris.cloud
             </div>
             <div className="ms-auto flex items-center gap-1">
               <span className="kbd">⌘</span>

@@ -2,20 +2,34 @@ import { useAuth } from "@/lib/auth";
 
 // Mirrors PERMISSION_MODULES/PERMISSION_LEVELS in django-backend/api/models.py.
 export const PERMISSION_MODULES = [
-  "students", "teachers", "parents", "courses", "groups",
-  "sessions", "payments", "grades", "attendance", "messages", "quizzes",
+  "dashboard", "students", "teachers", "parents", "courses", "groups",
+  "sessions", "calendar", "payments", "expenses", "teacher_payments",
+  "grades", "attendance", "messages", "quizzes", "website", "reports",
+  "logs", "users", "settings",
 ];
 export const PERMISSION_LEVELS = ["hidden", "view", "edit"];
+
+// Mirrors DEFAULT_MODULE_PERMISSIONS server-side: pages that were never
+// permission-gated stay visible for existing staff accounts that have no
+// explicit entry, while the money/audit/user-management pages stay hidden
+// until an owner grants them.
+const DEFAULT_MODULE_PERMISSIONS = {
+  dashboard: "view",
+  calendar: "view",
+  reports: "view",
+  settings: "view",
+  website: "view",
+};
 
 const FULL_ACCESS_ROLES = ["owner", "director", "super_admin"];
 
 /** Effective access level for a tab/module — mirrors User.get_permission()
  * server-side. Owner/director/super_admin always get "edit"; everyone else
- * falls back to their stored permissions map, defaulting to "hidden". */
+ * falls back to their stored permissions map, then the per-module default. */
 export function getModulePermission(user, moduleKey) {
   if (!user) return "hidden";
   if (FULL_ACCESS_ROLES.includes(user.role)) return "edit";
-  return user.permissions?.[moduleKey] || "hidden";
+  return user.permissions?.[moduleKey] || DEFAULT_MODULE_PERMISSIONS[moduleKey] || "hidden";
 }
 
 export function isFullAccessRole(role) {

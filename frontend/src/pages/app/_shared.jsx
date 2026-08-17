@@ -4,7 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval,
-  isSameMonth, isToday, format, addMonths, subMonths,
+  isSameMonth, isToday, format, addMonths, subMonths, addWeeks, subWeeks,
 } from "date-fns";
 import { ChevronLeft, ChevronRight, Copy, Download, Repeat, Send } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { api, extractError, downloadExport } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { SCHOOL_LEVELS, SCHOOL_LEVEL_YEAR_COUNT, specialtiesFor } from "@/lib/schoolLevels";
 
 export function Field({ label, required, children }) {
   return (
@@ -31,6 +32,81 @@ export function Field({ label, required, children }) {
         {label} {required && <span className="text-destructive">*</span>}
       </Label>
       {children}
+    </div>
+  );
+}
+
+/** Level -> year -> specialty selectors for the Algerian school system,
+ * shared by the student and course forms. The specialty select only appears
+ * for high-school years, and offers the common-core tracks in year 1 vs the
+ * branch specialties in years 2-3 (see lib/schoolLevels.js). */
+export function SchoolLevelFields({ form, setForm }) {
+  const { t } = useI18n();
+  const specialties = specialtiesFor(form.school_level, form.school_year);
+  return (
+    <>
+      <Field label={t("field.school_level")}>
+        <Select
+          value={form.school_level || "__none"}
+          onValueChange={(v) => setForm({ ...form, school_level: v === "__none" ? "" : v, school_year: "", specialty: "" })}
+        >
+          <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+          <SelectContent className="bg-popover">
+            <SelectItem value="__none">—</SelectItem>
+            {SCHOOL_LEVELS.map((lvl) => (
+              <SelectItem key={lvl} value={lvl}>{t(`school_level.${lvl}`)}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      <Field label={t("field.school_year")}>
+        <Select
+          value={form.school_year ? String(form.school_year) : "__none"}
+          onValueChange={(v) => setForm({ ...form, school_year: v === "__none" ? "" : Number(v), specialty: "" })}
+          disabled={!form.school_level}
+        >
+          <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+          <SelectContent className="bg-popover">
+            <SelectItem value="__none">—</SelectItem>
+            {Array.from({ length: SCHOOL_LEVEL_YEAR_COUNT[form.school_level] || 0 }, (_, i) => i + 1).map((y) => (
+              <SelectItem key={y} value={String(y)}>{t("common.year_n", { n: y })}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      {specialties.length > 0 && (
+        <div className="md:col-span-2">
+          <Field label={t("field.specialty")}>
+            <Select
+              value={form.specialty || "__none"}
+              onValueChange={(v) => setForm({ ...form, specialty: v === "__none" ? "" : v })}
+            >
+              <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+              <SelectContent className="bg-popover">
+                <SelectItem value="__none">—</SelectItem>
+                {specialties.map((sp) => (
+                  <SelectItem key={sp} value={sp}>{t(`specialty.${sp}`)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Compact "High school · Year 2 / Experimental Sciences" cell for list views. */
+export function SchoolLevelCell({ row }) {
+  const { t } = useI18n();
+  if (!row.school_level) return <span className="text-muted-foreground">—</span>;
+  return (
+    <div className="text-xs">
+      <div>
+        {t(`school_level.${row.school_level}`)}
+        {row.school_year ? ` · ${t("common.year_n", { n: row.school_year })}` : ""}
+      </div>
+      {row.specialty && <div className="text-muted-foreground">{t(`specialty.${row.specialty}`)}</div>}
     </div>
   );
 }
@@ -221,10 +297,13 @@ const WEEKDAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
  * and groups it by day itself so callers never need to pre-bucket anything.
  * Used by both the staff Calendar page (full CRUD via onDayClick) and the
  * parent portal's read-only session calendar. */
-export function CalendarGrid({ month, sessions, onDayClick }) {
+/** Month grid (6 weeks) or a single week strip, depending on `view`.
+ * `anchor` is any date inside the period being shown. */
+export function CalendarGrid({ month: anchor, sessions, onDayClick, view = "month" }) {
   const { t } = useI18n();
-  const start = startOfWeek(startOfMonth(month));
-  const end = endOfWeek(endOfMonth(month));
+  const isWeek = view === "week";
+  const start = isWeek ? startOfWeek(anchor) : startOfWeek(startOfMonth(anchor));
+  const end = isWeek ? endOfWeek(anchor) : endOfWeek(endOfMonth(anchor));
   const days = eachDayOfInterval({ start, end });
 
   const byDay = {};
@@ -246,13 +325,14 @@ export function CalendarGrid({ month, sessions, onDayClick }) {
         {days.map((day) => {
           const key = format(day, "yyyy-MM-dd");
           const daySessions = (byDay[key] || []).sort((a, b) => new Date(a.start_at) - new Date(b.start_at));
-          const inMonth = isSameMonth(day, month);
+          const dimmed = !isWeek && !isSameMonth(day, anchor);
+          const visible = isWeek ? daySessions.length : 3;
           return (
             <button
               key={key}
               type="button"
               onClick={() => onDayClick?.(day, daySessions)}
-              className={`min-h-[92px] p-1.5 border-b border-e border-border text-start align-top hover:bg-muted/40 transition-colors ${inMonth ? "" : "bg-muted/20 text-muted-foreground"}`}
+              className={`${isWeek ? "min-h-[220px]" : "min-h-[92px]"} p-1.5 border-b border-e border-border text-start align-top hover:bg-muted/40 transition-colors ${dimmed ? "bg-muted/20 text-muted-foreground" : ""}`}
             >
               <div
                 className={`text-xs font-mono mb-1 inline-flex items-center justify-center w-5 h-5 rounded-full ${
@@ -262,13 +342,17 @@ export function CalendarGrid({ month, sessions, onDayClick }) {
                 {format(day, "d")}
               </div>
               <div className="space-y-0.5">
-                {daySessions.slice(0, 3).map((s) => (
-                  <div key={s.id} className="text-[10px] truncate rounded px-1 py-0.5 bg-accent/10 text-accent">
-                    {format(new Date(s.start_at), "HH:mm")} {s.topic || ""}
+                {daySessions.slice(0, visible).map((s) => (
+                  <div key={s.id} className="text-[10px] rounded px-1 py-0.5 bg-accent/10 text-accent">
+                    <div className="font-mono">{format(new Date(s.start_at), "HH:mm")}</div>
+                    <div className="truncate">{s.group_name || s.topic || ""}</div>
+                    {isWeek && s.teacher_name && (
+                      <div className="truncate text-muted-foreground">{s.teacher_name}</div>
+                    )}
                   </div>
                 ))}
-                {daySessions.length > 3 && (
-                  <div className="text-[10px] text-muted-foreground px-1">{t("calendar.more", { count: daySessions.length - 3 })}</div>
+                {daySessions.length > visible && (
+                  <div className="text-[10px] text-muted-foreground px-1">{t("calendar.more", { count: daySessions.length - visible })}</div>
                 )}
               </div>
             </button>
@@ -280,22 +364,35 @@ export function CalendarGrid({ month, sessions, onDayClick }) {
 }
 
 /** Header row for a CalendarGrid: month label + prev/next/today nav. */
-export function CalendarMonthNav({ month, onChange }) {
-  const { t } = useI18n();
+export function CalendarMonthNav({ month, onChange, view = "month" }) {
+  const isWeek = view === "week";
+  const step = (dir) => {
+    if (isWeek) return onChange(dir > 0 ? addWeeks(month, 1) : subWeeks(month, 1));
+    return onChange(dir > 0 ? addMonths(month, 1) : subMonths(month, 1));
+  };
+  const label = isWeek
+    ? `${format(startOfWeek(month), "d MMM")} – ${format(endOfWeek(month), "d MMM yyyy")}`
+    : format(month, "MMMM yyyy");
+
   return (
     <div className="flex items-center justify-between mb-4">
-      <div className="font-display text-lg font-semibold">{format(month, "MMMM yyyy")}</div>
-      <div className="flex items-center gap-1">
-        <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => onChange(subMonths(month, 1))}>
-          <ChevronLeft className="w-4 h-4" />
-        </Button>
-        <Button variant="outline" size="sm" className="h-8" onClick={() => onChange(new Date())}>
-          {t("calendar.today")}
-        </Button>
-        <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => onChange(addMonths(month, 1))}>
-          <ChevronRight className="w-4 h-4" />
-        </Button>
-      </div>
+      <button
+        type="button"
+        onClick={() => step(-1)}
+        className="w-8 h-8 grid place-items-center rounded-md border border-border hover:bg-muted transition-colors"
+        aria-label="Previous"
+      >
+        <ChevronLeft className="w-4 h-4" />
+      </button>
+      <div className="font-display font-semibold">{label}</div>
+      <button
+        type="button"
+        onClick={() => step(1)}
+        className="w-8 h-8 grid place-items-center rounded-md border border-border hover:bg-muted transition-colors"
+        aria-label="Next"
+      >
+        <ChevronRight className="w-4 h-4" />
+      </button>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Attendance, Payment, Grade, ChargilyCheckout, Conversation, Message, Coupon, Quiz, Question, Choice, QuizAttempt, SchoolGalleryPhoto
+from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Attendance, Payment, Grade, ChargilyCheckout, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog
 
 class TenantSerializer(serializers.ModelSerializer):
     class Meta:
@@ -112,10 +112,18 @@ class ClassSessionSerializer(serializers.ModelSerializer):
     course_id = serializers.PrimaryKeyRelatedField(
         queryset=Course.objects.all(), source='course', allow_null=True, required=False
     )
+    # Read-only labels so the planner can show who/what/where without a
+    # lookup request per session.
+    group_name = serializers.CharField(source='group.name', read_only=True, default=None)
+    course_title = serializers.CharField(source='course.title', read_only=True, default=None)
+    teacher_name = serializers.SerializerMethodField()
 
     class Meta:
         model = ClassSession
         exclude = ['tenant', 'group', 'teacher', 'course']
+
+    def get_teacher_name(self, obj):
+        return f"{obj.teacher.first_name} {obj.teacher.last_name}" if obj.teacher else None
 
 
 class AttendanceSerializer(serializers.ModelSerializer):
@@ -229,23 +237,6 @@ class CouponSerializer(serializers.ModelSerializer):
         return max(0, obj.max_redemptions - self.get_times_redeemed(obj))
 
 
-# Teacher-facing choice/question serializers — includes is_correct, unlike
-# the public take-quiz payload (built by hand in views.py) which must never
-# leak the answer key to a student.
-class ChoiceSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Choice
-        exclude = ['tenant', 'question']
-
-
-class QuestionSerializer(serializers.ModelSerializer):
-    choices = ChoiceSerializer(many=True, read_only=True)
-
-    class Meta:
-        model = Question
-        exclude = ['tenant', 'quiz']
-
-
 class QuizSerializer(serializers.ModelSerializer):
     tenant_id = serializers.PrimaryKeyRelatedField(
         queryset=Tenant.objects.all(), source='tenant', required=False, allow_null=True
@@ -256,8 +247,6 @@ class QuizSerializer(serializers.ModelSerializer):
     group_id = serializers.PrimaryKeyRelatedField(
         queryset=Group.objects.all(), source='group', allow_null=True, required=False
     )
-    questions = QuestionSerializer(many=True, read_only=True)
-    question_count = serializers.SerializerMethodField()
     group_name = serializers.CharField(source='group.name', read_only=True, default=None)
     # Every QuizAttempt row is a completed submission now (the shared-link
     # flow only ever creates one at submit time — see
@@ -269,15 +258,19 @@ class QuizSerializer(serializers.ModelSerializer):
         model = Quiz
         exclude = ['tenant', 'course', 'group']
 
-    def get_question_count(self, obj):
-        return obj.questions.count()
-
     def get_attempts_total(self, obj):
         return obj.attempts.count()
 
 
+class QuizSubmissionFileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = QuizSubmissionFile
+        exclude = ['tenant', 'attempt']
+
+
 class QuizAttemptSerializer(serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
+    files = QuizSubmissionFileSerializer(many=True, read_only=True)
 
     class Meta:
         model = QuizAttempt
@@ -285,6 +278,50 @@ class QuizAttemptSerializer(serializers.ModelSerializer):
 
     def get_student_name(self, obj):
         return f"{obj.student.first_name} {obj.student.last_name}" if obj.student else None
+
+
+class ExpenseCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ExpenseCategory
+        exclude = ['tenant']
+
+
+class ExpenseSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.PrimaryKeyRelatedField(
+        queryset=Tenant.objects.all(), source='tenant', required=False, allow_null=True
+    )
+    category_id = serializers.PrimaryKeyRelatedField(
+        queryset=ExpenseCategory.objects.all(), source='category', allow_null=True, required=False
+    )
+    category_key = serializers.CharField(source='category.key', read_only=True, default=None)
+    category_name = serializers.CharField(source='category.name', read_only=True, default=None)
+
+    class Meta:
+        model = Expense
+        exclude = ['tenant', 'category', 'created_by']
+
+
+class TeacherPayoutSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.PrimaryKeyRelatedField(
+        queryset=Tenant.objects.all(), source='tenant', required=False, allow_null=True
+    )
+    teacher_id = serializers.PrimaryKeyRelatedField(
+        queryset=Teacher.objects.all(), source='teacher'
+    )
+    teacher_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TeacherPayout
+        exclude = ['tenant', 'teacher', 'created_by']
+
+    def get_teacher_name(self, obj):
+        return f"{obj.teacher.first_name} {obj.teacher.last_name}" if obj.teacher else None
+
+
+class ActivityLogSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ActivityLog
+        exclude = ['tenant', 'user']
 
 
 class SchoolGalleryPhotoSerializer(serializers.ModelSerializer):

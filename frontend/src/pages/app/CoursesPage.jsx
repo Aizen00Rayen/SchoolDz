@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Field } from "./StudentsPage";
+import { SchoolLevelFields, SchoolLevelCell } from "./_shared";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -14,6 +15,7 @@ import { usePermission } from "@/lib/permissions";
 const DEFAULT_FORM = {
   title: "", description: "", category: "", duration_weeks: 12, price: 0,
   max_students: 20, color: "#0A0A0B", status: "active", show_on_enrollment: false,
+  school_level: "", school_year: "", specialty: "",
 };
 
 export default function CoursesPage() {
@@ -32,7 +34,7 @@ export default function CoursesPage() {
       defaultForm={DEFAULT_FORM}
       columns={[
         {
-          key: "title", label: t("field.title"),
+          key: "title", label: t("field.course_title"),
           render: (r) => (
             <div className="flex items-center gap-2.5">
               <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: r.color || "#0A0A0B" }} />
@@ -53,6 +55,7 @@ export default function CoursesPage() {
           ),
         },
         { key: "max_students", label: t("field.capacity") },
+        { key: "school_level", label: t("field.school_level"), render: (r) => <SchoolLevelCell row={r} /> },
         { key: "status", label: t("field.status"), render: (r) => <StatusPill status={r.status} /> },
         {
           key: "show_on_enrollment", label: t("field.public"),
@@ -64,7 +67,7 @@ export default function CoursesPage() {
       renderForm={(form, setForm) => (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="md:col-span-2">
-            <Field label={t("field.title")} required>
+            <Field label={t("field.course_title")} required>
               <Input value={form.title || ""} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
             </Field>
           </div>
@@ -81,6 +84,7 @@ export default function CoursesPage() {
               </SelectContent>
             </Select>
           </Field>
+          <SchoolLevelFields form={form} setForm={setForm} />
           <Field label={t("field.duration_weeks")}>
             <Input type="number" value={form.duration_weeks || 12} onChange={(e) => setForm({ ...form, duration_weeks: parseInt(e.target.value) || 0 })} />
           </Field>

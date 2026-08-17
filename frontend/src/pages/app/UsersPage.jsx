@@ -24,17 +24,25 @@ const LEVELS = ["hidden", "view", "edit"];
 // ever limited; owner/director always have full access (see isFullAccessRole).
 const ROLE_PRESETS = {
   secretary: {
-    students: "edit", parents: "edit", teachers: "edit", courses: "edit", groups: "edit",
-    sessions: "edit", attendance: "edit", grades: "edit", messages: "edit", payments: "view",
+    dashboard: "view", students: "edit", parents: "edit", teachers: "edit", courses: "edit",
+    groups: "edit", sessions: "edit", calendar: "view", attendance: "edit", grades: "edit",
+    messages: "edit", quizzes: "hidden", payments: "view", expenses: "hidden",
+    teacher_payments: "hidden", website: "hidden", reports: "view", logs: "hidden",
+    users: "hidden", settings: "hidden",
   },
   accountant: {
-    students: "view", courses: "view", payments: "edit",
+    dashboard: "view", students: "view", courses: "view", payments: "edit",
+    expenses: "edit", teacher_payments: "edit", reports: "view",
     teachers: "hidden", parents: "hidden", groups: "hidden", sessions: "hidden",
-    attendance: "hidden", grades: "hidden", messages: "hidden",
+    calendar: "hidden", attendance: "hidden", grades: "hidden", messages: "hidden",
+    quizzes: "hidden", website: "hidden", logs: "hidden", users: "hidden", settings: "hidden",
   },
   teacher: {
-    students: "view", groups: "view", sessions: "view", attendance: "edit", grades: "edit",
-    teachers: "hidden", parents: "hidden", courses: "hidden", payments: "hidden", messages: "hidden",
+    dashboard: "view", students: "view", groups: "view", sessions: "view", calendar: "view",
+    attendance: "edit", grades: "edit", quizzes: "edit",
+    teachers: "hidden", parents: "hidden", courses: "hidden", payments: "hidden",
+    expenses: "hidden", teacher_payments: "hidden", messages: "hidden", website: "hidden",
+    reports: "hidden", logs: "hidden", users: "hidden", settings: "hidden",
   },
 };
 const EMPTY_PERMISSIONS = Object.fromEntries(PERMISSION_MODULES.map((m) => [m, "hidden"]));
