@@ -82,7 +82,7 @@ class GroupSerializer(serializers.ModelSerializer):
         queryset=Tenant.objects.all(), source='tenant', required=False, allow_null=True
     )
     course_id = serializers.PrimaryKeyRelatedField(
-        queryset=Course.objects.all(), source='course', required=False, allow_null=True
+        queryset=Course.objects.all(), source='course'
     )
     teacher_id = serializers.PrimaryKeyRelatedField(
         queryset=Teacher.objects.all(), source='teacher', allow_null=True, required=False
