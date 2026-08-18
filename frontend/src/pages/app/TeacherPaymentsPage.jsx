@@ -89,8 +89,13 @@ export default function TeacherPaymentsPage() {
   });
 
   const savePercentage = (teacherId, currentServerValue, draftValue) => {
-    const value = parseFloat(draftValue);
-    if (Number.isNaN(value) || value === currentServerValue) {
+    let value = parseFloat(draftValue);
+    if (Number.isNaN(value)) {
+      setPctDrafts((prev) => { const next = { ...prev }; delete next[teacherId]; return next; });
+      return;
+    }
+    value = Math.min(100, Math.max(0, value));
+    if (value === currentServerValue) {
       setPctDrafts((prev) => { const next = { ...prev }; delete next[teacherId]; return next; });
       return;
     }
@@ -196,7 +201,7 @@ export default function TeacherPaymentsPage() {
             <table className="w-full text-sm">
               <thead className="bg-muted/40 border-b border-border">
                 <tr>
-                  {["menu.teachers", "tp.rate_per_present", "tp.present_count", "tp.earned", "tp.paid_out", "tp.balance"].map((k) => (
+                  {["menu.teachers", "tp.percentage", "tp.present_count", "tp.earned", "tp.paid_out", "tp.balance"].map((k) => (
                     <th key={k} className="text-start px-4 py-2.5 font-medium text-xs uppercase tracking-widest text-muted-foreground">
                       {t(k)}
                     </th>
@@ -209,12 +214,12 @@ export default function TeacherPaymentsPage() {
                     <td className="px-4 py-3 font-medium">{r.teacher_name}</td>
                     <td className="px-4 py-3 font-mono text-xs">
                       {!canEditPercentage ? (
-                        money(r.percentage)
+                        `${r.percentage}%`
                       ) : (
                         <div className="flex items-center gap-1">
                           <Input
-                            type="number" min="0" step="1"
-                            className="h-8 w-24 font-mono text-xs"
+                            type="number" min="0" max="100" step="1"
+                            className="h-8 w-20 font-mono text-xs"
                             value={pctDrafts[r.teacher_id] ?? r.percentage}
                             onChange={(e) => setPctDrafts((prev) => ({ ...prev, [r.teacher_id]: e.target.value }))}
                             onKeyDown={(e) => {
@@ -223,7 +228,7 @@ export default function TeacherPaymentsPage() {
                             onBlur={(e) => savePercentage(r.teacher_id, r.percentage, e.target.value)}
                             data-testid={`tp-percentage-input-${r.teacher_id}`}
                           />
-                          <span className="text-muted-foreground">{currency}</span>
+                          <span className="text-muted-foreground">%</span>
                         </div>
                       )}
                     </td>

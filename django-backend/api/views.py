@@ -2738,6 +2738,12 @@ class TeacherViewSet(TenantScopedViewSet):
             user = request.user
             if not user.is_super_admin() and user.role not in ('owner', 'director'):
                 raise PermissionDenied('Only the workspace owner or director can set teacher payment percentages.')
+            try:
+                pct = float(data['payment_percentage'])
+            except (TypeError, ValueError):
+                raise ValidationError('payment_percentage must be a number')
+            if pct < 0 or pct > 100:
+                raise ValidationError('payment_percentage must be between 0 and 100')
 
     @action(detail=True, methods=['post'])
     def invite(self, request, pk=None):
@@ -3834,11 +3840,12 @@ def filter_by_date_range(queryset, request, field):
 
 
 def compute_teacher_earnings(tenant_id, request):
-    """What each teacher has earned = (present-student attendance records
-    across their sessions) x their per-student rate ("percentage" — the
-    field name is legacy, but the tenant sets whatever number the payout
-    formula should use, and can change it any time from Teacher Payments),
-    minus what's already been paid out.
+    """What each teacher has earned = their percentage of the per-session
+    value of every present-student attendance record across their sessions,
+    minus what's already been paid out. A course's per-session value is its
+    price divided by its duration_weeks (this app's "one session per week"
+    convention) — so for each present student, the teacher earns
+    percentage% of that course's per-session price.
 
     Driven by attendance rather than payments: a teacher is owed for
     students who actually showed up and were taught, regardless of whether
@@ -3855,17 +3862,39 @@ def compute_teacher_earnings(tenant_id, request):
     if group_id:
         attendance = attendance.filter(session__group_id=group_id)
 
-    # session -> teacher, resolved once so we don't hit the DB per attendance row.
-    # Falls back to the session's own teacher_id when set (a substitute
-    # teacher covering someone else's group), else the group's regular teacher.
-    sessions = ClassSession.objects.filter(tenant_id=tenant_id).values('id', 'teacher_id', 'group__teacher_id')
-    session_teacher = {s['id']: s['teacher_id'] or s['group__teacher_id'] for s in sessions}
+    # session -> (teacher, course), resolved once so we don't hit the DB per
+    # attendance row. Teacher falls back to the session's own teacher_id when
+    # set (a substitute covering someone else's group), else the group's
+    # regular teacher; course similarly falls back to the group's course.
+    sessions = ClassSession.objects.filter(tenant_id=tenant_id).values(
+        'id', 'teacher_id', 'group__teacher_id', 'course_id', 'group__course_id',
+    )
+    session_info = {}
+    course_ids = set()
+    for s in sessions:
+        course_id = s['course_id'] or s['group__course_id']
+        session_info[s['id']] = {
+            'teacher_id': s['teacher_id'] or s['group__teacher_id'],
+            'course_id': course_id,
+        }
+        if course_id:
+            course_ids.add(course_id)
+
+    # Per-session price for each course, computed once.
+    price_per_session = {}
+    for c in Course.objects.filter(id__in=course_ids).values('id', 'price', 'duration_weeks'):
+        weeks = c['duration_weeks'] or 1
+        price_per_session[c['id']] = float(c['price']) / weeks if weeks > 0 else float(c['price'])
 
     present_count = {}
+    base_value = {}
     for a in attendance:
-        tid = session_teacher.get(a.session_id)
-        if tid:
-            present_count[tid] = present_count.get(tid, 0) + 1
+        info = session_info.get(a.session_id)
+        tid = info['teacher_id'] if info else None
+        if not tid:
+            continue
+        present_count[tid] = present_count.get(tid, 0) + 1
+        base_value[tid] = base_value.get(tid, 0.0) + price_per_session.get(info['course_id'], 0.0)
 
     payouts = TeacherPayout.objects.filter(tenant_id=tenant_id)
     payouts = filter_by_date_range(payouts, request, 'paid_at')
@@ -3876,13 +3905,13 @@ def compute_teacher_earnings(tenant_id, request):
     rows = []
     for t in teachers:
         count = present_count.get(t.id, 0)
-        rate = float(t.payment_percentage or 0)
-        earned = round(count * rate, 2)
+        pct = float(t.payment_percentage or 0)
+        earned = round(base_value.get(t.id, 0.0) * pct / 100, 2)
         already = round(paid_out.get(t.id, 0.0), 2)
         rows.append({
             'teacher_id': t.id,
             'teacher_name': f'{t.first_name} {t.last_name}',
-            'percentage': rate,
+            'percentage': pct,
             'present_count': count,
             'earned': earned,
             'paid_out': already,
@@ -3902,7 +3931,7 @@ def teacher_payments_summary(request):
 
     rows = compute_teacher_earnings(user.tenant_id, request)
     if request.GET.get('type') in ('csv', 'xlsx'):
-        headers = ['Teacher', 'Rate per present student', 'Present count', 'Earned', 'Paid out', 'Balance']
+        headers = ['Teacher', 'Percentage', 'Present count', 'Earned', 'Paid out', 'Balance']
         return export_rows(
             headers,
             [[r['teacher_name'], r['percentage'], r['present_count'], r['earned'], r['paid_out'], r['balance']] for r in rows],
