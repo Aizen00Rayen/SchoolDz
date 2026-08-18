@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { api, extractError, downloadExport } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { useDateLocale } from "@/lib/dateLocale";
 import { SCHOOL_LEVELS, SCHOOL_LEVEL_YEAR_COUNT, specialtiesFor } from "@/lib/schoolLevels";
 
 export function Field({ label, required, children }) {
@@ -108,6 +109,28 @@ export function SchoolLevelCell({ row }) {
       </div>
       {row.specialty && <div className="text-muted-foreground">{t(`specialty.${row.specialty}`)}</div>}
     </div>
+  );
+}
+
+/** Room dropdown sourced from /rooms, used by Groups and Sessions forms
+ * instead of a free-text field — lets the Rooms occupancy view actually
+ * know which sessions are in which room. */
+export function RoomSelect({ value, onChange }) {
+  const { t } = useI18n();
+  const { data: rooms } = useQuery({
+    queryKey: ["rooms-list"],
+    queryFn: async () => (await api.get("/rooms")).data,
+  });
+  return (
+    <Select value={value || "__none"} onValueChange={(v) => onChange(v === "__none" ? "" : v)}>
+      <SelectTrigger className="bg-background"><SelectValue placeholder="—" /></SelectTrigger>
+      <SelectContent className="bg-popover">
+        <SelectItem value="__none">—</SelectItem>
+        {(rooms?.items || []).map((r) => (
+          <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 
@@ -365,14 +388,15 @@ export function CalendarGrid({ month: anchor, sessions, onDayClick, view = "mont
 
 /** Header row for a CalendarGrid: month label + prev/next/today nav. */
 export function CalendarMonthNav({ month, onChange, view = "month" }) {
+  const locale = useDateLocale();
   const isWeek = view === "week";
   const step = (dir) => {
     if (isWeek) return onChange(dir > 0 ? addWeeks(month, 1) : subWeeks(month, 1));
     return onChange(dir > 0 ? addMonths(month, 1) : subMonths(month, 1));
   };
   const label = isWeek
-    ? `${format(startOfWeek(month), "d MMM")} – ${format(endOfWeek(month), "d MMM yyyy")}`
-    : format(month, "MMMM yyyy");
+    ? `${format(startOfWeek(month), "d MMM", { locale })} – ${format(endOfWeek(month), "d MMM yyyy", { locale })}`
+    : format(month, "MMMM yyyy", { locale });
 
   return (
     <div className="flex items-center justify-between mb-4">

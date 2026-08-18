@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Field } from "./StudentsPage";
 import { StudentPicker } from "./ParentsPage";
+import { RoomSelect } from "./_shared";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -13,7 +14,7 @@ import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
 
 const DEFAULT_FORM = {
-  course_id: "", name: "", teacher_id: "", room: "", capacity: 20,
+  course_id: "", name: "", teacher_id: "", room_id: "", capacity: 20,
   schedule: "", status: "active", student_ids: [],
 };
 
@@ -61,7 +62,7 @@ export default function GroupsPage() {
             return t ? `${t.first_name} ${t.last_name}` : <span className="text-muted-foreground">—</span>;
           },
         },
-        { key: "room", label: t("field.room") },
+        { key: "room", label: t("field.room"), render: (r) => r.room_name || r.room || <span className="text-muted-foreground">—</span> },
         { key: "capacity", label: t("field.capacity") },
         { key: "students", label: t("field.enrolled"), render: (r) => <span className="font-mono">{(r.student_ids || []).length}</span> },
         { key: "status", label: t("field.status"), render: (r) => <StatusPill status={r.status} /> },
@@ -92,7 +93,7 @@ export default function GroupsPage() {
             </Select>
           </Field>
           <Field label={t("field.room")}>
-            <Input value={form.room || ""} onChange={(e) => setForm({ ...form, room: e.target.value })} placeholder="Room 101" />
+            <RoomSelect value={form.room_id} onChange={(v) => setForm({ ...form, room_id: v })} />
           </Field>
           <Field label={t("field.capacity")}>
             <Input type="number" value={form.capacity || 20} onChange={(e) => setForm({ ...form, capacity: parseInt(e.target.value) || 0 })} />

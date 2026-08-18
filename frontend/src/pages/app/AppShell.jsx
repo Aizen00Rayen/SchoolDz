@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Award, BarChart3, BookOpen, Building2, CalendarClock, CalendarDays, ChevronsUpDown, ClipboardCheck,
-  FileBarChart2, FileQuestion, GraduationCap, Globe, HandCoins, Languages, LogOut, MessageSquare, Moon,
+  DoorOpen, FileBarChart2, FileQuestion, GraduationCap, Globe, HandCoins, Languages, LogOut, MessageSquare, Moon,
   PanelLeft, PanelLeftClose, Receipt, ScrollText, Search, Settings, Sun, Users, UserRound, Wallet, Layers,
 } from "lucide-react";
 
@@ -33,6 +33,7 @@ const NAV = [
   { key: "groups", to: "/app/groups", icon: Layers, module: "groups" },
   { key: "sessions", to: "/app/sessions", icon: CalendarClock, module: "sessions" },
   { key: "calendar", to: "/app/calendar", icon: CalendarDays, premiumOnly: true, module: "calendar" },
+  { key: "rooms", to: "/app/rooms", icon: DoorOpen, module: "rooms" },
   { key: "attendance", to: "/app/attendance", icon: ClipboardCheck, module: "attendance" },
   { key: "payments", to: "/app/payments", icon: Wallet, module: "payments" },
   { key: "expenses", to: "/app/expenses", icon: Receipt, module: "expenses" },

@@ -17,6 +17,7 @@ from django.db.models import Q, Sum, F, Count
 from django.http import FileResponse, Http404, HttpResponse
 from django.template.loader import render_to_string
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from django.shortcuts import redirect
 from weasyprint import HTML
 from rest_framework import viewsets, status, serializers
@@ -26,8 +27,8 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, PermissionDenied, NotFound, APIException
 from rest_framework.authtoken.models import Token
 
-from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Attendance, Payment, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_LEVELS
-from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, AttendanceSerializer, PaymentSerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer
+from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_LEVELS
+from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, RoomSerializer, AttendanceSerializer, PaymentSerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer
 from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle, EnrollmentRateThrottle, log_activity
 
 # Single source of truth for pricing:
@@ -386,14 +387,45 @@ class TenantScopedViewSet(viewsets.ModelViewSet):
 
         return queryset.filter(tenant_id=user.tenant_id)
 
+    def _entity_label(self, instance):
+        """Best-effort human-readable name for the activity log line — most
+        models here have one of these fields."""
+        for field in ('title', 'name'):
+            if hasattr(instance, field) and getattr(instance, field):
+                return getattr(instance, field)
+        if hasattr(instance, 'first_name'):
+            return f"{instance.first_name} {getattr(instance, 'last_name', '')}".strip()
+        return str(getattr(instance, 'pk', instance))
+
+    def _log_model_action(self, action, instance):
+        """Fires on every create/update/delete across every TenantScopedViewSet
+        subclass — this one hook is what backs the Logs page (item 9) without
+        needing a log_activity() call sprinkled through every viewset."""
+        module = self.module_key or instance.__class__.__name__.lower()
+        tenant_id = getattr(instance, 'tenant_id', None) or getattr(self.request.user, 'tenant_id', None)
+        verb = {'create': 'Added', 'update': 'Updated', 'delete': 'Deleted'}[action]
+        log_activity(
+            self.request, tenant_id, action, entity_type=module, entity_id=getattr(instance, 'pk', None),
+            description=f'{verb} {module}: {self._entity_label(instance)}',
+        )
+
     def perform_create(self, serializer):
         user = self.request.user
         if user.tenant_id:
             if not user.is_super_admin() and user.tenant.status != 'active':
                 raise PermissionDenied('This workspace is not active yet — complete billing to continue.')
-            serializer.save(tenant_id=user.tenant_id)
+            instance = serializer.save(tenant_id=user.tenant_id)
         else:
-            serializer.save()
+            instance = serializer.save()
+        self._log_model_action('create', instance)
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        self._log_model_action('update', instance)
+
+    def perform_destroy(self, instance):
+        self._log_model_action('delete', instance)
+        instance.delete()
 
     def create(self, request, *args, **kwargs):
         self.check_module_edit()
@@ -802,8 +834,13 @@ def public_school_enroll(request, slug):
         student = Student.objects.create(
             tenant=tenant, parent=guardian, first_name=student_first, last_name=student_last,
             student_code=student_code, enrollment_date=timezone.now(), status='active',
+            # Self-enrolled — a secretary reviews it on the Students page
+            # before it counts as a confirmed record (see StudentViewSet.approve).
+            source='public', approval_status='pending',
         )
         group.students.add(student)
+        log_activity(request, tenant.id, 'create', category='data', entity_type='students', entity_id=student.id,
+                     description=f'Public enrollment: {student.first_name} {student.last_name} (pending approval)')
 
         invoice_count = Payment.objects.filter(tenant_id=tenant.id).count()
         invoice_number = f"{tenant.invoice_prefix or 'INV-'}{str(invoice_count + 1).zfill(6)}"
@@ -2572,7 +2609,7 @@ class GuardianViewSet(TenantScopedViewSet):
 
         serializer = self.get_serializer(instance, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        self.perform_update(serializer)
 
         if student_ids is not None:
             Student.objects.filter(parent=instance, tenant_id=instance.tenant_id).exclude(id__in=student_ids).update(parent=None)
@@ -2760,8 +2797,18 @@ class StudentViewSet(TenantScopedViewSet):
             queryset = queryset.filter(status=status_val)
         q = request.GET.get('q')
         if q:
-            queryset = queryset.filter(name_search_q(q, 'first_name', 'last_name', 'email', 'phone'))
-        queryset = queryset.order_by('-created_at')[:500]
+            queryset = queryset.filter(name_search_q(q, 'first_name', 'last_name', 'email', 'phone', 'student_code'))
+        ids_param = request.GET.get('ids')
+        if ids_param:
+            queryset = queryset.filter(id__in=[i for i in ids_param.split(',') if i])
+        # A picker searching a tenant with thousands of students only wants a
+        # handful of matches, not the full 500-row cap this endpoint normally
+        # allows — capped at that same 500 either way.
+        try:
+            limit = min(int(request.GET.get('limit', 500)), 500)
+        except (TypeError, ValueError):
+            limit = 500
+        queryset = queryset.order_by('-created_at')[:limit]
         serializer = self.get_serializer(queryset, many=True)
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
@@ -2770,17 +2817,18 @@ class StudentViewSet(TenantScopedViewSet):
         queryset = self.filter_queryset(self.get_queryset()).select_related('parent').order_by('-created_at')
         headers = [
             'Student Code', 'First Name', 'Last Name', 'Gender', 'School Level', 'School Year', 'Specialty',
-            'Insurance', 'Health Condition', 'ID Card Number',
+            'Insurance', 'Health Condition', 'Blood Type',
             'Birth Date', 'Email', 'Phone', 'Address',
-            'Emergency Contact', 'Status', 'Parent Name', 'Parent Email', 'Parent Phone', 'Enrollment Date',
+            'Emergency Contact', 'Status', 'Parent Name', 'Parent Email', 'Parent Phone', 'Parent ID Card Number', 'Enrollment Date',
         ]
         rows = [[
             s.student_code or '', s.first_name, s.last_name, s.gender or '',
             s.school_level or '', s.school_year or '', s.specialty or '',
-            s.insurance_status or '', s.health_condition or '', s.id_card_number or '',
+            s.insurance_status or '', s.health_condition or '', s.blood_type or '',
             s.birth_date.isoformat() if s.birth_date else '', s.email or '', s.phone or '', s.address or '',
             s.emergency_contact or '', s.status, s.parent.name if s.parent else '',
             s.parent.email if s.parent and s.parent.email else '', s.parent.phone if s.parent and s.parent.phone else '',
+            s.parent.id_card_number if s.parent and s.parent.id_card_number else '',
             s.enrollment_date.date().isoformat() if s.enrollment_date else '',
         ] for s in queryset]
         return export_rows(headers, rows, 'students', request.GET.get('type'))
@@ -2865,6 +2913,11 @@ class StudentViewSet(TenantScopedViewSet):
                 failed.append({'row': i, 'error': 'insurance_status must be insured or uninsured'})
                 continue
 
+            blood_type = (row.get('blood_type') or '').strip().upper()
+            if blood_type and blood_type not in dict(Student.BLOOD_TYPE_CHOICES):
+                failed.append({'row': i, 'error': 'blood_type must be one of O+, O-, A+, A-, B+, B-, AB+, AB-'})
+                continue
+
             try:
                 with transaction.atomic():
                     guardian = None
@@ -2872,7 +2925,11 @@ class StudentViewSet(TenantScopedViewSet):
                     if parent_email:
                         guardian, _ = Guardian.objects.get_or_create(
                             tenant=tenant, email=parent_email,
-                            defaults={'name': (row.get('parent_name') or parent_email).strip(), 'phone': (row.get('parent_phone') or '').strip()},
+                            defaults={
+                                'name': (row.get('parent_name') or parent_email).strip(),
+                                'phone': (row.get('parent_phone') or '').strip(),
+                                'id_card_number': (row.get('parent_id_card_number') or '').strip() or None,
+                            },
                         )
 
                     student_code = f"{tenant.student_prefix or 'STU-'}{str(existing_count + created_count + 1).zfill(5)}"
@@ -2889,7 +2946,7 @@ class StudentViewSet(TenantScopedViewSet):
                         specialty=(row.get('specialty') or '').strip() or None,
                         insurance_status=insurance_status or None,
                         health_condition=(row.get('health_condition') or '').strip() or None,
-                        id_card_number=(row.get('id_card_number') or '').strip() or None,
+                        blood_type=blood_type or None,
                         birth_date=(row.get('birth_date') or '').strip() or None,
                         address=(row.get('address') or '').strip() or None,
                         emergency_contact=(row.get('emergency_contact') or '').strip() or None,
@@ -2927,6 +2984,29 @@ class StudentViewSet(TenantScopedViewSet):
             'paid': not has_overdue,
             'groups': [g.name for g in groups],
         })
+
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        """A student self-enrolled via the public page (source='public')
+        starts life as approval_status='pending' — a secretary reviews and
+        confirms them here before they count as a normal record."""
+        self.check_module_edit()
+        student = self.get_object()
+        student.approval_status = 'approved'
+        student.save(update_fields=['approval_status', 'updated_at'])
+        log_activity(request, student.tenant_id, 'update', entity_type='students', entity_id=student.id,
+                     description=f'Approved enrollment: {student.first_name} {student.last_name}')
+        return Response(StudentSerializer(student).data)
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        self.check_module_edit()
+        student = self.get_object()
+        student.approval_status = 'rejected'
+        student.save(update_fields=['approval_status', 'updated_at'])
+        log_activity(request, student.tenant_id, 'update', entity_type='students', entity_id=student.id,
+                     description=f'Rejected enrollment: {student.first_name} {student.last_name}')
+        return Response(StudentSerializer(student).data)
 
 
 class CourseViewSet(TenantScopedViewSet):
@@ -2968,6 +3048,55 @@ class CourseViewSet(TenantScopedViewSet):
         return Response(CourseSerializer(course).data)
 
 
+class RoomViewSet(TenantScopedViewSet):
+    queryset = Room.objects.all()
+    serializer_class = RoomSerializer
+    module_key = 'rooms'
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset()).order_by('name')
+        q = request.GET.get('q')
+        if q:
+            queryset = queryset.filter(Q(name__icontains=q) | Q(notes__icontains=q))
+
+        rooms = list(queryset)
+
+        # Optional occupancy check: does this room have a session overlapping
+        # [from, to]? Defaults to "right now" so the Rooms page can show a
+        # live free/occupied state without the caller passing a range.
+        from_raw = request.GET.get('from')
+        to_raw = request.GET.get('to')
+        now = timezone.now()
+        range_start = parse_datetime(from_raw) if from_raw else now
+        range_end = parse_datetime(to_raw) if to_raw else (range_start + timedelta(minutes=1))
+        if range_start and range_end:
+            # room_ref__in=rooms is already tenant-scoped (rooms came from
+            # get_queryset(), which filters by tenant) so no separate
+            # tenant_id filter is needed here.
+            occupied_sessions = ClassSession.objects.filter(
+                room_ref__in=rooms,
+                start_at__lt=range_end,
+                end_at__gt=range_start,
+            ).exclude(status='cancelled').select_related('group', 'course')
+            by_room = {}
+            for s in occupied_sessions:
+                by_room.setdefault(s.room_ref_id, []).append({
+                    'session_id': s.id,
+                    'group_name': s.group.name if s.group else None,
+                    'course_title': s.course.title if s.course else None,
+                    'start_at': s.start_at,
+                    'end_at': s.end_at,
+                })
+        else:
+            by_room = {}
+
+        data = self.get_serializer(rooms, many=True).data
+        for row in data:
+            row['occupied'] = bool(by_room.get(row['id']))
+            row['occupying_sessions'] = by_room.get(row['id'], [])
+        return Response({'items': data, 'total': len(data)})
+
+
 class GroupViewSet(TenantScopedViewSet):
     queryset = Group.objects.all()
     serializer_class = GroupSerializer
@@ -2984,7 +3113,7 @@ class GroupViewSet(TenantScopedViewSet):
                 Q(name__icontains=q) | Q(room__icontains=q) | Q(schedule__icontains=q)
             )
         # Prefetch students for efficient SerializerMethodField
-        queryset = queryset.prefetch_related('students').order_by('-created_at')[:500]
+        queryset = queryset.select_related('room_ref').prefetch_related('students').order_by('-created_at')[:500]
         serializer = self.get_serializer(queryset, many=True)
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
@@ -3013,7 +3142,7 @@ class GroupViewSet(TenantScopedViewSet):
         partial = kwargs.pop('partial', False)
         serializer = self.get_serializer(instance, data=data, partial=partial)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        self.perform_update(serializer)
 
         if student_ids is not None:
             students = Student.objects.filter(id__in=student_ids, tenant_id=instance.tenant_id)
@@ -3060,7 +3189,7 @@ class ClassSessionViewSet(TenantScopedViewSet):
     def list(self, request, *args, **kwargs):
         # select_related keeps the serializer's group/course/teacher labels
         # from firing a query per row in the planner's month view.
-        queryset = self.filter_queryset(self.get_queryset()).select_related('group', 'course', 'teacher')
+        queryset = self.filter_queryset(self.get_queryset()).select_related('group', 'course', 'teacher', 'room_ref')
         group_id = request.GET.get('group_id')
         if group_id:
             queryset = queryset.filter(group_id=group_id)
@@ -3705,32 +3834,38 @@ def filter_by_date_range(queryset, request, field):
 
 
 def compute_teacher_earnings(tenant_id, request):
-    """What each teacher has earned = their percentage of the *paid* student
-    payments on groups they teach, minus what's already been paid out.
+    """What each teacher has earned = (present-student attendance records
+    across their sessions) x their per-student rate ("percentage" — the
+    field name is legacy, but the tenant sets whatever number the payout
+    formula should use, and can change it any time from Teacher Payments),
+    minus what's already been paid out.
 
-    Only 'paid' payments count — billing a student doesn't mean the money
-    arrived, and paying a teacher a share of an unpaid invoice would put the
-    school out of pocket."""
+    Driven by attendance rather than payments: a teacher is owed for
+    students who actually showed up and were taught, regardless of whether
+    that student's invoice has been settled yet — collection is the
+    school's problem, not something that should delay a teacher's pay."""
     teachers = Teacher.objects.filter(tenant_id=tenant_id).order_by('first_name', 'last_name')
     teacher_id = request.GET.get('teacher_id')
     if teacher_id:
         teachers = teachers.filter(id=teacher_id)
 
-    payments = Payment.objects.filter(tenant_id=tenant_id, status='paid').select_related('group')
-    payments = filter_by_date_range(payments, request, 'paid_at__date')
+    attendance = Attendance.objects.filter(tenant_id=tenant_id, status='present').select_related('session')
+    attendance = filter_by_date_range(attendance, request, 'session__start_at__date')
     group_id = request.GET.get('group_id')
     if group_id:
-        payments = payments.filter(group_id=group_id)
+        attendance = attendance.filter(session__group_id=group_id)
 
-    # group -> teacher, resolved once so we don't hit the DB per payment
-    group_teacher = dict(
-        Group.objects.filter(tenant_id=tenant_id).exclude(teacher_id=None).values_list('id', 'teacher_id')
-    )
-    collected = {}
-    for p in payments:
-        tid = group_teacher.get(p.group_id)
+    # session -> teacher, resolved once so we don't hit the DB per attendance row.
+    # Falls back to the session's own teacher_id when set (a substitute
+    # teacher covering someone else's group), else the group's regular teacher.
+    sessions = ClassSession.objects.filter(tenant_id=tenant_id).values('id', 'teacher_id', 'group__teacher_id')
+    session_teacher = {s['id']: s['teacher_id'] or s['group__teacher_id'] for s in sessions}
+
+    present_count = {}
+    for a in attendance:
+        tid = session_teacher.get(a.session_id)
         if tid:
-            collected[tid] = collected.get(tid, 0.0) + float(p.amount) - float(p.discount or 0)
+            present_count[tid] = present_count.get(tid, 0) + 1
 
     payouts = TeacherPayout.objects.filter(tenant_id=tenant_id)
     payouts = filter_by_date_range(payouts, request, 'paid_at')
@@ -3740,15 +3875,15 @@ def compute_teacher_earnings(tenant_id, request):
 
     rows = []
     for t in teachers:
-        base = collected.get(t.id, 0.0)
-        pct = float(t.payment_percentage or 0)
-        earned = round(base * pct / 100, 2)
+        count = present_count.get(t.id, 0)
+        rate = float(t.payment_percentage or 0)
+        earned = round(count * rate, 2)
         already = round(paid_out.get(t.id, 0.0), 2)
         rows.append({
             'teacher_id': t.id,
             'teacher_name': f'{t.first_name} {t.last_name}',
-            'percentage': pct,
-            'collected': round(base, 2),
+            'percentage': rate,
+            'present_count': count,
             'earned': earned,
             'paid_out': already,
             'balance': round(earned - already, 2),
@@ -3767,16 +3902,16 @@ def teacher_payments_summary(request):
 
     rows = compute_teacher_earnings(user.tenant_id, request)
     if request.GET.get('type') in ('csv', 'xlsx'):
-        headers = ['Teacher', 'Percentage', 'Collected', 'Earned', 'Paid out', 'Balance']
+        headers = ['Teacher', 'Rate per present student', 'Present count', 'Earned', 'Paid out', 'Balance']
         return export_rows(
             headers,
-            [[r['teacher_name'], r['percentage'], r['collected'], r['earned'], r['paid_out'], r['balance']] for r in rows],
+            [[r['teacher_name'], r['percentage'], r['present_count'], r['earned'], r['paid_out'], r['balance']] for r in rows],
             'teacher-payments', request.GET.get('type'),
         )
     return Response({
         'items': rows,
         'totals': {
-            'collected': round(sum(r['collected'] for r in rows), 2),
+            'present_count': sum(r['present_count'] for r in rows),
             'earned': round(sum(r['earned'] for r in rows), 2),
             'paid_out': round(sum(r['paid_out'] for r in rows), 2),
             'balance': round(sum(r['balance'] for r in rows), 2),

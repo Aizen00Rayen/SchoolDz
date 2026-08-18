@@ -10,7 +10,7 @@ def generate_uuid():
 # frontend) so serializers/views validate against the same source of truth.
 PERMISSION_MODULES = [
     'dashboard', 'students', 'teachers', 'parents', 'courses', 'groups',
-    'sessions', 'calendar', 'payments', 'expenses', 'teacher_payments',
+    'sessions', 'calendar', 'rooms', 'payments', 'expenses', 'teacher_payments',
     'grades', 'attendance', 'messages', 'quizzes', 'website', 'reports',
     'logs', 'users', 'settings',
 ]
@@ -24,6 +24,10 @@ PERMISSION_LEVELS = ['hidden', 'view', 'edit']
 DEFAULT_MODULE_PERMISSIONS = {
     'dashboard': 'view',
     'calendar': 'view',
+    # 'view' by default so existing staff can still populate the room
+    # dropdown when creating a group/session — only full room management
+    # (the Rooms page's create/edit/delete) needs an explicit 'edit' grant.
+    'rooms': 'view',
     'reports': 'view',
     'settings': 'view',
     'website': 'view',
@@ -185,6 +189,7 @@ class Guardian(models.Model):
     ]
     relationship = models.CharField(max_length=50, choices=RELATIONSHIP_CHOICES, default='guardian')
     emergency_contact = models.CharField(max_length=255, null=True, blank=True)
+    id_card_number = models.CharField(max_length=50, null=True, blank=True)
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, db_column='user_id', related_name='guardians')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -258,7 +263,26 @@ class Student(models.Model):
     ]
     insurance_status = models.CharField(max_length=20, choices=INSURANCE_CHOICES, null=True, blank=True)
     health_condition = models.TextField(null=True, blank=True)
-    id_card_number = models.CharField(max_length=50, null=True, blank=True)
+    BLOOD_TYPE_CHOICES = [
+        ('O+', 'O+'), ('O-', 'O-'), ('A+', 'A+'), ('A-', 'A-'),
+        ('B+', 'B+'), ('B-', 'B-'), ('AB+', 'AB+'), ('AB-', 'AB-'),
+    ]
+    blood_type = models.CharField(max_length=3, choices=BLOOD_TYPE_CHOICES, null=True, blank=True)
+    # ID cards live on the Guardian (parent), not the student.
+    SOURCE_CHOICES = [
+        ('staff', 'staff'),
+        ('public', 'public'),
+    ]
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default='staff')
+    # Only meaningful when source='public' — a self-enrolled student needs a
+    # secretary's review before counting as a real record. Staff-entered
+    # students skip this (approved outright).
+    APPROVAL_CHOICES = [
+        ('approved', 'approved'),
+        ('pending', 'pending'),
+        ('rejected', 'rejected'),
+    ]
+    approval_status = models.CharField(max_length=20, choices=APPROVAL_CHOICES, default='approved')
     birth_date = models.DateField(null=True, blank=True)
     email = models.EmailField(null=True, blank=True)
     phone = models.CharField(max_length=255, null=True, blank=True)
@@ -313,13 +337,36 @@ class Course(models.Model):
         db_table = 'courses'
 
 
+class Room(models.Model):
+    """A physical room the tenant can assign to groups/sessions and check
+    for scheduling conflicts (see rooms_occupancy view)."""
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='rooms')
+    name = models.CharField(max_length=255)
+    capacity = models.IntegerField(null=True, blank=True)
+    notes = models.CharField(max_length=255, null=True, blank=True)
+    STATUS_CHOICES = [
+        ('active', 'active'),
+        ('inactive', 'inactive'),
+    ]
+    status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='active')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'rooms'
+
+
 class Group(models.Model):
     id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='groups')
     course = models.ForeignKey(Course, on_delete=models.CASCADE, db_column='course_id', related_name='groups')
     teacher = models.ForeignKey(Teacher, on_delete=models.SET_NULL, null=True, blank=True, db_column='teacher_id', related_name='groups')
     name = models.CharField(max_length=255)
+    # Legacy free-text room (kept so existing data keeps displaying); new
+    # groups should set room_ref instead, which is what rooms_occupancy uses.
     room = models.CharField(max_length=255, null=True, blank=True)
+    room_ref = models.ForeignKey(Room, on_delete=models.SET_NULL, null=True, blank=True, db_column='room_id', related_name='groups')
     capacity = models.IntegerField(default=20)
     schedule = models.CharField(max_length=255, null=True, blank=True)
     start_date = models.DateField(null=True, blank=True)
@@ -344,7 +391,10 @@ class ClassSession(models.Model):
     group = models.ForeignKey(Group, on_delete=models.CASCADE, db_column='group_id', related_name='sessions')
     teacher = models.ForeignKey(Teacher, on_delete=models.SET_NULL, null=True, blank=True, db_column='teacher_id', related_name='sessions')
     course = models.ForeignKey(Course, on_delete=models.SET_NULL, null=True, blank=True, db_column='course_id', related_name='sessions')
+    # Legacy free-text room (kept so existing data keeps displaying); new
+    # sessions should set room_ref instead, which is what rooms_occupancy uses.
     room = models.CharField(max_length=255, null=True, blank=True)
+    room_ref = models.ForeignKey(Room, on_delete=models.SET_NULL, null=True, blank=True, db_column='room_id', related_name='sessions')
     start_at = models.DateTimeField()
     end_at = models.DateTimeField()
     topic = models.CharField(max_length=255, null=True, blank=True)

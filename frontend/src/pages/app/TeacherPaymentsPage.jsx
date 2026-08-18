@@ -36,7 +36,10 @@ export default function TeacherPaymentsPage() {
   const [filters, setFilters] = useState({ from: "", to: "", teacher_id: "", group_id: "" });
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_PAYOUT);
-  const [editingPct, setEditingPct] = useState(null);
+  // Draft values for the always-visible percentage inputs, keyed by teacher
+  // id — only holds an entry while a field has been touched and not yet
+  // saved, so unedited rows always reflect the server value.
+  const [pctDrafts, setPctDrafts] = useState({});
 
   const query = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
 
@@ -74,13 +77,25 @@ export default function TeacherPaymentsPage() {
 
   const percentageMut = useMutation({
     mutationFn: ({ teacherId, value }) => api.patch(`/teachers/${teacherId}`, { payment_percentage: value }).then((r) => r.data),
-    onSuccess: () => {
+    onSuccess: (_, { teacherId }) => {
       toast.success(t("toast.updated"));
       qc.invalidateQueries({ queryKey: ["teacher-payments"] });
-      setEditingPct(null);
+      setPctDrafts((prev) => { const next = { ...prev }; delete next[teacherId]; return next; });
     },
-    onError: (e) => { toast.error(extractError(e)); setEditingPct(null); },
+    onError: (e, { teacherId }) => {
+      toast.error(extractError(e));
+      setPctDrafts((prev) => { const next = { ...prev }; delete next[teacherId]; return next; });
+    },
   });
+
+  const savePercentage = (teacherId, currentServerValue, draftValue) => {
+    const value = parseFloat(draftValue);
+    if (Number.isNaN(value) || value === currentServerValue) {
+      setPctDrafts((prev) => { const next = { ...prev }; delete next[teacherId]; return next; });
+      return;
+    }
+    percentageMut.mutate({ teacherId, value });
+  };
 
   const submit = (e) => {
     e.preventDefault();
@@ -155,8 +170,11 @@ export default function TeacherPaymentsPage() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <div className="surface-card p-4">
+          <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">{t("tp.present_count")}</div>
+          <div className="font-mono font-bold text-lg">{totals.present_count ?? 0}</div>
+        </div>
         {[
-          ["tp.collected", totals.collected],
           ["tp.earned", totals.earned],
           ["tp.paid_out", totals.paid_out],
           ["tp.balance", totals.balance],
@@ -178,7 +196,7 @@ export default function TeacherPaymentsPage() {
             <table className="w-full text-sm">
               <thead className="bg-muted/40 border-b border-border">
                 <tr>
-                  {["menu.teachers", "tp.percentage", "tp.collected", "tp.earned", "tp.paid_out", "tp.balance"].map((k) => (
+                  {["menu.teachers", "tp.rate_per_present", "tp.present_count", "tp.earned", "tp.paid_out", "tp.balance"].map((k) => (
                     <th key={k} className="text-start px-4 py-2.5 font-medium text-xs uppercase tracking-widest text-muted-foreground">
                       {t(k)}
                     </th>
@@ -191,38 +209,25 @@ export default function TeacherPaymentsPage() {
                     <td className="px-4 py-3 font-medium">{r.teacher_name}</td>
                     <td className="px-4 py-3 font-mono text-xs">
                       {!canEditPercentage ? (
-                        `${r.percentage}%`
-                      ) : editingPct?.teacherId === r.teacher_id ? (
+                        money(r.percentage)
+                      ) : (
                         <div className="flex items-center gap-1">
                           <Input
-                            type="number" min="0" max="100" step="0.5" autoFocus
-                            className="h-7 w-20 font-mono text-xs"
-                            value={editingPct.value}
-                            onChange={(e) => setEditingPct({ ...editingPct, value: e.target.value })}
+                            type="number" min="0" step="1"
+                            className="h-8 w-24 font-mono text-xs"
+                            value={pctDrafts[r.teacher_id] ?? r.percentage}
+                            onChange={(e) => setPctDrafts((prev) => ({ ...prev, [r.teacher_id]: e.target.value }))}
                             onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                percentageMut.mutate({ teacherId: r.teacher_id, value: parseFloat(editingPct.value) || 0 });
-                              } else if (e.key === "Escape") {
-                                setEditingPct(null);
-                              }
+                              if (e.key === "Enter") e.target.blur();
                             }}
-                            onBlur={() => percentageMut.mutate({ teacherId: r.teacher_id, value: parseFloat(editingPct.value) || 0 })}
+                            onBlur={(e) => savePercentage(r.teacher_id, r.percentage, e.target.value)}
                             data-testid={`tp-percentage-input-${r.teacher_id}`}
                           />
-                          <span>%</span>
+                          <span className="text-muted-foreground">{currency}</span>
                         </div>
-                      ) : (
-                        <button
-                          type="button"
-                          className="hover:underline decoration-dotted"
-                          onClick={() => setEditingPct({ teacherId: r.teacher_id, value: String(r.percentage) })}
-                          data-testid={`tp-percentage-edit-${r.teacher_id}`}
-                        >
-                          {r.percentage}%
-                        </button>
                       )}
                     </td>
-                    <td className="px-4 py-3 font-mono text-xs">{money(r.collected)}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{r.present_count}</td>
                     <td className="px-4 py-3 font-mono">{money(r.earned)}</td>
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{money(r.paid_out)}</td>
                     <td className={`px-4 py-3 font-mono font-semibold ${r.balance > 0 ? "text-destructive" : ""}`}>

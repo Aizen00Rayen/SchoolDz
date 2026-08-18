@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import CrudPanel, { StatusPill } from "./CrudPanel";
 import { CalendarClock, Repeat } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Field, RecurringDialog, isoToLocalInput, localInputToIso } from "./_shared";
+import { Field, RecurringDialog, RoomSelect, isoToLocalInput, localInputToIso } from "./_shared";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -12,7 +12,7 @@ import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
 
 const DEFAULT_FORM = {
-  group_id: "", teacher_id: "", room: "", start_at: new Date().toISOString(), end_at: new Date().toISOString(),
+  group_id: "", teacher_id: "", room_id: "", start_at: new Date().toISOString(), end_at: new Date().toISOString(),
   topic: "", status: "scheduled",
 };
 
@@ -105,7 +105,7 @@ export default function SessionsPage() {
           render: (r) => groupMap[r.group_id]?.name || "—",
         },
         { key: "topic", label: t("field.topic"), render: (r) => r.topic || <span className="text-muted-foreground">—</span> },
-        { key: "room", label: t("field.room") },
+        { key: "room", label: t("field.room"), render: (r) => r.room_name || r.room || <span className="text-muted-foreground">—</span> },
         {
           key: "teacher", label: t("field.teacher"),
           render: (r) => {
@@ -120,7 +120,7 @@ export default function SessionsPage() {
           <Field label={t("field.group")} required>
             <Select value={form.group_id || ""} onValueChange={(v) => {
               const g = groupMap[v];
-              setForm({ ...form, group_id: v, teacher_id: g?.teacher_id || form.teacher_id, room: g?.room || form.room });
+              setForm({ ...form, group_id: v, teacher_id: g?.teacher_id || form.teacher_id, room_id: g?.room_id || form.room_id });
             }}>
               <SelectTrigger className="bg-background"><SelectValue placeholder={t("sessions.select_group")} /></SelectTrigger>
               <SelectContent className="bg-popover">
@@ -142,7 +142,7 @@ export default function SessionsPage() {
           </Field>
           <SessionRangePicker form={form} setForm={setForm} />
           <Field label={t("field.room")}>
-            <Input value={form.room || ""} onChange={(e) => setForm({ ...form, room: e.target.value })} />
+            <RoomSelect value={form.room_id} onChange={(v) => setForm({ ...form, room_id: v })} />
           </Field>
           <Field label={t("field.status")}>
             <Select value={form.status || "scheduled"} onValueChange={(v) => setForm({ ...form, status: v })}>

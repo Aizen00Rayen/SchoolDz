@@ -9,9 +9,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
+import { useDateLocale } from "@/lib/dateLocale";
 
 export default function CalendarPage() {
   const { t } = useI18n();
+  const locale = useDateLocale();
   const { tenant } = useAuth();
   const nav = useNavigate();
   const [month, setMonth] = useState(new Date());
@@ -94,7 +96,7 @@ export default function CalendarPage() {
         <DialogContent className="bg-card">
           <DialogHeader>
             <DialogTitle className="font-display text-xl">
-              {dayDetail && format(dayDetail.day, "EEEE, MMMM d")}
+              {dayDetail && format(dayDetail.day, "EEEE, MMMM d", { locale })}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-2 max-h-[60vh] overflow-y-auto">

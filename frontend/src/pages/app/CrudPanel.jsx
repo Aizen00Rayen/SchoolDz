@@ -37,6 +37,7 @@ function cleanPayload(obj) {
 export default function CrudPanel({
   moduleKey, endpoint, title, subtitle, columns, defaultForm, renderForm,
   emptyIcon: EmptyIcon, canEdit = true, canCreate = true, extraActions,
+  rowClassName, renderRowActions,
 }) {
   const { t } = useI18n();
   const confirm = useConfirm();
@@ -174,7 +175,7 @@ export default function CrudPanel({
                   <tr
                     key={row.id}
                     data-testid={APPUI.row(moduleKey, row.id)}
-                    className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors"
+                    className={`border-b border-border last:border-0 hover:bg-muted/40 transition-colors ${rowClassName ? rowClassName(row) : ""}`}
                   >
                     {columns.map((c) => (
                       <td key={c.key} className="px-4 py-3">
@@ -184,6 +185,7 @@ export default function CrudPanel({
                     {canEdit && (
                       <td className="px-4 py-2 text-end">
                         <div className="flex items-center justify-end gap-1">
+                          {renderRowActions?.(row)}
                           <Button
                             size="icon" variant="ghost"
                             onClick={() => openEdit(row)}

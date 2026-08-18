@@ -28,6 +28,7 @@ import TeachersPage from "@/pages/app/TeachersPage";
 import CoursesPage from "@/pages/app/CoursesPage";
 import GroupsPage from "@/pages/app/GroupsPage";
 import SessionsPage from "@/pages/app/SessionsPage";
+import RoomsPage from "@/pages/app/RoomsPage";
 import CalendarPage from "@/pages/app/CalendarPage";
 import AttendancePage from "@/pages/app/AttendancePage";
 import PaymentsPage from "@/pages/app/PaymentsPage";
@@ -165,6 +166,7 @@ function App() {
                     <Route path="courses" element={<CoursesPage />} />
                     <Route path="groups" element={<GroupsPage />} />
                     <Route path="sessions" element={<SessionsPage />} />
+                    <Route path="rooms" element={<RoomsPage />} />
                     <Route path="calendar" element={<CalendarPage />} />
                     <Route path="attendance" element={<AttendancePage />} />
                     <Route path="payments" element={<PaymentsPage />} />

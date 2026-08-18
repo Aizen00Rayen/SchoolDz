@@ -1,8 +1,8 @@
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import CrudPanel from "./CrudPanel";
-import { UserRound } from "lucide-react";
+import { UserRound, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Field, InviteButton, ExportMenu } from "./_shared";
 import {
@@ -15,28 +15,72 @@ import { usePermission } from "@/lib/permissions";
 
 const DEFAULT_FORM = {
   name: "", email: "", phone: "", address: "", occupation: "", relationship: "father",
-  emergency_contact: "", student_ids: [],
+  emergency_contact: "", id_card_number: "", student_ids: [],
 };
 
-/** `max` (optional) caps how many students can be checked — used by
+/** Search-by-name-or-code picker — a tenant with thousands of students can't
+ * reasonably render them all as a checkbox list (that's what this replaced).
+ * `max` (optional) caps how many students can be selected — used by
  * GroupsPage to keep enrollment from exceeding the group's capacity field.
- * Selecting fewer is always fine; once at max, unchecked rows just disable
- * until something is unchecked again. Omit `max` for unlimited pickers
- * (e.g. linking a guardian's own children, which has no such ceiling). */
+ * Selecting fewer is always fine; once at max, matches just can't be added
+ * until something is removed. Omit `max` for unlimited pickers (e.g. linking
+ * a guardian's own children, which has no such ceiling). */
 export function StudentPicker({ selected, onChange, max }) {
   const { t } = useI18n();
-  const { data: students, isLoading } = useQuery({
-    queryKey: ["students-list"],
-    queryFn: async () => (await api.get("/students")).data,
-  });
-  const items = students?.items || [];
+  const [query, setQuery] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [labels, setLabels] = useState({});
   const ids = selected || [];
   const hasMax = typeof max === "number" && !Number.isNaN(max);
   const atMax = hasMax && ids.length >= max;
 
-  const toggle = (studentId, checked) => {
-    if (checked && atMax) return;
-    onChange(checked ? [...ids, studentId] : ids.filter((id) => id !== studentId));
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(query.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const { data: results, isFetching } = useQuery({
+    queryKey: ["students-search", debounced],
+    queryFn: async () => (await api.get("/students", { params: { q: debounced, limit: 10 } })).data,
+    enabled: debounced.length > 0,
+  });
+
+  // Chips need a label for every selected id, including ones picked in an
+  // earlier session (editing an existing group/guardian) that never came
+  // through a search result in this render.
+  const missingIds = ids.filter((id) => !labels[id]);
+  useQuery({
+    queryKey: ["students-labels", missingIds.join(",")],
+    queryFn: async () => {
+      const { data } = await api.get("/students", { params: { ids: missingIds.join(",") } });
+      setLabels((prev) => {
+        const next = { ...prev };
+        for (const s of data.items) next[s.id] = `${s.first_name} ${s.last_name}`;
+        return next;
+      });
+      return data;
+    },
+    enabled: missingIds.length > 0,
+  });
+
+  useEffect(() => {
+    if (results?.items?.length) {
+      setLabels((prev) => {
+        const next = { ...prev };
+        for (const s of results.items) next[s.id] = `${s.first_name} ${s.last_name}`;
+        return next;
+      });
+    }
+  }, [results]);
+
+  const toggle = (studentId, label) => {
+    if (ids.includes(studentId)) {
+      onChange(ids.filter((id) => id !== studentId));
+      return;
+    }
+    if (atMax) return;
+    if (label) setLabels((prev) => ({ ...prev, [studentId]: label }));
+    onChange([...ids, studentId]);
   };
 
   return (
@@ -47,34 +91,60 @@ export function StudentPicker({ selected, onChange, max }) {
           {atMax && <span className="text-warning font-medium">{t("picker.max_reached")}</span>}
         </div>
       )}
-      <div className="border border-border rounded-lg max-h-48 overflow-y-auto p-2 space-y-1 bg-background">
-        {isLoading ? (
-          <div className="text-xs text-muted-foreground p-2">{t("picker.loading_students")}</div>
-        ) : items.length === 0 ? (
-          <div className="text-xs text-muted-foreground p-2">{t("picker.no_students")}</div>
-        ) : (
-          items.map((s) => {
-            const checked = ids.includes(s.id);
-            const disabled = !checked && atMax;
-            return (
-              <label
-                key={s.id}
-                className={`flex items-center gap-2 px-2 py-1.5 rounded text-sm ${
-                  disabled ? "opacity-40 cursor-not-allowed" : "hover:bg-muted/60 cursor-pointer"
-                }`}
-              >
-                <Checkbox
-                  checked={checked}
+
+      <Input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder={t("picker.search_students")}
+        data-testid="student-picker-search"
+      />
+
+      {debounced && (
+        <div className="border border-border rounded-lg mt-1.5 max-h-48 overflow-y-auto bg-background">
+          {isFetching ? (
+            <div className="text-xs text-muted-foreground p-2">{t("actions.loading")}</div>
+          ) : (results?.items || []).length === 0 ? (
+            <div className="text-xs text-muted-foreground p-2">{t("picker.no_students")}</div>
+          ) : (
+            results.items.map((s) => {
+              const checked = ids.includes(s.id);
+              const disabled = !checked && atMax;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
                   disabled={disabled}
-                  onCheckedChange={(c) => toggle(s.id, !!c)}
-                />
-                <span>{s.first_name} {s.last_name}</span>
-                <span className="text-[11px] font-mono text-muted-foreground ms-auto">{s.student_code}</span>
-              </label>
-            );
-          })
-        )}
-      </div>
+                  onClick={() => toggle(s.id, `${s.first_name} ${s.last_name}`)}
+                  className={`w-full flex items-center gap-2 px-2 py-1.5 text-sm text-start ${
+                    checked ? "bg-accent/10" : ""
+                  } ${disabled ? "opacity-40 cursor-not-allowed" : "hover:bg-muted/60 cursor-pointer"}`}
+                  data-testid={`student-picker-result-${s.id}`}
+                >
+                  <span className={checked ? "font-medium" : ""}>{s.first_name} {s.last_name}</span>
+                  <span className="text-[11px] font-mono text-muted-foreground ms-auto">{s.student_code}</span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {ids.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {ids.map((id) => (
+            <span
+              key={id}
+              className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-xs"
+              data-testid={`student-picker-chip-${id}`}
+            >
+              {labels[id] || "…"}
+              <button type="button" onClick={() => toggle(id)} className="text-muted-foreground hover:text-destructive">
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -132,6 +202,9 @@ export default function ParentsPage() {
           </Field>
           <Field label={t("field.emergency_contact")}>
             <Input value={form.emergency_contact || ""} onChange={(e) => setForm({ ...form, emergency_contact: e.target.value })} />
+          </Field>
+          <Field label={t("field.id_card_number")}>
+            <Input value={form.id_card_number || ""} onChange={(e) => setForm({ ...form, id_card_number: e.target.value })} />
           </Field>
           <div className="md:col-span-2">
             <Field label={t("field.address")}>

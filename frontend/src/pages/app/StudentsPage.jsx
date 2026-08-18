@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import CrudPanel, { StatusPill } from "./CrudPanel";
-import { GraduationCap, Upload } from "lucide-react";
+import { Check, GraduationCap, Upload, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,8 @@ import { api, extractError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
 
+const BLOOD_TYPES = ["O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"];
+
 const DEFAULT_FORM = {
   first_name: "",
   last_name: "",
@@ -26,7 +28,7 @@ const DEFAULT_FORM = {
   specialty: "",
   insurance_status: "",
   health_condition: "",
-  id_card_number: "",
+  blood_type: "",
   birth_date: "",
   email: "",
   phone: "",
@@ -117,9 +119,38 @@ function ImportCsvDialog() {
   );
 }
 
+/** Amber for a self-enrolled record awaiting a secretary's review, dimmed
+ * red once rejected — so the ones needing attention stand out in the list
+ * without having to open each row. */
+function approvalRowClass(row) {
+  if (row.approval_status === "pending") return "bg-warning/10 hover:!bg-warning/15";
+  if (row.approval_status === "rejected") return "bg-destructive/5 text-muted-foreground hover:!bg-destructive/10";
+  return "";
+}
+
 export default function StudentsPage() {
   const { t } = useI18n();
   const { canEdit } = usePermission("students");
+  const qc = useQueryClient();
+
+  const approveMut = useMutation({
+    mutationFn: (id) => api.post(`/students/${id}/approve`).then((r) => r.data),
+    onSuccess: () => {
+      toast.success(t("students.approved_toast"));
+      qc.invalidateQueries({ queryKey: ["students"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+  const rejectMut = useMutation({
+    mutationFn: (id) => api.post(`/students/${id}/reject`).then((r) => r.data),
+    onSuccess: () => {
+      toast.success(t("students.rejected_toast"));
+      qc.invalidateQueries({ queryKey: ["students"] });
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
   return (
     <CrudPanel
       moduleKey="students"
@@ -130,6 +161,29 @@ export default function StudentsPage() {
       defaultForm={DEFAULT_FORM}
       canEdit={canEdit}
       canCreate={canEdit}
+      rowClassName={approvalRowClass}
+      renderRowActions={(row) => row.approval_status === "pending" && canEdit ? (
+        <>
+          <Button
+            size="icon" variant="ghost"
+            onClick={() => approveMut.mutate(row.id)}
+            className="h-8 w-8 text-success hover:bg-success/10"
+            title={t("students.approve")}
+            data-testid={`students-approve-${row.id}`}
+          >
+            <Check className="w-3.5 h-3.5" />
+          </Button>
+          <Button
+            size="icon" variant="ghost"
+            onClick={() => rejectMut.mutate(row.id)}
+            className="h-8 w-8 text-destructive hover:bg-destructive/10"
+            title={t("students.reject")}
+            data-testid={`students-reject-${row.id}`}
+          >
+            <X className="w-3.5 h-3.5" />
+          </Button>
+        </>
+      ) : null}
       extraActions={(
         <>
           {canEdit && <ImportCsvDialog />}
@@ -141,7 +195,15 @@ export default function StudentsPage() {
           key: "name", label: t("field.full_name"),
           render: (r) => (
             <div>
-              <div className="font-medium">{r.first_name} {r.last_name}</div>
+              <div className="font-medium flex items-center gap-1.5">
+                {r.first_name} {r.last_name}
+                {r.approval_status === "pending" && (
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-warning">{t("students.approval_pending")}</span>
+                )}
+                {r.approval_status === "rejected" && (
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-destructive">{t("students.approval_rejected")}</span>
+                )}
+              </div>
               <div className="text-[11px] font-mono text-muted-foreground">{r.student_code}</div>
             </div>
           ),
@@ -184,8 +246,19 @@ export default function StudentsPage() {
               </SelectContent>
             </Select>
           </Field>
-          <Field label={t("field.id_card_number")}>
-            <Input value={form.id_card_number || ""} onChange={(e) => setForm({ ...form, id_card_number: e.target.value })} />
+          <Field label={t("field.blood_type")}>
+            <Select
+              value={form.blood_type || "__none"}
+              onValueChange={(v) => setForm({ ...form, blood_type: v === "__none" ? "" : v })}
+            >
+              <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+              <SelectContent className="bg-popover">
+                <SelectItem value="__none">—</SelectItem>
+                {BLOOD_TYPES.map((bt) => (
+                  <SelectItem key={bt} value={bt}>{bt}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Field>
           <div className="md:col-span-2">
             <Field label={t("field.health_condition")}>

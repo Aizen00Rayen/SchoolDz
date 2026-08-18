@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Attendance, Payment, Grade, ChargilyCheckout, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog
+from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Grade, ChargilyCheckout, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog
 
 class TenantSerializer(serializers.ModelSerializer):
     class Meta:
@@ -87,11 +87,15 @@ class GroupSerializer(serializers.ModelSerializer):
     teacher_id = serializers.PrimaryKeyRelatedField(
         queryset=Teacher.objects.all(), source='teacher', allow_null=True, required=False
     )
+    room_id = serializers.PrimaryKeyRelatedField(
+        queryset=Room.objects.all(), source='room_ref', allow_null=True, required=False
+    )
+    room_name = serializers.CharField(source='room_ref.name', read_only=True, default=None)
     student_ids = serializers.SerializerMethodField()
 
     class Meta:
         model = Group
-        exclude = ['tenant', 'course', 'teacher', 'students']
+        exclude = ['tenant', 'course', 'teacher', 'students', 'room_ref']
 
     def get_student_ids(self, obj):
         # See GuardianSerializer.get_student_ids — .all() hits the
@@ -112,6 +116,10 @@ class ClassSessionSerializer(serializers.ModelSerializer):
     course_id = serializers.PrimaryKeyRelatedField(
         queryset=Course.objects.all(), source='course', allow_null=True, required=False
     )
+    room_id = serializers.PrimaryKeyRelatedField(
+        queryset=Room.objects.all(), source='room_ref', allow_null=True, required=False
+    )
+    room_name = serializers.CharField(source='room_ref.name', read_only=True, default=None)
     # Read-only labels so the planner can show who/what/where without a
     # lookup request per session.
     group_name = serializers.CharField(source='group.name', read_only=True, default=None)
@@ -120,7 +128,7 @@ class ClassSessionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ClassSession
-        exclude = ['tenant', 'group', 'teacher', 'course']
+        exclude = ['tenant', 'group', 'teacher', 'course', 'room_ref']
 
     def get_teacher_name(self, obj):
         return f"{obj.teacher.first_name} {obj.teacher.last_name}" if obj.teacher else None
@@ -327,4 +335,14 @@ class ActivityLogSerializer(serializers.ModelSerializer):
 class SchoolGalleryPhotoSerializer(serializers.ModelSerializer):
     class Meta:
         model = SchoolGalleryPhoto
+        exclude = ['tenant']
+
+
+class RoomSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.PrimaryKeyRelatedField(
+        queryset=Tenant.objects.all(), source='tenant', required=False, allow_null=True
+    )
+
+    class Meta:
+        model = Room
         exclude = ['tenant']
