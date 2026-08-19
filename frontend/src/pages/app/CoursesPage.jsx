@@ -13,10 +13,16 @@ import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/permissions";
 
 const DEFAULT_FORM = {
-  title: "", description: "", category: "", duration_weeks: 12, price: 0,
+  title: "", description: "", category: "", pricing_type: "fixed_sessions", sessions_count: 12, price: 0,
   max_students: 20, color: "#0A0A0B", status: "active", show_on_enrollment: false,
   school_level: "", school_year: "", specialty: "",
 };
+
+function pricingLabel(r, t) {
+  if (r.pricing_type === "per_session") return t("course.pricing_per_session");
+  if (r.pricing_type === "per_month") return t("course.pricing_per_month_count", { count: r.sessions_count || 0 });
+  return t("course.pricing_fixed_sessions_count", { count: r.sessions_count || 0 });
+}
 
 export default function CoursesPage() {
   const { t } = useI18n();
@@ -45,7 +51,7 @@ export default function CoursesPage() {
             </div>
           ),
         },
-        { key: "duration_weeks", label: t("field.duration"), render: (r) => `${r.duration_weeks || 0}w` },
+        { key: "pricing_type", label: t("field.pricing"), render: (r) => <span className="text-xs">{pricingLabel(r, t)}</span> },
         {
           key: "price", label: t("field.price"),
           render: (r) => (
@@ -85,12 +91,30 @@ export default function CoursesPage() {
             </Select>
           </Field>
           <SchoolLevelFields form={form} setForm={setForm} />
-          <Field label={t("field.duration_weeks")}>
-            <Input type="number" value={form.duration_weeks || 12} onChange={(e) => setForm({ ...form, duration_weeks: parseInt(e.target.value) || 0 })} />
+          <Field label={t("field.pricing_type")}>
+            <Select
+              value={form.pricing_type || "fixed_sessions"}
+              onValueChange={(v) => setForm({ ...form, pricing_type: v, sessions_count: v === "per_session" ? null : (form.sessions_count || 12) })}
+            >
+              <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+              <SelectContent className="bg-popover">
+                <SelectItem value="per_session">{t("course.pricing_per_session")}</SelectItem>
+                <SelectItem value="per_month">{t("course.pricing_per_month")}</SelectItem>
+                <SelectItem value="fixed_sessions">{t("course.pricing_fixed_sessions")}</SelectItem>
+              </SelectContent>
+            </Select>
           </Field>
           <Field label={t("field.price")}>
             <Input type="number" value={form.price || 0} onChange={(e) => setForm({ ...form, price: parseFloat(e.target.value) || 0 })} />
           </Field>
+          {form.pricing_type !== "per_session" && (
+            <Field label={form.pricing_type === "per_month" ? t("course.sessions_per_month") : t("course.total_sessions")}>
+              <Input
+                type="number" value={form.sessions_count || ""}
+                onChange={(e) => setForm({ ...form, sessions_count: parseInt(e.target.value) || null })}
+              />
+            </Field>
+          )}
           <Field label={t("field.max_students")}>
             <Input type="number" value={form.max_students || 20} onChange={(e) => setForm({ ...form, max_students: parseInt(e.target.value) || 0 })} />
           </Field>

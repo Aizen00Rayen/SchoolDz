@@ -89,9 +89,12 @@ urlpatterns = [
     path('attendance/session/<str:session_id>', views.attendance_for_session, name='attendance_for_session_noslash'),
     path('attendance/student/<str:student_id>/', views.attendance_for_student, name='attendance_for_student'),
     path('attendance/student/<str:student_id>', views.attendance_for_student, name='attendance_for_student_noslash'),
+    *_both('attendance/<str:attendance_id>/excuse-document', views.attendance_upload_excuse, 'attendance_upload_excuse'),
+    *_both('attendance/<str:attendance_id>/recovery', views.attendance_set_recovery, 'attendance_set_recovery'),
 
     # Payments
     *_both('payments/overdue', views.payments_overdue, 'payments_overdue'),
+    *_both('payments/balances', views.payments_balances, 'payments_balances'),
     path('payments/<str:payment_id>/invoice/', views.payment_invoice_pdf, name='payment_invoice_pdf'),
     path('payments/<str:payment_id>/invoice', views.payment_invoice_pdf, name='payment_invoice_pdf_noslash'),
 

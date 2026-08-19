@@ -1,13 +1,16 @@
-import { useQuery } from "@tanstack/react-query";
+import { useRef } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import CrudPanel, { StatusPill } from "./CrudPanel";
-import { Users } from "lucide-react";
+import { ExternalLink, FileText, Loader2, Upload, Users } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
 import { Field, InviteButton, ExportMenu } from "./_shared";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { api } from "@/lib/api";
+import { api, extractError, resolveFileUrl } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
 
@@ -58,9 +61,59 @@ function SubjectPicker({ selected, onChange }) {
   );
 }
 
+/** Upload/replace + view/download for an optional HR document (CV or
+ * diploma) — only usable once the teacher exists (needs an id to upload
+ * against), so the create dialog shows a hint instead until saved once. */
+function DocumentField({ label, url, uploadPath, teacherId, onUploaded }) {
+  const { t } = useI18n();
+  const inputRef = useRef(null);
+
+  const uploadMut = useMutation({
+    mutationFn: (file) => {
+      const body = new FormData();
+      body.append("file", file);
+      return api.post(`/teachers/${teacherId}${uploadPath}`, body).then((r) => r.data);
+    },
+    onSuccess: (data) => {
+      toast.success(t("toast.updated"));
+      onUploaded(data);
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
+  const onFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) uploadMut.mutate(file);
+  };
+
+  if (!teacherId) {
+    return <p className="text-xs text-muted-foreground">{t("teacher.save_before_documents")}</p>;
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      {url && (
+        <a
+          href={resolveFileUrl(url)} target="_blank" rel="noreferrer"
+          className="flex items-center gap-1.5 text-xs text-accent hover:underline truncate"
+        >
+          <FileText className="w-3.5 h-3.5 flex-shrink-0" /> {t("teacher.view_document")} <ExternalLink className="w-3 h-3 flex-shrink-0" />
+        </a>
+      )}
+      <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" className="hidden" onChange={onFileSelect} />
+      <Button type="button" variant="outline" size="sm" disabled={uploadMut.isPending} onClick={() => inputRef.current?.click()}>
+        {uploadMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5 me-1.5" />}
+        {url ? t("actions.replace") : t("teacher.upload_document")}
+      </Button>
+    </div>
+  );
+}
+
 export default function TeachersPage() {
   const { t } = useI18n();
   const { canEdit } = usePermission("teachers");
+  const qc = useQueryClient();
   return (
     <CrudPanel
       moduleKey="teachers"
@@ -126,6 +179,18 @@ export default function TeachersPage() {
                 <SelectItem value="inactive">{t("status.inactive")}</SelectItem>
               </SelectContent>
             </Select>
+          </Field>
+          <Field label={t("teacher.cv")}>
+            <DocumentField
+              label={t("teacher.cv")} url={form.cv_url} uploadPath="/cv" teacherId={form.id}
+              onUploaded={(data) => { setForm({ ...form, cv_url: data.cv_url }); qc.invalidateQueries({ queryKey: ["teachers"] }); }}
+            />
+          </Field>
+          <Field label={t("teacher.diploma")}>
+            <DocumentField
+              label={t("teacher.diploma")} url={form.diploma_url} uploadPath="/diploma" teacherId={form.id}
+              onUploaded={(data) => { setForm({ ...form, diploma_url: data.diploma_url }); qc.invalidateQueries({ queryKey: ["teachers"] }); }}
+            />
           </Field>
         </div>
       )}

@@ -112,6 +112,22 @@ def prorate_upgrade_amount(tenant, new_plan):
     return max(0, int(round(new_remaining_cost - unused_credit)))
 
 
+def course_per_session_price(price, pricing_type, sessions_count):
+    """A course's price means different things depending on pricing_type:
+    already-per-session, a recurring monthly rate split across the sessions
+    that happen in a month, or a total split across the course's whole
+    session count. Both of the latter two divide by sessions_count — it's
+    just 'sessions per month' vs 'total sessions' depending on which type.
+    Used for both teacher-earnings and student-balance calculations, so a
+    course's per-session value means the same thing everywhere."""
+    price = float(price or 0)
+    if pricing_type == 'per_session':
+        return price
+    if sessions_count and sessions_count > 0:
+        return price / sessions_count
+    return price
+
+
 def name_search_q(q, *field_groups):
     """Builds a Q for searching a first/last-name-split model by a free-typed
     query. Matching a single field against the whole query (e.g.
@@ -199,7 +215,7 @@ INVOICE_STATUS_AR = {
     'due_on': 'يُستحق في',
 }
 
-UPLOAD_SUBDIRS = {'logos', 'hero', 'teachers', 'courses', 'gallery', 'quizzes', 'submissions'}
+UPLOAD_SUBDIRS = {'logos', 'hero', 'teachers', 'courses', 'gallery', 'quizzes', 'submissions', 'documents', 'excuses'}
 IMAGE_UPLOAD_EXTS = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif'}
 
 
@@ -735,7 +751,8 @@ def public_school_info(request, slug):
             'title': c.title,
             'description': c.description,
             'category': c.category,
-            'duration_weeks': c.duration_weeks,
+            'pricing_type': c.pricing_type,
+            'sessions_count': c.sessions_count,
             'price': str(c.price),
             'color': c.color,
             'image_url': c.image_url,
@@ -1956,10 +1973,21 @@ def attendance_for_session(request, session_id):
                 student_id = mark.get('student_id')
                 status_val = mark.get('status')
                 note = mark.get('note')
-                
+
                 if not student_id or status_val not in ['present', 'absent', 'late', 'excused']:
                     continue
-                    
+
+                # Recovery only applies to excused absences. Re-saving an
+                # already-excused record (e.g. fixing the note) must not
+                # clobber a recovery_status the tenant already progressed —
+                # only a *fresh* transition into 'excused' starts it at
+                # needs_recovery. Any other status resets it to n/a.
+                existing = Attendance.objects.filter(tenant_id=tid, session_id=session_id, student_id=student_id).first()
+                if status_val == 'excused':
+                    recovery_status = existing.recovery_status if existing and existing.status == 'excused' else 'needs_recovery'
+                else:
+                    recovery_status = 'not_applicable'
+
                 Attendance.objects.update_or_create(
                     tenant_id=tid,
                     session_id=session_id,
@@ -1967,6 +1995,7 @@ def attendance_for_session(request, session_id):
                     defaults={
                         'status': status_val,
                         'note': note or None,
+                        'recovery_status': recovery_status,
                         'marked_by': user,
                         'marked_at': timezone.now()
                     }
@@ -1974,6 +2003,60 @@ def attendance_for_session(request, session_id):
                 
         items = Attendance.objects.filter(tenant_id=tid, session_id=session_id)
         return Response({'items': AttendanceSerializer(items, many=True).data, 'total': items.count()})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def attendance_upload_excuse(request, attendance_id):
+    """Attaches a photo/PDF of the excuse document (doctor's note, etc.) to
+    an excused absence — only meaningful for status='excused' records."""
+    user = request.user
+    tid = user.tenant_id
+    if not tid:
+        raise PermissionDenied('User has no tenant')
+    if not user.is_super_admin() and user.get_permission('attendance') != 'edit':
+        raise PermissionDenied('Forbidden')
+
+    attendance = Attendance.objects.filter(id=attendance_id, tenant_id=tid).first()
+    if not attendance:
+        raise NotFound('Attendance record not found')
+    if attendance.status != 'excused':
+        return Response({'error': 'Only excused absences can have an excuse document'}, status=status.HTTP_400_BAD_REQUEST)
+    if 'file' not in request.FILES:
+        return Response({'error': 'file is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    new_url = save_uploaded_document(request.FILES['file'], 'excuses', attendance.id)
+    delete_uploaded_image(attendance.excuse_document_url, 'excuses')
+    attendance.excuse_document_url = new_url
+    attendance.save(update_fields=['excuse_document_url'])
+    return Response(AttendanceSerializer(attendance).data)
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def attendance_set_recovery(request, attendance_id):
+    """Manually toggles whether a student has made up an excused absence —
+    a plain status flag, no makeup-session scheduling involved."""
+    user = request.user
+    tid = user.tenant_id
+    if not tid:
+        raise PermissionDenied('User has no tenant')
+    if not user.is_super_admin() and user.get_permission('attendance') != 'edit':
+        raise PermissionDenied('Forbidden')
+
+    recovery_status = request.data.get('recovery_status')
+    if recovery_status not in ('needs_recovery', 'recovered'):
+        return Response({'error': "recovery_status must be 'needs_recovery' or 'recovered'"}, status=status.HTTP_400_BAD_REQUEST)
+
+    attendance = Attendance.objects.filter(id=attendance_id, tenant_id=tid).first()
+    if not attendance:
+        raise NotFound('Attendance record not found')
+    if attendance.status != 'excused':
+        return Response({'error': 'Recovery only applies to excused absences'}, status=status.HTTP_400_BAD_REQUEST)
+
+    attendance.recovery_status = recovery_status
+    attendance.save(update_fields=['recovery_status'])
+    return Response(AttendanceSerializer(attendance).data)
 
 
 @api_view(['GET'])
@@ -2706,6 +2789,32 @@ class TeacherViewSet(TenantScopedViewSet):
         teacher.save(update_fields=['photo_url', 'updated_at'])
         return Response(TeacherSerializer(teacher).data)
 
+    @action(detail=True, methods=['post'], url_path='cv')
+    def upload_cv(self, request, pk=None):
+        self.check_module_edit()
+        teacher = self.get_object()
+        if 'file' not in request.FILES:
+            return Response({'error': 'file is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        new_url = save_uploaded_document(request.FILES['file'], 'documents', f'{teacher.id}-cv')
+        delete_uploaded_image(teacher.cv_url, 'documents')
+        teacher.cv_url = new_url
+        teacher.save(update_fields=['cv_url', 'updated_at'])
+        return Response(TeacherSerializer(teacher).data)
+
+    @action(detail=True, methods=['post'], url_path='diploma')
+    def upload_diploma(self, request, pk=None):
+        self.check_module_edit()
+        teacher = self.get_object()
+        if 'file' not in request.FILES:
+            return Response({'error': 'file is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+        new_url = save_uploaded_document(request.FILES['file'], 'documents', f'{teacher.id}-diploma')
+        delete_uploaded_image(teacher.diploma_url, 'documents')
+        teacher.diploma_url = new_url
+        teacher.save(update_fields=['diploma_url', 'updated_at'])
+        return Response(TeacherSerializer(teacher).data)
+
     def create(self, request, *args, **kwargs):
         self.check_module_edit()
         data = request.data.copy()
@@ -3313,6 +3422,11 @@ class PaymentViewSet(TenantScopedViewSet):
             queryset = queryset.filter(
                 Q(invoice_number__icontains=q) | Q(reference__icontains=q) | Q(notes__icontains=q)
             )
+        balance_status = request.GET.get('balance_status')
+        if balance_status in ('owes', 'overpaid', 'settled'):
+            balances = compute_student_balances(request.user.tenant_id)
+            matching_ids = [sid for sid, b in balances.items() if b['status'] == balance_status]
+            queryset = queryset.filter(student_id__in=matching_ids)
         queryset = queryset.order_by('-created_at')[:500]
         serializer = self.get_serializer(queryset, many=True)
         return Response({'items': serializer.data, 'total': len(serializer.data)})
@@ -3364,6 +3478,77 @@ def payments_overdue(request):
         'total': len(items),
         'total_owed': float(total_data['total'] or 0),
     })
+
+
+BALANCE_THRESHOLD = 1.0  # DZD-scale rounding noise shouldn't read as owing/overpaid
+
+
+def compute_student_balances(tenant_id):
+    """Per-student running balance = money actually received (paid Payment
+    rows) minus the cost of every session they've actually used (present or
+    excused attendance, priced via course_per_session_price) — collection
+    status is tracked by attendance, not by manually re-deriving what's
+    "owed" from enrollment alone. Returns {student_id: {paid, cost, balance,
+    status}}, status one of 'owes' (they owe the school), 'overpaid' (the
+    school owes them), 'settled'."""
+    attendance = Attendance.objects.filter(tenant_id=tenant_id, status__in=['present', 'excused'])
+
+    sessions = ClassSession.objects.filter(tenant_id=tenant_id).values('id', 'course_id', 'group__course_id')
+    session_course = {}
+    course_ids = set()
+    for s in sessions:
+        course_id = s['course_id'] or s['group__course_id']
+        session_course[s['id']] = course_id
+        if course_id:
+            course_ids.add(course_id)
+
+    price_per_session = {}
+    for c in Course.objects.filter(id__in=course_ids).values('id', 'price', 'pricing_type', 'sessions_count'):
+        price_per_session[c['id']] = course_per_session_price(c['price'], c['pricing_type'], c['sessions_count'])
+
+    cost = {}
+    for a in attendance.values('student_id', 'session_id'):
+        course_id = session_course.get(a['session_id'])
+        if not course_id:
+            continue
+        cost[a['student_id']] = cost.get(a['student_id'], 0.0) + price_per_session.get(course_id, 0.0)
+
+    paid = {}
+    payments = Payment.objects.filter(tenant_id=tenant_id, status='paid').values('student_id', 'amount', 'discount')
+    for p in payments:
+        paid[p['student_id']] = paid.get(p['student_id'], 0.0) + float(p['amount']) - float(p['discount'])
+
+    balances = {}
+    for student_id in set(cost) | set(paid):
+        paid_amount = round(paid.get(student_id, 0.0), 2)
+        cost_amount = round(cost.get(student_id, 0.0), 2)
+        balance = round(paid_amount - cost_amount, 2)
+        if balance > BALANCE_THRESHOLD:
+            balance_status = 'overpaid'
+        elif balance < -BALANCE_THRESHOLD:
+            balance_status = 'owes'
+        else:
+            balance_status = 'settled'
+        balances[student_id] = {'paid': paid_amount, 'cost': cost_amount, 'balance': balance, 'status': balance_status}
+    return balances
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def payments_balances(request):
+    tid = request.user.tenant_id
+    if not tid:
+        raise PermissionDenied('User has no tenant')
+
+    balances = compute_student_balances(tid)
+    students = Student.objects.filter(tenant_id=tid, id__in=balances.keys())
+    rows = [{
+        'student_id': s.id,
+        'student_name': f'{s.first_name} {s.last_name}',
+        **balances[s.id],
+    } for s in students]
+    rows.sort(key=lambda r: r['balance'])
+    return Response({'items': rows, 'total': len(rows)})
 
 
 class GradeViewSet(TenantScopedViewSet):
@@ -3842,10 +4027,9 @@ def filter_by_date_range(queryset, request, field):
 def compute_teacher_earnings(tenant_id, request):
     """What each teacher has earned = their percentage of the per-session
     value of every present-student attendance record across their sessions,
-    minus what's already been paid out. A course's per-session value is its
-    price divided by its duration_weeks (this app's "one session per week"
-    convention) — so for each present student, the teacher earns
-    percentage% of that course's per-session price.
+    minus what's already been paid out. A course's per-session value comes
+    from course_per_session_price() — so for each present student, the
+    teacher earns percentage% of that course's per-session price.
 
     Driven by attendance rather than payments: a teacher is owed for
     students who actually showed up and were taught, regardless of whether
@@ -3882,9 +4066,8 @@ def compute_teacher_earnings(tenant_id, request):
 
     # Per-session price for each course, computed once.
     price_per_session = {}
-    for c in Course.objects.filter(id__in=course_ids).values('id', 'price', 'duration_weeks'):
-        weeks = c['duration_weeks'] or 1
-        price_per_session[c['id']] = float(c['price']) / weeks if weeks > 0 else float(c['price'])
+    for c in Course.objects.filter(id__in=course_ids).values('id', 'price', 'pricing_type', 'sessions_count'):
+        price_per_session[c['id']] = course_per_session_price(c['price'], c['pricing_type'], c['sessions_count'])
 
     present_count = {}
     base_value = {}

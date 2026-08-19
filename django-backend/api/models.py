@@ -221,6 +221,10 @@ class Teacher(models.Model):
     # basis for the Teacher payments page. 0 means nothing is owed.
     payment_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     photo_url = models.CharField(max_length=255, null=True, blank=True)
+    # Optional HR documents — image or PDF, viewable/downloadable by the
+    # tenant only (not shown on the public website, unlike photo_url).
+    cv_url = models.CharField(max_length=255, null=True, blank=True)
+    diploma_url = models.CharField(max_length=255, null=True, blank=True)
     # Whether this teacher appears on the tenant's public website — same
     # semantics as Course.show_on_enrollment.
     show_on_website = models.BooleanField(default=False)
@@ -323,7 +327,20 @@ class Course(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(null=True, blank=True)
     category = models.CharField(max_length=255, null=True, blank=True)
-    duration_weeks = models.IntegerField(default=12)
+    PRICING_TYPE_CHOICES = [
+        # price is already a per-session rate.
+        ('per_session', 'per_session'),
+        # price is a recurring monthly rate; sessions_count holds how many
+        # sessions happen per month, to derive a per-session value.
+        ('per_month', 'per_month'),
+        # price is the total for the whole course; sessions_count holds the
+        # total number of sessions it's spread across.
+        ('fixed_sessions', 'fixed_sessions'),
+    ]
+    pricing_type = models.CharField(max_length=20, choices=PRICING_TYPE_CHOICES, default='fixed_sessions')
+    # Meaning depends on pricing_type — see choices above. Unused (null) for
+    # per_session, since there's nothing to divide by there.
+    sessions_count = models.IntegerField(null=True, blank=True)
     price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     max_students = models.IntegerField(default=20)
     color = models.CharField(max_length=16, default='#E53935')
@@ -437,6 +454,18 @@ class Attendance(models.Model):
     ]
     status = models.CharField(max_length=50, choices=STATUS_CHOICES)
     note = models.CharField(max_length=255, null=True, blank=True)
+    # Photo/PDF of the excuse (doctor's note, etc.) for an 'excused' absence —
+    # unused for any other status.
+    excuse_document_url = models.CharField(max_length=255, null=True, blank=True)
+    RECOVERY_CHOICES = [
+        # Default for present/absent/late — recovery doesn't apply to them.
+        ('not_applicable', 'not_applicable'),
+        # Set automatically when status becomes 'excused'; the tenant flips
+        # this by hand once the student has made up the missed session.
+        ('needs_recovery', 'needs_recovery'),
+        ('recovered', 'recovered'),
+    ]
+    recovery_status = models.CharField(max_length=20, choices=RECOVERY_CHOICES, default='not_applicable')
     marked_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, db_column='marked_by', related_name='marked_attendance')
     marked_at = models.DateTimeField(auto_now_add=True)
 

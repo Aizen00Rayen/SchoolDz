@@ -37,7 +37,7 @@ function cleanPayload(obj) {
 export default function CrudPanel({
   moduleKey, endpoint, title, subtitle, columns, defaultForm, renderForm,
   emptyIcon: EmptyIcon, canEdit = true, canCreate = true, extraActions,
-  rowClassName, renderRowActions,
+  rowClassName, renderRowActions, extraParams, filterBar,
 }) {
   const { t } = useI18n();
   const confirm = useConfirm();
@@ -48,8 +48,8 @@ export default function CrudPanel({
   const [form, setForm] = useState(defaultForm || {});
 
   const { data, isLoading } = useQuery({
-    queryKey: [moduleKey, q],
-    queryFn: async () => (await api.get(endpoint, { params: q ? { q } : {} })).data,
+    queryKey: [moduleKey, q, extraParams],
+    queryFn: async () => (await api.get(endpoint, { params: { ...(q ? { q } : {}), ...(extraParams || {}) } })).data,
   });
 
   const createMut = useMutation({
@@ -138,6 +138,7 @@ export default function CrudPanel({
             data-testid={`${moduleKey}-search-input`}
           />
         </div>
+        {filterBar}
         <div className="text-xs text-muted-foreground font-mono">
           {data?.total ?? 0} {t(`menu.${moduleKey}`)}
         </div>

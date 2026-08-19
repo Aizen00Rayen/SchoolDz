@@ -434,7 +434,11 @@ export default function EnrollPage() {
                     </div>
                     {c.description && <p className="text-xs text-muted-foreground mb-2">{c.description}</p>}
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>{c.duration_weeks} أسابيع</span>
+                      <span>
+                        {c.pricing_type === "per_session" ? "لكل حصة"
+                          : c.pricing_type === "per_month" ? "شهرياً"
+                          : `${c.sessions_count || ""} حصة`}
+                      </span>
                       <span className="font-mono font-semibold text-foreground">
                         {Number(c.price).toLocaleString()} {school.currency}
                       </span>

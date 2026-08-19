@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import CrudPanel, { StatusPill } from "./CrudPanel";
@@ -14,6 +15,12 @@ import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/permissions";
 
 const downloadInvoice = (paymentId) => openInvoicePdf(paymentId).catch((e) => toast.error(extractError(e)));
+
+const BALANCE_CLS = {
+  owes: "text-destructive",
+  overpaid: "text-info",
+  settled: "",
+};
 
 const DEFAULT_FORM = {
   student_id: "", course_id: "", kind: "monthly",
@@ -36,8 +43,14 @@ export default function PaymentsPage() {
     queryKey: ["payments-overdue"],
     queryFn: async () => (await api.get("/payments/overdue")).data,
   });
+  const { data: balances } = useQuery({
+    queryKey: ["payments-balances"],
+    queryFn: async () => (await api.get("/payments/balances")).data,
+  });
+  const [balanceFilter, setBalanceFilter] = useState("all");
   const stuMap = Object.fromEntries((students?.items || []).map((s) => [s.id, s]));
   const courseMap = Object.fromEntries((courses?.items || []).map((c) => [c.id, c]));
+  const balanceMap = Object.fromEntries((balances?.items || []).map((b) => [b.student_id, b]));
 
   return (
     <div>
@@ -65,6 +78,20 @@ export default function PaymentsPage() {
       defaultForm={DEFAULT_FORM}
       canEdit={canEdit}
       canCreate={canEdit}
+      extraParams={balanceFilter !== "all" ? { balance_status: balanceFilter } : undefined}
+      filterBar={(
+        <Select value={balanceFilter} onValueChange={setBalanceFilter}>
+          <SelectTrigger className="bg-background h-9 w-44" data-testid="payments-balance-filter">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="bg-popover">
+            <SelectItem value="all">{t("payments.balance_all")}</SelectItem>
+            <SelectItem value="owes">{t("payments.balance_owes")}</SelectItem>
+            <SelectItem value="overpaid">{t("payments.balance_overpaid")}</SelectItem>
+            <SelectItem value="settled">{t("payments.balance_settled")}</SelectItem>
+          </SelectContent>
+        </Select>
+      )}
       columns={[
         {
           key: "invoice_number", label: t("field.invoice"),
@@ -89,7 +116,13 @@ export default function PaymentsPage() {
           key: "student", label: t("field.student"),
           render: (r) => {
             const s = stuMap[r.student_id];
-            return s ? `${s.first_name} ${s.last_name}` : "—";
+            const b = balanceMap[r.student_id];
+            if (!s) return "—";
+            return (
+              <span className={`font-medium ${b ? BALANCE_CLS[b.status] : ""}`} title={b ? t(`payments.balance_${b.status}`) : undefined}>
+                {s.first_name} {s.last_name}
+              </span>
+            );
           },
         },
         {

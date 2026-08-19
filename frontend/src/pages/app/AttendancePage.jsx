@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ClipboardCheck, Save, Search } from "lucide-react";
+import { CheckCircle2, ClipboardCheck, ExternalLink, FileText, Loader2, RotateCcw, Save, Search, Upload } from "lucide-react";
 
-import { api, extractError } from "@/lib/api";
+import { api, extractError, resolveFileUrl } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
 import { APPUI } from "@/constants/testIds";
@@ -21,6 +21,74 @@ const STATUS_KEYS = [
   { key: "excused", cls: "bg-info text-info-foreground" },
   { key: "absent", cls: "bg-destructive text-destructive-foreground" },
 ];
+
+/** Excuse document upload + recovery toggle for one excused student — only
+ * usable once that student's mark has actually been saved (needs a real
+ * Attendance id to upload/toggle against), which is why `record` can be
+ * undefined right after picking "excused" but before hitting Save. */
+function ExcuseCell({ record, canEdit, onChanged }) {
+  const { t } = useI18n();
+  const inputRef = useRef(null);
+
+  const uploadMut = useMutation({
+    mutationFn: (file) => {
+      const body = new FormData();
+      body.append("file", file);
+      return api.post(`/attendance/${record.id}/excuse-document`, body).then((r) => r.data);
+    },
+    onSuccess: () => { toast.success(t("toast.updated")); onChanged(); },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
+  const recoveryMut = useMutation({
+    mutationFn: (recovery_status) => api.post(`/attendance/${record.id}/recovery`, { recovery_status }).then((r) => r.data),
+    onSuccess: () => { toast.success(t("toast.updated")); onChanged(); },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
+  const onFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) uploadMut.mutate(file);
+  };
+
+  if (!record?.id) {
+    return <span className="text-[11px] text-muted-foreground">{t("attendance.save_before_excuse")}</span>;
+  }
+
+  const recovered = record.recovery_status === "recovered";
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      {record.excuse_document_url ? (
+        <a
+          href={resolveFileUrl(record.excuse_document_url)} target="_blank" rel="noreferrer"
+          className="flex items-center gap-1 text-[11px] text-accent hover:underline"
+        >
+          <FileText className="w-3 h-3" /> {t("attendance.view_excuse")} <ExternalLink className="w-2.5 h-2.5" />
+        </a>
+      ) : null}
+      {canEdit && (
+        <>
+          <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" className="hidden" onChange={onFileSelect} />
+          <Button type="button" variant="outline" size="sm" className="h-6 px-2 text-[11px]" disabled={uploadMut.isPending} onClick={() => inputRef.current?.click()}>
+            {uploadMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3 me-1" />}
+            {record.excuse_document_url ? t("actions.replace") : t("attendance.upload_excuse")}
+          </Button>
+          <Button
+            type="button" variant="outline" size="sm"
+            className={`h-6 px-2 text-[11px] ${recovered ? "text-success border-success/40" : "text-warning border-warning/40"}`}
+            disabled={recoveryMut.isPending}
+            onClick={() => recoveryMut.mutate(recovered ? "needs_recovery" : "recovered")}
+          >
+            {recoveryMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : recovered ? <CheckCircle2 className="w-3 h-3 me-1" /> : <RotateCcw className="w-3 h-3 me-1" />}
+            {recovered ? t("attendance.recovered") : t("attendance.needs_recovery")}
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
 
 export default function AttendancePage() {
   const { t } = useI18n();
@@ -86,6 +154,11 @@ export default function AttendancePage() {
     },
     onError: (e) => toast.error(extractError(e)),
   });
+
+  const attendanceByStudent = useMemo(
+    () => Object.fromEntries((existing?.items || []).map((a) => [a.student_id, a])),
+    [existing],
+  );
 
   const enrolled = (selectedGroup?.student_ids || []).map((id) => studentMap[id]).filter(Boolean);
   const visibleEnrolled = useMemo(() => {
@@ -172,6 +245,7 @@ export default function AttendancePage() {
                 <th className="text-start px-4 py-2.5 text-xs uppercase tracking-widest text-muted-foreground font-medium">{t("field.student")}</th>
                 <th className="text-start px-4 py-2.5 text-xs uppercase tracking-widest text-muted-foreground font-medium">{t("field.code")}</th>
                 <th className="text-start px-4 py-2.5 text-xs uppercase tracking-widest text-muted-foreground font-medium">{t("field.mark")}</th>
+                <th className="text-start px-4 py-2.5 text-xs uppercase tracking-widest text-muted-foreground font-medium">{t("attendance.excuse")}</th>
               </tr>
             </thead>
             <tbody>
@@ -199,6 +273,15 @@ export default function AttendancePage() {
                         );
                       })}
                     </div>
+                  </td>
+                  <td className="px-4 py-2">
+                    {marks[s.id] === "excused" && (
+                      <ExcuseCell
+                        record={attendanceByStudent[s.id]}
+                        canEdit={canEdit}
+                        onChanged={() => qc.invalidateQueries({ queryKey: ["attendance", sessionId] })}
+                      />
+                    )}
                   </td>
                 </tr>
               ))}
