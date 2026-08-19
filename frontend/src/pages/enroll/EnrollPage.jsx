@@ -491,8 +491,8 @@ export default function EnrollPage() {
                 <Field label="البريد الإلكتروني" required>
                   <Input type="email" value={form.guardian_email} onChange={(e) => setForm((f) => ({ ...f, guardian_email: e.target.value }))} required dir="ltr" />
                 </Field>
-                <Field label="الهاتف">
-                  <Input value={form.guardian_phone} onChange={(e) => setForm((f) => ({ ...f, guardian_phone: e.target.value }))} dir="ltr" />
+                <Field label="الهاتف" required>
+                  <Input value={form.guardian_phone} onChange={(e) => setForm((f) => ({ ...f, guardian_phone: e.target.value }))} required dir="ltr" />
                 </Field>
               </div>
 

@@ -811,7 +811,7 @@ def public_school_enroll(request, slug):
     group_id = data.get('group_id')
     payment_method = data.get('payment_method')  # 'online' | 'office'
 
-    if not all([guardian_name, guardian_email, password, student_first, student_last, group_id]):
+    if not all([guardian_name, guardian_email, guardian_phone, password, student_first, student_last, group_id]):
         return Response({'error': 'All fields are required'}, status=status.HTTP_400_BAD_REQUEST)
     if payment_method not in ['online', 'office']:
         return Response({'error': 'Choose a payment method'}, status=status.HTTP_400_BAD_REQUEST)
