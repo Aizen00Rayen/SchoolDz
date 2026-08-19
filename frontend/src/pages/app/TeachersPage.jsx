@@ -12,7 +12,7 @@ import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
 
 const DEFAULT_FORM = {
-  first_name: "", last_name: "", email: "", phone: "", subjects: [],
+  first_name: "", last_name: "", first_name_latin: "", last_name_latin: "", email: "", phone: "", subjects: [],
   status: "active",
 };
 
@@ -97,6 +97,12 @@ export default function TeachersPage() {
           </Field>
           <Field label={t("field.last_name")} required>
             <Input value={form.last_name || ""} onChange={(e) => setForm({ ...form, last_name: e.target.value })} required />
+          </Field>
+          <Field label={t("field.first_name_latin")}>
+            <Input value={form.first_name_latin || ""} onChange={(e) => setForm({ ...form, first_name_latin: e.target.value })} dir="ltr" />
+          </Field>
+          <Field label={t("field.last_name_latin")}>
+            <Input value={form.last_name_latin || ""} onChange={(e) => setForm({ ...form, last_name_latin: e.target.value })} dir="ltr" />
           </Field>
           <Field label={t("field.email")}>
             <Input type="email" value={form.email || ""} onChange={(e) => setForm({ ...form, email: e.target.value })} />

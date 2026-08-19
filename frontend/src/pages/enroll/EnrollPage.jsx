@@ -148,7 +148,7 @@ export default function EnrollPage() {
         window.location.href = data.checkout_url;
         return;
       }
-      toast.success(`${data.student.first_name} is enrolled!`);
+      toast.success(`تم تسجيل ${data.student.first_name} بنجاح!`);
       nav("/portal", { replace: true });
     },
     onError: (e) => toast.error(extractError(e)),
@@ -157,7 +157,7 @@ export default function EnrollPage() {
   const onSubmit = (e) => {
     e.preventDefault();
     if (!effectiveGroupId) {
-      toast.error("Choose a course group first.");
+      toast.error("اختر مجموعة الدورة أولاً.");
       return;
     }
     enrollMut.mutate({ ...form, group_id: effectiveGroupId });
@@ -165,7 +165,7 @@ export default function EnrollPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen grid place-items-center bg-background">
+      <div dir="rtl" className="min-h-screen grid place-items-center bg-background">
         <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
       </div>
     );
@@ -173,10 +173,10 @@ export default function EnrollPage() {
 
   if (isError || !school) {
     return (
-      <div className="min-h-screen grid place-items-center bg-background text-center px-6">
+      <div dir="rtl" className="min-h-screen grid place-items-center bg-background text-center px-6">
         <div>
-          <h1 className="text-2xl font-bold mb-2">School not found</h1>
-          <p className="text-muted-foreground">Double-check the link you were given.</p>
+          <h1 className="text-2xl font-bold mb-2">المدرسة غير موجودة</h1>
+          <p className="text-muted-foreground">تحقق من الرابط الذي تم تزويدك به.</p>
         </div>
       </div>
     );
@@ -186,7 +186,7 @@ export default function EnrollPage() {
   const navLightbox = (delta) => setLightboxIndex((i) => (i == null ? i : (i + delta + gallery.length) % gallery.length));
 
   return (
-    <div className="min-h-screen bg-background overflow-x-hidden">
+    <div dir="rtl" className="min-h-screen bg-background overflow-x-hidden">
       <style>{`
         @keyframes enrollBlobFloat {
           0%, 100% { transform: translate(0, 0) scale(1); }
@@ -236,7 +236,7 @@ export default function EnrollPage() {
                 className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.2em] px-3 py-1 rounded-full mb-4"
                 style={{ color: accent, backgroundColor: `${accent}1a` }}
               >
-                <Sparkles className="w-3 h-3" /> Enrollment open
+                <Sparkles className="w-3 h-3" /> التسجيل مفتوح
               </span>
               <h1 className="font-display text-4xl md:text-6xl font-bold tracking-tight">{school.name}</h1>
             </motion.div>
@@ -254,7 +254,7 @@ export default function EnrollPage() {
       {/* Gallery — hover zoom + click-to-enlarge lightbox */}
       {gallery.length > 0 && (
         <div className="max-w-5xl mx-auto px-6 pt-14">
-          <SectionHeading eyebrow="Gallery" title="A look inside" accent={accent} />
+          <SectionHeading eyebrow="معرض الصور" title="لمحة من الداخل" accent={accent} />
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {gallery.map((p, i) => (
               <motion.button
@@ -286,7 +286,7 @@ export default function EnrollPage() {
       {/* Teachers */}
       {teachers.length > 0 && (
         <div className="max-w-5xl mx-auto px-6 pt-14">
-          <SectionHeading eyebrow="Meet the team" title="Learn from the best" accent={accent} />
+          <SectionHeading eyebrow="تعرف على الفريق" title="تعلم مع الأفضل" accent={accent} />
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
             {teachers.map((tch, i) => (
               <motion.div
@@ -325,7 +325,7 @@ export default function EnrollPage() {
       {/* Location, contact, social — with a real embedded map */}
       {hasLocation && (
         <div className="max-w-5xl mx-auto px-6 pt-14">
-          <SectionHeading eyebrow="Find us" title="Visit or reach out" accent={accent} />
+          <SectionHeading eyebrow="موقعنا" title="زورونا أو تواصلوا معنا" accent={accent} />
           <motion.div {...fadeUp} className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
             <div className="space-y-4">
               {school.address && (
@@ -337,7 +337,7 @@ export default function EnrollPage() {
                     <div className="text-sm font-medium">{school.address}</div>
                     {school.map_url && (
                       <a href={school.map_url} target="_blank" rel="noreferrer" className="text-xs hover:underline" style={{ color: accent }}>
-                        Get directions
+                        احصل على الاتجاهات
                       </a>
                     )}
                   </div>
@@ -372,7 +372,7 @@ export default function EnrollPage() {
             {mapEmbedSrc && (
               <div className="rounded-xl overflow-hidden border border-border h-64">
                 <iframe
-                  title="School location"
+                  title="موقع المدرسة"
                   src={mapEmbedSrc}
                   className="w-full h-full border-0"
                   loading="lazy"
@@ -393,7 +393,7 @@ export default function EnrollPage() {
               className="text-white shadow-lg hover:shadow-xl transition-shadow"
               style={{ backgroundColor: accent }}
             >
-              Enroll now
+              سجل الآن
             </Button>
           </motion.div>
         </div>
@@ -403,10 +403,10 @@ export default function EnrollPage() {
         {/* Course picker */}
         <motion.div {...fadeUp} className="lg:col-span-2">
           <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-4">
-            Choose a course
+            اختر الدورة
           </h2>
           {courses.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No courses are open for enrollment right now — please contact the school directly.</p>
+            <p className="text-sm text-muted-foreground">لا توجد دورات مفتوحة للتسجيل حالياً — يرجى التواصل مع المدرسة مباشرة.</p>
           ) : (
             <div className="space-y-3">
               {courses.map((c) => {
@@ -434,7 +434,7 @@ export default function EnrollPage() {
                     </div>
                     {c.description && <p className="text-xs text-muted-foreground mb-2">{c.description}</p>}
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>{c.duration_weeks} weeks</span>
+                      <span>{c.duration_weeks} أسابيع</span>
                       <span className="font-mono font-semibold text-foreground">
                         {Number(c.price).toLocaleString()} {school.currency}
                       </span>
@@ -442,7 +442,7 @@ export default function EnrollPage() {
                     {(scarce || allFull) && (
                       <div className={`flex items-center gap-1.5 text-xs mt-1.5 font-medium ${allFull ? "text-muted-foreground" : "text-destructive"}`}>
                         <Users className="w-3 h-3" />
-                        {allFull ? "Full" : `Only ${totalSeats} place${totalSeats > 1 ? "s" : ""} left!`}
+                        {allFull ? "مكتمل" : `تبقى ${totalSeats} مقعد فقط!`}
                       </div>
                     )}
                   </button>
@@ -456,14 +456,14 @@ export default function EnrollPage() {
         <motion.div {...fadeUp} className="lg:col-span-3">
           {selectedCourse && (
             <form onSubmit={onSubmit} className="space-y-5 surface-card p-6">
-              <Field label="Group" required>
+              <Field label="المجموعة" required>
                 <Select value={effectiveGroupId} onValueChange={(v) => setForm((f) => ({ ...f, group_id: v }))}>
-                  <SelectTrigger className="bg-background"><SelectValue placeholder="Pick a group" /></SelectTrigger>
+                  <SelectTrigger className="bg-background"><SelectValue placeholder="اختر مجموعة" /></SelectTrigger>
                   <SelectContent className="bg-popover">
                     {selectedCourse.groups.map((g) => (
                       <SelectItem key={g.id} value={g.id} disabled={g.seats_left === 0}>
                         {g.name}{g.schedule ? ` · ${g.schedule}` : ""}
-                        {g.seats_left === 0 ? " — Full" : g.seats_left_is_low ? ` — only ${g.seats_left} left!` : ""}
+                        {g.seats_left === 0 ? " — مكتمل" : g.seats_left_is_low ? ` — تبقى ${g.seats_left} فقط!` : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -471,47 +471,47 @@ export default function EnrollPage() {
               </Field>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Field label="Student first name" required>
+                <Field label="الاسم الأول للطالب" required>
                   <Input value={form.student_first_name} onChange={(e) => setForm((f) => ({ ...f, student_first_name: e.target.value }))} required />
                 </Field>
-                <Field label="Student last name" required>
+                <Field label="لقب الطالب" required>
                   <Input value={form.student_last_name} onChange={(e) => setForm((f) => ({ ...f, student_last_name: e.target.value }))} required />
                 </Field>
               </div>
 
-              <Field label="Your name (parent/guardian)" required>
+              <Field label="اسمك (ولي الأمر)" required>
                 <Input value={form.guardian_name} onChange={(e) => setForm((f) => ({ ...f, guardian_name: e.target.value }))} required />
               </Field>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Field label="Email" required>
-                  <Input type="email" value={form.guardian_email} onChange={(e) => setForm((f) => ({ ...f, guardian_email: e.target.value }))} required />
+                <Field label="البريد الإلكتروني" required>
+                  <Input type="email" value={form.guardian_email} onChange={(e) => setForm((f) => ({ ...f, guardian_email: e.target.value }))} required dir="ltr" />
                 </Field>
-                <Field label="Phone">
-                  <Input value={form.guardian_phone} onChange={(e) => setForm((f) => ({ ...f, guardian_phone: e.target.value }))} />
+                <Field label="الهاتف">
+                  <Input value={form.guardian_phone} onChange={(e) => setForm((f) => ({ ...f, guardian_phone: e.target.value }))} dir="ltr" />
                 </Field>
               </div>
 
-              <Field label="Choose a password" required>
+              <Field label="اختر كلمة مرور" required>
                 <Input
                   type="password" minLength={8} value={form.password}
                   onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-                  required placeholder="At least 8 characters"
+                  required placeholder="8 أحرف على الأقل" dir="ltr"
                 />
               </Field>
               <p className="text-xs text-muted-foreground -mt-3">
-                This becomes your login for the parent portal, where you'll see attendance, grades, and payments.
+                ستكون هذه بيانات دخولك إلى بوابة الأولياء، حيث يمكنك متابعة الحضور والنتائج والمدفوعات.
               </p>
 
-              <Field label="How would you like to pay?" required>
+              <Field label="كيف تودّ الدفع؟" required>
                 <div className="grid grid-cols-2 gap-3">
                   <label className={`flex items-center gap-2 rounded-lg border p-3 cursor-pointer text-sm ${form.payment_method === "online" ? "border-foreground" : "border-border"}`}>
                     <input type="radio" name="payment_method" checked={form.payment_method === "online"} onChange={() => setForm((f) => ({ ...f, payment_method: "online" }))} />
-                    Pay online now
+                    الدفع الآن عبر الإنترنت
                   </label>
                   <label className={`flex items-center gap-2 rounded-lg border p-3 cursor-pointer text-sm ${form.payment_method === "office" ? "border-foreground" : "border-border"}`}>
                     <input type="radio" name="payment_method" checked={form.payment_method === "office"} onChange={() => setForm((f) => ({ ...f, payment_method: "office" }))} />
-                    Pay at the office
+                    الدفع في المكتب
                   </label>
                 </div>
               </Field>
@@ -520,9 +520,9 @@ export default function EnrollPage() {
                 {enrollMut.isPending ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : form.payment_method === "online" ? (
-                  <>Continue to payment</>
+                  <>المتابعة إلى الدفع</>
                 ) : (
-                  <><Check className="w-4 h-4 me-2" /> Enroll</>
+                  <><Check className="w-4 h-4 me-2" /> تسجيل</>
                 )}
               </Button>
             </form>

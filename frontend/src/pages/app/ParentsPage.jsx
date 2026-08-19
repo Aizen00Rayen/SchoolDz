@@ -14,9 +14,18 @@ import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
 
 const DEFAULT_FORM = {
-  name: "", email: "", phone: "", address: "", occupation: "", relationship: "father",
+  name: "", name_latin: "", email: "", phone: "", address: "", occupation: "", relationship: "father",
   emergency_contact: "", id_card_number: "", student_ids: [],
 };
+
+/** Shows the student's Latin-script name alongside the Arabic one when set,
+ * so a school that enters names in Arabic can still recognize the right
+ * student in a search result or selection chip. */
+function studentLabel(s) {
+  const latin = [s.first_name_latin, s.last_name_latin].filter(Boolean).join(" ");
+  const base = `${s.first_name} ${s.last_name}`;
+  return latin ? `${base} (${latin})` : base;
+}
 
 /** Search-by-name-or-code picker — a tenant with thousands of students can't
  * reasonably render them all as a checkbox list (that's what this replaced).
@@ -55,7 +64,7 @@ export function StudentPicker({ selected, onChange, max }) {
       const { data } = await api.get("/students", { params: { ids: missingIds.join(",") } });
       setLabels((prev) => {
         const next = { ...prev };
-        for (const s of data.items) next[s.id] = `${s.first_name} ${s.last_name}`;
+        for (const s of data.items) next[s.id] = studentLabel(s);
         return next;
       });
       return data;
@@ -67,7 +76,7 @@ export function StudentPicker({ selected, onChange, max }) {
     if (results?.items?.length) {
       setLabels((prev) => {
         const next = { ...prev };
-        for (const s of results.items) next[s.id] = `${s.first_name} ${s.last_name}`;
+        for (const s of results.items) next[s.id] = studentLabel(s);
         return next;
       });
     }
@@ -114,13 +123,13 @@ export function StudentPicker({ selected, onChange, max }) {
                   key={s.id}
                   type="button"
                   disabled={disabled}
-                  onClick={() => toggle(s.id, `${s.first_name} ${s.last_name}`)}
+                  onClick={() => toggle(s.id, studentLabel(s))}
                   className={`w-full flex items-center gap-2 px-2 py-1.5 text-sm text-start ${
                     checked ? "bg-accent/10" : ""
                   } ${disabled ? "opacity-40 cursor-not-allowed" : "hover:bg-muted/60 cursor-pointer"}`}
                   data-testid={`student-picker-result-${s.id}`}
                 >
-                  <span className={checked ? "font-medium" : ""}>{s.first_name} {s.last_name}</span>
+                  <span className={checked ? "font-medium" : ""}>{studentLabel(s)}</span>
                   <span className="text-[11px] font-mono text-muted-foreground ms-auto">{s.student_code}</span>
                 </button>
               );
@@ -179,6 +188,9 @@ export default function ParentsPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label={t("field.full_name")} required>
             <Input value={form.name || ""} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+          </Field>
+          <Field label={t("field.name_latin")}>
+            <Input value={form.name_latin || ""} onChange={(e) => setForm({ ...form, name_latin: e.target.value })} dir="ltr" />
           </Field>
           <Field label={t("field.relationship")}>
             <Select value={form.relationship || "father"} onValueChange={(v) => setForm({ ...form, relationship: v })}>

@@ -177,6 +177,10 @@ class Guardian(models.Model):
     id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='guardians')
     name = models.CharField(max_length=255)
+    # Latin-script transliteration (French/English) of `name` — most schools
+    # enter names in Arabic, but paperwork, IDs, and cross-referencing often
+    # need the Latin spelling too. Search matches either.
+    name_latin = models.CharField(max_length=255, null=True, blank=True)
     email = models.EmailField(null=True, blank=True)
     phone = models.CharField(max_length=255, null=True, blank=True)
     address = models.CharField(max_length=255, null=True, blank=True)
@@ -204,6 +208,9 @@ class Teacher(models.Model):
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, db_column='user_id', related_name='teachers')
     first_name = models.CharField(max_length=255)
     last_name = models.CharField(max_length=255)
+    # Latin-script transliteration of first/last name — see Guardian.name_latin.
+    first_name_latin = models.CharField(max_length=255, null=True, blank=True)
+    last_name_latin = models.CharField(max_length=255, null=True, blank=True)
     email = models.EmailField(null=True, blank=True)
     phone = models.CharField(max_length=255, null=True, blank=True)
     address = models.CharField(max_length=255, null=True, blank=True)
@@ -237,6 +244,9 @@ class Student(models.Model):
     parent = models.ForeignKey(Guardian, on_delete=models.SET_NULL, null=True, blank=True, db_column='parent_id', related_name='students')
     first_name = models.CharField(max_length=255)
     last_name = models.CharField(max_length=255)
+    # Latin-script transliteration of first/last name — see Guardian.name_latin.
+    first_name_latin = models.CharField(max_length=255, null=True, blank=True)
+    last_name_latin = models.CharField(max_length=255, null=True, blank=True)
     GENDER_CHOICES = [
         ('male', 'male'),
         ('female', 'female'),

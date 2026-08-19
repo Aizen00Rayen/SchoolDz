@@ -2570,7 +2570,7 @@ class GuardianViewSet(TenantScopedViewSet):
         q = request.GET.get('q')
         if q:
             queryset = queryset.filter(
-                Q(name__icontains=q) | Q(email__icontains=q) | Q(phone__icontains=q)
+                Q(name__icontains=q) | Q(name_latin__icontains=q) | Q(email__icontains=q) | Q(phone__icontains=q)
             )
         queryset = queryset.prefetch_related('students').order_by('-created_at')[:500]
         serializer = self.get_serializer(queryset, many=True)
@@ -2579,9 +2579,9 @@ class GuardianViewSet(TenantScopedViewSet):
     @action(detail=False, methods=['get'])
     def export(self, request):
         queryset = self.filter_queryset(self.get_queryset()).prefetch_related('students').order_by('-created_at')
-        headers = ['Name', 'Email', 'Phone', 'Address', 'Occupation', 'Relationship', 'Emergency Contact', 'Students']
+        headers = ['Name', 'Name (Latin)', 'Email', 'Phone', 'Address', 'Occupation', 'Relationship', 'Emergency Contact', 'Students']
         rows = [[
-            g.name, g.email or '', g.phone or '', g.address or '', g.occupation or '', g.relationship,
+            g.name, g.name_latin or '', g.email or '', g.phone or '', g.address or '', g.occupation or '', g.relationship,
             g.emergency_contact or '', ', '.join(f"{s.first_name} {s.last_name}" for s in g.students.all()),
         ] for g in queryset]
         return export_rows(headers, rows, 'parents', request.GET.get('type'))
@@ -2675,7 +2675,7 @@ class TeacherViewSet(TenantScopedViewSet):
         queryset = self.filter_queryset(self.get_queryset())
         q = request.GET.get('q')
         if q:
-            queryset = queryset.filter(name_search_q(q, 'first_name', 'last_name', 'email'))
+            queryset = queryset.filter(name_search_q(q, 'first_name', 'last_name', 'first_name_latin', 'last_name_latin', 'email'))
         queryset = queryset.order_by('-created_at')[:500]
         serializer = self.get_serializer(queryset, many=True)
         return Response({'items': serializer.data, 'total': len(serializer.data)})
@@ -2683,9 +2683,9 @@ class TeacherViewSet(TenantScopedViewSet):
     @action(detail=False, methods=['get'])
     def export(self, request):
         queryset = self.filter_queryset(self.get_queryset()).order_by('-created_at')
-        headers = ['First Name', 'Last Name', 'Email', 'Phone', 'Address', 'Subjects', 'Hourly Rate', 'Monthly Salary', 'Status', 'Hire Date']
+        headers = ['First Name', 'Last Name', 'First Name (Latin)', 'Last Name (Latin)', 'Email', 'Phone', 'Address', 'Subjects', 'Hourly Rate', 'Monthly Salary', 'Status', 'Hire Date']
         rows = [[
-            t.first_name, t.last_name, t.email or '', t.phone or '', t.address or '',
+            t.first_name, t.last_name, t.first_name_latin or '', t.last_name_latin or '', t.email or '', t.phone or '', t.address or '',
             ', '.join(t.subjects) if t.subjects else '', t.hourly_rate, t.monthly_salary, t.status,
             t.hire_date.isoformat() if t.hire_date else '',
         ] for t in queryset]
@@ -2803,7 +2803,7 @@ class StudentViewSet(TenantScopedViewSet):
             queryset = queryset.filter(status=status_val)
         q = request.GET.get('q')
         if q:
-            queryset = queryset.filter(name_search_q(q, 'first_name', 'last_name', 'email', 'phone', 'student_code'))
+            queryset = queryset.filter(name_search_q(q, 'first_name', 'last_name', 'first_name_latin', 'last_name_latin', 'email', 'phone', 'student_code'))
         ids_param = request.GET.get('ids')
         if ids_param:
             queryset = queryset.filter(id__in=[i for i in ids_param.split(',') if i])
@@ -2822,13 +2822,13 @@ class StudentViewSet(TenantScopedViewSet):
     def export(self, request):
         queryset = self.filter_queryset(self.get_queryset()).select_related('parent').order_by('-created_at')
         headers = [
-            'Student Code', 'First Name', 'Last Name', 'Gender', 'School Level', 'School Year', 'Specialty',
+            'Student Code', 'First Name', 'Last Name', 'First Name (Latin)', 'Last Name (Latin)', 'Gender', 'School Level', 'School Year', 'Specialty',
             'Insurance', 'Health Condition', 'Blood Type',
             'Birth Date', 'Email', 'Phone', 'Address',
             'Emergency Contact', 'Status', 'Parent Name', 'Parent Email', 'Parent Phone', 'Parent ID Card Number', 'Enrollment Date',
         ]
         rows = [[
-            s.student_code or '', s.first_name, s.last_name, s.gender or '',
+            s.student_code or '', s.first_name, s.last_name, s.first_name_latin or '', s.last_name_latin or '', s.gender or '',
             s.school_level or '', s.school_year or '', s.specialty or '',
             s.insurance_status or '', s.health_condition or '', s.blood_type or '',
             s.birth_date.isoformat() if s.birth_date else '', s.email or '', s.phone or '', s.address or '',

@@ -22,6 +22,8 @@ const BLOOD_TYPES = ["O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"];
 const DEFAULT_FORM = {
   first_name: "",
   last_name: "",
+  first_name_latin: "",
+  last_name_latin: "",
   gender: "male",
   school_level: "",
   school_year: "",
@@ -221,6 +223,12 @@ export default function StudentsPage() {
           </Field>
           <Field label={t("field.last_name")} required>
             <Input value={form.last_name || ""} onChange={(e) => setForm({ ...form, last_name: e.target.value })} required data-testid="student-form-lastname" />
+          </Field>
+          <Field label={t("field.first_name_latin")}>
+            <Input value={form.first_name_latin || ""} onChange={(e) => setForm({ ...form, first_name_latin: e.target.value })} dir="ltr" />
+          </Field>
+          <Field label={t("field.last_name_latin")}>
+            <Input value={form.last_name_latin || ""} onChange={(e) => setForm({ ...form, last_name_latin: e.target.value })} dir="ltr" />
           </Field>
           <Field label={t("field.gender")}>
             <Select value={form.gender || "male"} onValueChange={(v) => setForm({ ...form, gender: v })}>

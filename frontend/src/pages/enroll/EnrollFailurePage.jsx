@@ -4,14 +4,14 @@ import { Button } from "@/components/ui/button";
 
 export default function EnrollFailurePage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-6">
+    <div dir="rtl" className="min-h-screen flex items-center justify-center bg-background px-6">
       <div className="max-w-sm text-center">
         <XCircle className="w-10 h-10 mx-auto mb-4 text-destructive" />
-        <p className="font-semibold mb-1">Payment didn't go through</p>
+        <p className="font-semibold mb-1">لم تتم عملية الدفع</p>
         <p className="text-sm text-muted-foreground mb-4">
-          No charge was made. Your enrollment was still saved — you can pay from your parent portal, or ask the school about paying at the office instead.
+          لم يتم أي خصم. تسجيلك محفوظ رغم ذلك — يمكنك الدفع من بوابة الأولياء، أو الاستفسار من المدرسة حول الدفع في المكتب.
         </p>
-        <Link to="/portal"><Button variant="outline">Go to portal</Button></Link>
+        <Link to="/portal"><Button variant="outline">الذهاب إلى البوابة</Button></Link>
       </div>
     </div>
   );
