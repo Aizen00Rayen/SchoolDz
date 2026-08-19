@@ -195,6 +195,21 @@ class Guardian(models.Model):
     emergency_contact = models.CharField(max_length=255, null=True, blank=True)
     id_card_number = models.CharField(max_length=50, null=True, blank=True)
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, db_column='user_id', related_name='guardians')
+    SOURCE_CHOICES = [
+        ('staff', 'staff'),
+        ('public', 'public'),
+    ]
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default='staff')
+    # Only meaningful when source='public' — mirrors Student.approval_status.
+    # A public enrollment's guardian and student are two halves of one
+    # application, so approving/rejecting either one cascades to the other
+    # (see StudentViewSet.approve/reject and GuardianViewSet.approve/reject).
+    APPROVAL_CHOICES = [
+        ('approved', 'approved'),
+        ('pending', 'pending'),
+        ('rejected', 'rejected'),
+    ]
+    approval_status = models.CharField(max_length=20, choices=APPROVAL_CHOICES, default='approved')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -1,17 +1,29 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import CrudPanel from "./CrudPanel";
-import { UserRound, X } from "lucide-react";
+import { Check, UserRound, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 import { Field, InviteButton, ExportMenu } from "./_shared";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { api } from "@/lib/api";
+import { api, extractError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
+
+/** Same amber/dimmed-red treatment as StudentsPage's approvalRowClass — a
+ * parent who self-registered via public enrollment gets the same pending
+ * review state, since approving/rejecting either the parent or their child
+ * cascades to the other (see GuardianViewSet.approve/reject). */
+function approvalRowClass(row) {
+  if (row.approval_status === "pending") return "bg-warning/10 hover:!bg-warning/15";
+  if (row.approval_status === "rejected") return "bg-destructive/5 text-muted-foreground hover:!bg-destructive/10";
+  return "";
+}
 
 const DEFAULT_FORM = {
   name: "", name_latin: "", email: "", phone: "", address: "", occupation: "", relationship: "father",
@@ -163,6 +175,28 @@ export default function ParentsPage() {
   const { tenant } = useAuth();
   const canInvite = tenant?.plan && tenant.plan !== "basic";
   const { canEdit } = usePermission("parents");
+  const qc = useQueryClient();
+
+  const approveMut = useMutation({
+    mutationFn: (id) => api.post(`/parents/${id}/approve`).then((r) => r.data),
+    onSuccess: () => {
+      toast.success(t("parents.approved_toast"));
+      qc.invalidateQueries({ queryKey: ["parents"] });
+      qc.invalidateQueries({ queryKey: ["students"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+  const rejectMut = useMutation({
+    mutationFn: (id) => api.post(`/parents/${id}/reject`).then((r) => r.data),
+    onSuccess: () => {
+      toast.success(t("parents.rejected_toast"));
+      qc.invalidateQueries({ queryKey: ["parents"] });
+      qc.invalidateQueries({ queryKey: ["students"] });
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
   return (
     <CrudPanel
       moduleKey="parents"
@@ -173,9 +207,45 @@ export default function ParentsPage() {
       subtitle={t("subtitle.parents")}
       emptyIcon={UserRound}
       defaultForm={DEFAULT_FORM}
+      rowClassName={approvalRowClass}
+      renderRowActions={(row) => row.approval_status === "pending" && canEdit ? (
+        <>
+          <Button
+            size="icon" variant="ghost"
+            onClick={() => approveMut.mutate(row.id)}
+            className="h-8 w-8 text-success hover:bg-success/10"
+            title={t("parents.approve")}
+            data-testid={`parents-approve-${row.id}`}
+          >
+            <Check className="w-3.5 h-3.5" />
+          </Button>
+          <Button
+            size="icon" variant="ghost"
+            onClick={() => rejectMut.mutate(row.id)}
+            className="h-8 w-8 text-destructive hover:bg-destructive/10"
+            title={t("parents.reject")}
+            data-testid={`parents-reject-${row.id}`}
+          >
+            <X className="w-3.5 h-3.5" />
+          </Button>
+        </>
+      ) : null}
       extraActions={<ExportMenu resource="parents" />}
       columns={[
-        { key: "name", label: t("field.full_name"), render: (r) => <span className="font-medium">{r.name}</span> },
+        {
+          key: "name", label: t("field.full_name"),
+          render: (r) => (
+            <div className="flex items-center gap-1.5">
+              <span className="font-medium">{r.name}</span>
+              {r.approval_status === "pending" && (
+                <span className="text-[10px] font-bold uppercase tracking-wide text-warning">{t("parents.approval_pending")}</span>
+              )}
+              {r.approval_status === "rejected" && (
+                <span className="text-[10px] font-bold uppercase tracking-wide text-destructive">{t("parents.approval_rejected")}</span>
+              )}
+            </div>
+          ),
+        },
         { key: "phone", label: t("field.phone"), render: (r) => <span className="font-mono text-xs">{r.phone || "—"}</span> },
         { key: "email", label: t("field.email"), render: (r) => r.email || <span className="text-muted-foreground">—</span> },
         { key: "relationship", label: t("field.relationship"), render: (r) => <span className="capitalize text-xs">{r.relationship ? t(`relationship.${r.relationship}`) : "—"}</span> },

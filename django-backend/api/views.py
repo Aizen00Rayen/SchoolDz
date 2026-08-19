@@ -846,6 +846,9 @@ def public_school_enroll(request, slug):
         guardian = Guardian.objects.create(
             tenant=tenant, user=guardian_user, name=guardian_name,
             email=guardian_email, phone=guardian_phone or None, relationship='guardian',
+            # Reviewed together with the student on approve/reject — see
+            # GuardianViewSet.approve/reject.
+            source='public', approval_status='pending',
         )
         student_code = f"{tenant.student_prefix or 'STU-'}{str(existing_count + 1).zfill(5)}"
         student = Student.objects.create(
@@ -2743,6 +2746,34 @@ class GuardianViewSet(TenantScopedViewSet):
         return Response(self.get_serializer(instance).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        """A guardian self-registered via the public enrollment page
+        (source='public') starts life as approval_status='pending', in
+        lockstep with the student created in the same enrollment. Approving
+        either one cascades to the other — they're two halves of one
+        application — but only touches counterparts still 'pending', so it
+        never overwrites an explicit prior rejection."""
+        self.check_module_edit()
+        guardian = self.get_object()
+        guardian.approval_status = 'approved'
+        guardian.save(update_fields=['approval_status', 'updated_at'])
+        guardian.students.filter(approval_status='pending').update(approval_status='approved')
+        log_activity(request, guardian.tenant_id, 'update', entity_type='parents', entity_id=guardian.id,
+                     description=f'Approved enrollment: {guardian.name}')
+        return Response(GuardianSerializer(guardian).data)
+
+    @action(detail=True, methods=['post'])
+    def reject(self, request, pk=None):
+        self.check_module_edit()
+        guardian = self.get_object()
+        guardian.approval_status = 'rejected'
+        guardian.save(update_fields=['approval_status', 'updated_at'])
+        guardian.students.filter(approval_status='pending').update(approval_status='rejected')
+        log_activity(request, guardian.tenant_id, 'update', entity_type='parents', entity_id=guardian.id,
+                     description=f'Rejected enrollment: {guardian.name}')
+        return Response(GuardianSerializer(guardian).data)
+
+    @action(detail=True, methods=['post'])
     def invite(self, request, pk=None):
         user = request.user
         if not user.is_super_admin() and user.role not in ['owner', 'director', 'secretary']:
@@ -3146,11 +3177,17 @@ class StudentViewSet(TenantScopedViewSet):
     def approve(self, request, pk=None):
         """A student self-enrolled via the public page (source='public')
         starts life as approval_status='pending' — a secretary reviews and
-        confirms them here before they count as a normal record."""
+        confirms them here before they count as a normal record. Cascades to
+        the parent guardian created in the same enrollment (only if it's
+        still pending — never overwrites an explicit prior decision on the
+        guardian), since they're two halves of one application."""
         self.check_module_edit()
         student = self.get_object()
         student.approval_status = 'approved'
         student.save(update_fields=['approval_status', 'updated_at'])
+        if student.parent_id and student.parent.approval_status == 'pending':
+            student.parent.approval_status = 'approved'
+            student.parent.save(update_fields=['approval_status', 'updated_at'])
         log_activity(request, student.tenant_id, 'update', entity_type='students', entity_id=student.id,
                      description=f'Approved enrollment: {student.first_name} {student.last_name}')
         return Response(StudentSerializer(student).data)
@@ -3161,6 +3198,9 @@ class StudentViewSet(TenantScopedViewSet):
         student = self.get_object()
         student.approval_status = 'rejected'
         student.save(update_fields=['approval_status', 'updated_at'])
+        if student.parent_id and student.parent.approval_status == 'pending':
+            student.parent.approval_status = 'rejected'
+            student.parent.save(update_fields=['approval_status', 'updated_at'])
         log_activity(request, student.tenant_id, 'update', entity_type='students', entity_id=student.id,
                      description=f'Rejected enrollment: {student.first_name} {student.last_name}')
         return Response(StudentSerializer(student).data)
