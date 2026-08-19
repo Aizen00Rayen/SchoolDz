@@ -1690,7 +1690,30 @@ def dashboard_summary(request):
         status__in=['pending', 'partial']
     ).aggregate(total=Sum(F('amount') - F('discount')))
     outstanding = float(out_data['total'] or 0)
-    
+
+    # Expenses — same today/month windows as revenue, so profit/loss compares
+    # like-for-like periods.
+    exp_today_data = Expense.objects.filter(tenant_id=tid, spent_at__range=(day_start.date(), day_end.date())).aggregate(total=Sum('amount'))
+    expenses_today = float(exp_today_data['total'] or 0)
+    exp_month_data = Expense.objects.filter(tenant_id=tid, spent_at__gte=month_start.date()).aggregate(total=Sum('amount'))
+    expenses_month = float(exp_month_data['total'] or 0)
+
+    # Money owed to/by the school — receivables from students who've used
+    # more than they've paid for, payables from what's earned-but-unpaid to
+    # teachers plus students who've overpaid (the school owes them back).
+    # See compute_student_balances/compute_teacher_earnings docstrings for
+    # what "owes"/"overpaid"/earned-but-unpaid actually mean.
+    student_balances = compute_student_balances(tid)
+    receivables_total = round(sum(-b['balance'] for b in student_balances.values() if b['status'] == 'owes'), 2)
+    overpaid_students_total = round(sum(b['balance'] for b in student_balances.values() if b['status'] == 'overpaid'), 2)
+    students_owing_count = sum(1 for b in student_balances.values() if b['status'] == 'owes')
+    students_overpaid_count = sum(1 for b in student_balances.values() if b['status'] == 'overpaid')
+
+    teacher_rows = compute_teacher_earnings(tid, request)
+    teacher_payouts_due = round(sum(max(r['balance'], 0) for r in teacher_rows), 2)
+    teachers_awaiting_payout_count = sum(1 for r in teacher_rows if r['balance'] > BALANCE_THRESHOLD)
+    payables_total = round(teacher_payouts_due + overpaid_students_total, 2)
+
     recent_students = Student.objects.filter(tenant_id=tid).order_by('-created_at')[:5]
     recent_payments = Payment.objects.filter(tenant_id=tid).order_by('-created_at')[:5]
     
@@ -1732,11 +1755,18 @@ def dashboard_summary(request):
             status='paid',
             paid_at__range=(m_date, m_end)
         ).aggregate(total=Sum(F('amount') - F('discount')))
-        
+        m_exp_data = Expense.objects.filter(
+            tenant_id=tid,
+            spent_at__range=(m_date.date(), m_end.date())
+        ).aggregate(total=Sum('amount'))
+
         m_total = float(m_rev_data['total'] or 0)
+        m_expenses = float(m_exp_data['total'] or 0)
         trend.append({
             'month': m_date.strftime('%b'),
-            'revenue': round(m_total, 2)
+            'revenue': round(m_total, 2),
+            'expenses': round(m_expenses, 2),
+            'profit': round(m_total - m_expenses, 2),
         })
 
     at_risk_students = compute_at_risk_students(tid)
@@ -1749,9 +1779,21 @@ def dashboard_summary(request):
             'groups_total': groups_total,
             'revenue_today': round(revenue_today, 2),
             'revenue_month': round(revenue_month, 2),
+            'expenses_today': round(expenses_today, 2),
+            'expenses_month': round(expenses_month, 2),
+            'net_profit_month': round(revenue_month - expenses_month, 2),
             'outstanding': round(outstanding, 2),
+            'receivables_total': receivables_total,
+            'payables_total': payables_total,
+            'teacher_payouts_due': teacher_payouts_due,
+            'overpaid_students_total': overpaid_students_total,
             'attendance_pct': attendance_pct,
             'sessions_today': len(today_sessions),
+        },
+        'financial_alerts': {
+            'students_owing_count': students_owing_count,
+            'students_overpaid_count': students_overpaid_count,
+            'teachers_awaiting_payout_count': teachers_awaiting_payout_count,
         },
         'today_sessions': ClassSessionSerializer(today_sessions, many=True).data,
         'upcoming_sessions': ClassSessionSerializer(upcoming_sessions, many=True).data,

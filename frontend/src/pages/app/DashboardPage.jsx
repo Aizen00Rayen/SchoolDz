@@ -1,10 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import {
-  ResponsiveContainer, AreaChart, Area, Tooltip, XAxis, YAxis, CartesianGrid,
+  ResponsiveContainer, ComposedChart, Area, Line, Tooltip, XAxis, YAxis, CartesianGrid, Legend,
 } from "recharts";
 import { motion } from "framer-motion";
 import {
-  ArrowUpRight, GraduationCap, Wallet, Users, ClipboardCheck, Clock, BookOpen, TriangleAlert,
+  ArrowUpRight, ArrowDownRight, GraduationCap, Wallet, Receipt, TrendingUp, TrendingDown,
+  Users, ClipboardCheck, Clock, TriangleAlert, HandCoins, PiggyBank,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -17,14 +19,19 @@ import { Skeleton } from "@/components/ui/skeleton";
 const KPI_CONFIG = [
   { key: "students_total", tKey: "kpi.students", icon: GraduationCap, tone: "default" },
   { key: "revenue_month", tKey: "kpi.revenue_month", icon: Wallet, tone: "accent", format: "currency" },
+  { key: "expenses_month", tKey: "kpi.expenses_month", icon: Receipt, tone: "default", format: "currency" },
   { key: "attendance_pct", tKey: "kpi.attendance", icon: ClipboardCheck, tone: "default", format: "percent" },
   { key: "sessions_today", tKey: "kpi.sessions_today", icon: Clock, tone: "default" },
 ];
 
 function formatValue(k, v, currency) {
-  if (k.format === "currency") return `${Math.round(v).toLocaleString()} ${currency || "DZD"}`;
+  if (k.format === "currency") return `${Math.round(v || 0).toLocaleString()} ${currency || "DZD"}`;
   if (k.format === "percent") return `${v}%`;
   return v?.toLocaleString?.() ?? v;
+}
+
+function money(v, currency) {
+  return `${Math.round(v || 0).toLocaleString()} ${currency || "DZD"}`;
 }
 
 export default function DashboardPage() {
@@ -36,6 +43,19 @@ export default function DashboardPage() {
   });
 
   const kpis = data?.kpis || {};
+  const alerts = data?.financial_alerts || {};
+  const currency = tenant?.currency || "DZD";
+  const netProfit = kpis.net_profit_month || 0;
+  const isWinning = netProfit >= 0;
+
+  // Real month-over-month change on net profit, replacing what used to be a
+  // hardcoded badge — last two points of the 6-month trend.
+  const trendPoints = data?.revenue_trend || [];
+  const prevProfit = trendPoints.length >= 2 ? trendPoints[trendPoints.length - 2].profit : null;
+  const curProfit = trendPoints.length >= 1 ? trendPoints[trendPoints.length - 1].profit : null;
+  const profitChangePct = prevProfit && Math.abs(prevProfit) > 0.01 && curProfit != null
+    ? Math.round(((curProfit - prevProfit) / Math.abs(prevProfit)) * 1000) / 10
+    : null;
 
   return (
     <div>
@@ -51,8 +71,45 @@ export default function DashboardPage() {
         }
       />
 
+      {/* Net profit hero — the single "are we winning or losing" answer */}
+      <motion.div
+        initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+        data-testid={APPUI.dashboardKpi("net_profit_month")}
+        className={`surface-card p-5 mb-4 flex items-center gap-4 ${
+          isWinning ? "border-success/30 bg-success/5" : "border-destructive/30 bg-destructive/5"
+        }`}
+      >
+        <div className={`w-11 h-11 rounded-xl grid place-items-center flex-shrink-0 ${
+          isWinning ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"
+        }`}>
+          {isWinning ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-xs uppercase tracking-widest font-bold text-muted-foreground">
+            {t("dashboard.net_profit_month")}
+          </div>
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <span className={`font-mono text-2xl font-bold ${isWinning ? "text-success" : "text-destructive"}`}>
+              {isLoading ? <Skeleton className="h-7 w-32 inline-block" /> : money(netProfit, currency)}
+            </span>
+            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${isWinning ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
+              {isWinning ? t("dashboard.winning") : t("dashboard.losing")}
+            </span>
+            {profitChangePct != null && (
+              <span className="text-xs font-mono text-muted-foreground flex items-center gap-0.5">
+                {profitChangePct >= 0 ? <ArrowUpRight className="w-3 h-3 text-success" /> : <ArrowDownRight className="w-3 h-3 text-destructive" />}
+                {Math.abs(profitChangePct)}% {t("dashboard.vs_last_month")}
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-muted-foreground mt-0.5">
+            {money(kpis.revenue_month, currency)} {t("dashboard.revenue_label")} − {money(kpis.expenses_month, currency)} {t("dashboard.expenses_label")}
+          </div>
+        </div>
+      </motion.div>
+
       {/* KPI grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
         {KPI_CONFIG.map((k, i) => (
           <motion.div
             key={k.key}
@@ -91,14 +148,16 @@ export default function DashboardPage() {
               <h3 className="font-display font-semibold text-lg">{t("dashboard.revenue_trend")}</h3>
               <p className="text-xs text-muted-foreground">{t("dashboard.last6m")}</p>
             </div>
-            <div className="text-xs font-mono px-2 py-1 rounded-full bg-success/10 text-success">
-              +12.4%
-            </div>
+            {profitChangePct != null && (
+              <div className={`text-xs font-mono px-2 py-1 rounded-full ${profitChangePct >= 0 ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
+                {profitChangePct >= 0 ? "+" : ""}{profitChangePct}%
+              </div>
+            )}
           </div>
           <div className="h-64 min-h-[280px]">
             {data?.revenue_trend && (
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={data.revenue_trend}>
+                <ComposedChart data={data.revenue_trend}>
                   <defs>
                     <linearGradient id="rev" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="hsl(var(--accent))" stopOpacity={0.35} />
@@ -115,10 +174,17 @@ export default function DashboardPage() {
                       borderRadius: 8,
                       fontSize: 12,
                     }}
+                    formatter={(value, name) => [money(value, currency), t(`dashboard.${name}`)]}
+                  />
+                  <Legend
+                    formatter={(name) => t(`dashboard.${name}`)}
+                    wrapperStyle={{ fontSize: 11 }}
                   />
                   <Area type="monotone" dataKey="revenue" stroke="hsl(var(--accent))"
-                        strokeWidth={2} fill="url(#rev)" />
-                </AreaChart>
+                        strokeWidth={2} fill="url(#rev)" name="revenue" />
+                  <Line type="monotone" dataKey="expenses" stroke="hsl(var(--destructive))"
+                        strokeWidth={2} dot={false} name="expenses" />
+                </ComposedChart>
               </ResponsiveContainer>
             )}
           </div>
@@ -151,6 +217,46 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+      </div>
+
+      {/* Money owed — receivables (students owe the school) vs payables
+          (the school owes teachers/overpaid families) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+        <Link to="/app/payments" className="surface-card p-5 flex items-center gap-4 hover:border-warning/40 transition-colors">
+          <div className="w-11 h-11 rounded-xl grid place-items-center flex-shrink-0 bg-warning/10 text-warning">
+            <HandCoins className="w-5 h-5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs uppercase tracking-widest font-bold text-muted-foreground">
+              {t("dashboard.receivables")}
+            </div>
+            <div className="font-mono text-xl font-bold">
+              {isLoading ? <Skeleton className="h-6 w-28" /> : money(kpis.receivables_total, currency)}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {t("dashboard.students_owing_count", { count: alerts.students_owing_count || 0 })}
+            </div>
+          </div>
+        </Link>
+        <Link to="/app/teacher-payments" className="surface-card p-5 flex items-center gap-4 hover:border-info/40 transition-colors">
+          <div className="w-11 h-11 rounded-xl grid place-items-center flex-shrink-0 bg-info/10 text-info">
+            <PiggyBank className="w-5 h-5" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs uppercase tracking-widest font-bold text-muted-foreground">
+              {t("dashboard.payables")}
+            </div>
+            <div className="font-mono text-xl font-bold">
+              {isLoading ? <Skeleton className="h-6 w-28" /> : money(kpis.payables_total, currency)}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {t("dashboard.payables_breakdown", {
+                teachers: money(kpis.teacher_payouts_due, currency),
+                overpaid: money(kpis.overpaid_students_total, currency),
+              })}
+            </div>
+          </div>
+        </Link>
       </div>
 
       {/* Recent students + payments + at-risk */}
