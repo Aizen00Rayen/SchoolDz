@@ -28,6 +28,30 @@ const SOCIAL_ICONS = {
   youtube: Youtube, linkedin: Linkedin, tiktok: Music2,
 };
 
+const SCHOOL_LEVEL_AR = { primary: "ابتدائي", middle: "متوسط", high: "ثانوي" };
+const SPECIALTY_AR = {
+  common_science: "جذع مشترك علوم وتكنولوجيا",
+  common_arts: "جذع مشترك آداب وفلسفة",
+  science_exp: "علوم تجريبية",
+  math: "رياضيات",
+  tech_math: "تقني رياضي",
+  management_econ: "تسيير واقتصاد",
+  arts_philo: "آداب وفلسفة",
+  foreign_lang: "لغات أجنبية",
+};
+const YEAR_ORDINALS_AR = ["الأولى", "الثانية", "الثالثة", "الرابعة", "الخامسة"];
+
+/** "ثانوي · الثانية · علوم تجريبية" — same level/year/specialty a course was
+ * set up for, shown on its public enrollment card so parents can tell which
+ * class it targets before picking it. */
+function courseLevelLabel(c) {
+  if (!c.school_level) return null;
+  const parts = [SCHOOL_LEVEL_AR[c.school_level] || c.school_level];
+  if (c.school_year) parts.push(YEAR_ORDINALS_AR[c.school_year - 1] || `السنة ${c.school_year}`);
+  if (c.specialty) parts.push(SPECIALTY_AR[c.specialty] || c.specialty);
+  return parts.join(" · ");
+}
+
 const fadeUp = {
   initial: { opacity: 0, y: 28 },
   whileInView: { opacity: 1, y: 0 },
@@ -432,6 +456,9 @@ export default function EnrollPage() {
                       <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: c.color }} />
                       <span className="font-semibold">{c.title}</span>
                     </div>
+                    {courseLevelLabel(c) && (
+                      <p className="text-[11px] font-medium mb-1.5" style={{ color: accent }}>{courseLevelLabel(c)}</p>
+                    )}
                     {c.description && <p className="text-xs text-muted-foreground mb-2">{c.description}</p>}
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
                       <span>

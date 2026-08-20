@@ -756,6 +756,9 @@ def public_school_info(request, slug):
             'price': str(c.price),
             'color': c.color,
             'image_url': c.image_url,
+            'school_level': c.school_level,
+            'school_year': c.school_year,
+            'specialty': c.specialty,
             'groups': groups,
         })
 
