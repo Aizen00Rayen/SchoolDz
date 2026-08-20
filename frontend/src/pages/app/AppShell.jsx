@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import {
   Award, BarChart3, BookOpen, Building2, CalendarClock, CalendarDays, ChevronsUpDown, ClipboardCheck,
   DoorOpen, FileBarChart2, FileQuestion, GraduationCap, Globe, HandCoins, Languages, LogOut, MessageSquare, Moon,
-  PanelLeft, PanelLeftClose, Receipt, ScrollText, Search, Settings, Sun, Users, UserRound, Wallet, Layers,
+  PanelLeft, PanelLeftClose, Receipt, ScrollText, Search, Settings, Sun, Users, UserRound, Wallet, Layers, Table2,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth";
@@ -33,6 +33,7 @@ const NAV = [
   { key: "groups", to: "/app/groups", icon: Layers, module: "groups" },
   { key: "sessions", to: "/app/sessions", icon: CalendarClock, module: "sessions" },
   { key: "calendar", to: "/app/calendar", icon: CalendarDays, premiumOnly: true, module: "calendar" },
+  { key: "timetable", to: "/app/timetable", icon: Table2, module: "timetable" },
   { key: "rooms", to: "/app/rooms", icon: DoorOpen, module: "rooms" },
   { key: "attendance", to: "/app/attendance", icon: ClipboardCheck, module: "attendance" },
   { key: "payments", to: "/app/payments", icon: Wallet, module: "payments" },

@@ -165,6 +165,13 @@ export default function SettingsPage() {
           <Field label={t("field.student_prefix")}>
             <Input value={form.student_prefix || "STU-"} onChange={(e) => setForm({ ...form, student_prefix: e.target.value })} disabled={!canEdit} />
           </Field>
+          <Field label={t("field.timetable_end_time")}>
+            <Input
+              type="time" value={(form.timetable_end_time || "22:00:00").slice(0, 5)}
+              onChange={(e) => setForm({ ...form, timetable_end_time: e.target.value })}
+              disabled={!canEdit}
+            />
+          </Field>
         </div>
       </div>
 

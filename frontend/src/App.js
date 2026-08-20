@@ -30,6 +30,7 @@ import GroupsPage from "@/pages/app/GroupsPage";
 import SessionsPage from "@/pages/app/SessionsPage";
 import RoomsPage from "@/pages/app/RoomsPage";
 import CalendarPage from "@/pages/app/CalendarPage";
+import TimetablePage from "@/pages/app/TimetablePage";
 import AttendancePage from "@/pages/app/AttendancePage";
 import PaymentsPage from "@/pages/app/PaymentsPage";
 import GradesPage from "@/pages/app/GradesPage";
@@ -168,6 +169,7 @@ function App() {
                     <Route path="sessions" element={<SessionsPage />} />
                     <Route path="rooms" element={<RoomsPage />} />
                     <Route path="calendar" element={<CalendarPage />} />
+                    <Route path="timetable" element={<TimetablePage />} />
                     <Route path="attendance" element={<AttendancePage />} />
                     <Route path="payments" element={<PaymentsPage />} />
                     <Route path="grades" element={<GradesPage />} />

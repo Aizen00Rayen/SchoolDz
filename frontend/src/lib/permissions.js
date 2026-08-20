@@ -3,7 +3,7 @@ import { useAuth } from "@/lib/auth";
 // Mirrors PERMISSION_MODULES/PERMISSION_LEVELS in django-backend/api/models.py.
 export const PERMISSION_MODULES = [
   "dashboard", "students", "teachers", "parents", "courses", "groups",
-  "sessions", "calendar", "rooms", "payments", "expenses", "teacher_payments",
+  "sessions", "calendar", "timetable", "rooms", "payments", "expenses", "teacher_payments",
   "grades", "attendance", "messages", "quizzes", "website", "reports",
   "logs", "users", "settings",
 ];
@@ -16,6 +16,7 @@ export const PERMISSION_LEVELS = ["hidden", "view", "edit"];
 const DEFAULT_MODULE_PERMISSIONS = {
   dashboard: "view",
   calendar: "view",
+  timetable: "view",
   // 'view' by default so existing staff can still populate the room
   // dropdown when creating a group/session — only full room management
   // needs an explicit 'edit' grant.

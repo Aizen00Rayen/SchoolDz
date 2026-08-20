@@ -1,4 +1,5 @@
 import uuid
+from datetime import time
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
 
@@ -10,7 +11,7 @@ def generate_uuid():
 # frontend) so serializers/views validate against the same source of truth.
 PERMISSION_MODULES = [
     'dashboard', 'students', 'teachers', 'parents', 'courses', 'groups',
-    'sessions', 'calendar', 'rooms', 'payments', 'expenses', 'teacher_payments',
+    'sessions', 'calendar', 'timetable', 'rooms', 'payments', 'expenses', 'teacher_payments',
     'grades', 'attendance', 'messages', 'quizzes', 'website', 'reports',
     'logs', 'users', 'settings',
 ]
@@ -24,6 +25,7 @@ PERMISSION_LEVELS = ['hidden', 'view', 'edit']
 DEFAULT_MODULE_PERMISSIONS = {
     'dashboard': 'view',
     'calendar': 'view',
+    'timetable': 'view',
     # 'view' by default so existing staff can still populate the room
     # dropdown when creating a group/session — only full room management
     # (the Rooms page's create/edit/delete) needs an explicit 'edit' grant.
@@ -83,6 +85,10 @@ class Tenant(models.Model):
     # Free-form {facebook, instagram, twitter, youtube, linkedin, tiktok} —
     # missing/empty keys just don't render a link on the public page.
     social_links = models.JSONField(default=dict, blank=True)
+    # Weekly timetable (استعمال الزمن) grid bounds — every day starts at
+    # 08:00 (fixed, not configurable) and runs until this time, 22:00 by
+    # default, until the tenant narrows/widens it in Settings.
+    timetable_end_time = models.TimeField(default=time(22, 0))
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -851,3 +857,31 @@ class ActivityLog(models.Model):
         db_table = 'activity_logs'
         ordering = ['-created_at']
         indexes = [models.Index(fields=['tenant', '-created_at'])]
+
+
+class TimetableEntry(models.Model):
+    """One colored block on the weekly timetable (استعمال الزمن) — a fixed
+    weekly grid that repeats all year until the tenant changes it, distinct
+    from ClassSession's dated, one-off occurrences. day_of_week/start_time
+    place it in the grid (Tenant.timetable_end_time bounds how late the grid
+    runs; the grid always starts at 08:00); duration_minutes is one of a
+    small fixed set so blocks always align to the grid's rows."""
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='timetable_entries')
+    DAY_CHOICES = [
+        ('mon', 'mon'), ('tue', 'tue'), ('wed', 'wed'), ('thu', 'thu'),
+        ('fri', 'fri'), ('sat', 'sat'), ('sun', 'sun'),
+    ]
+    day_of_week = models.CharField(max_length=3, choices=DAY_CHOICES)
+    start_time = models.TimeField()
+    DURATION_CHOICES = [(60, '1h'), (90, '1h30'), (120, '2h'), (180, '3h')]
+    duration_minutes = models.IntegerField(choices=DURATION_CHOICES, default=60)
+    title = models.CharField(max_length=255)
+    color = models.CharField(max_length=16, default='#E53935')
+    notes = models.CharField(max_length=255, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'timetable_entries'
+        ordering = ['day_of_week', 'start_time']

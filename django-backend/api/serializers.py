@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Grade, ChargilyCheckout, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog
+from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Grade, ChargilyCheckout, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry
 
 class TenantSerializer(serializers.ModelSerializer):
     class Meta:
@@ -345,4 +345,14 @@ class RoomSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Room
+        exclude = ['tenant']
+
+
+class TimetableEntrySerializer(serializers.ModelSerializer):
+    tenant_id = serializers.PrimaryKeyRelatedField(
+        queryset=Tenant.objects.all(), source='tenant', required=False, allow_null=True
+    )
+
+    class Meta:
+        model = TimetableEntry
         exclude = ['tenant']

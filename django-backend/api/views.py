@@ -27,8 +27,8 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, PermissionDenied, NotFound, APIException
 from rest_framework.authtoken.models import Token
 
-from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_LEVELS
-from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, RoomSerializer, AttendanceSerializer, PaymentSerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer
+from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_LEVELS
+from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, RoomSerializer, AttendanceSerializer, PaymentSerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer, TimetableEntrySerializer
 from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle, EnrollmentRateThrottle, log_activity
 
 # Single source of truth for pricing:
@@ -2385,6 +2385,7 @@ class TenantViewSet(viewsets.ModelViewSet):
         owner_editable = [
             'name', 'center_type', 'logo_url', 'primary_color', 'accent_color',
             'language', 'currency', 'timezone', 'invoice_prefix', 'student_prefix',
+            'timetable_end_time',
             *website_fields,
         ]
 
@@ -3295,6 +3296,39 @@ class RoomViewSet(TenantScopedViewSet):
             row['occupied'] = bool(by_room.get(row['id']))
             row['occupying_sessions'] = by_room.get(row['id'], [])
         return Response({'items': data, 'total': len(data)})
+
+
+class TimetableEntryViewSet(TenantScopedViewSet):
+    """The weekly timetable (استعمال الزمن) — a fixed grid that repeats all
+    year, unlike ClassSession's dated occurrences. list() also returns the
+    tenant's grid bounds (fixed 08:00 start, tenant-configurable end) so the
+    frontend doesn't need a second request to know how many rows to draw."""
+    queryset = TimetableEntry.objects.all()
+    serializer_class = TimetableEntrySerializer
+    module_key = 'timetable'
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset()).order_by('day_of_week', 'start_time')
+        data = self.get_serializer(queryset, many=True).data
+        tenant = Tenant.objects.filter(id=request.user.tenant_id).first()
+        return Response({
+            'items': data,
+            'total': len(data),
+            'grid_start': '08:00',
+            'grid_end': tenant.timetable_end_time.strftime('%H:%M') if tenant else '22:00',
+        })
+
+    def create(self, request, *args, **kwargs):
+        self.check_module_edit()
+        return super().create(request, *args, **kwargs)
+
+    def update(self, request, *args, **kwargs):
+        self.check_module_edit()
+        return super().update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        self.check_module_edit()
+        return super().destroy(request, *args, **kwargs)
 
 
 class GroupViewSet(TenantScopedViewSet):
