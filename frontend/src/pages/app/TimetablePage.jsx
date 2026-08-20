@@ -6,9 +6,6 @@ import { PageHeader, Field } from "./_shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
-import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import { api, extractError } from "@/lib/api";
@@ -152,7 +149,7 @@ export default function TimetablePage() {
             </thead>
             <tbody>
               {slots.map((slotStart) => (
-                <tr key={slotStart} className="border-b border-border/50 h-9">
+                <tr key={slotStart} className={`h-9 ${slotStart % 60 === 0 ? "border-b border-border" : "border-b border-border/60"}`}>
                   <td className="px-2 text-[10px] font-mono text-muted-foreground align-top whitespace-nowrap">
                     {slotStart % 60 === 0 ? toHHMM(slotStart) : ""}
                   </td>
@@ -164,7 +161,7 @@ export default function TimetablePage() {
                         <td
                           key={day} rowSpan={entry.duration_minutes / SLOT_MINUTES}
                           onClick={() => openEdit(entry)}
-                          className="align-top p-1 cursor-pointer border-s border-border/50"
+                          className="align-top p-1 cursor-pointer border-s border-border"
                           data-testid={`timetable-entry-${entry.id}`}
                         >
                           <div
@@ -182,7 +179,7 @@ export default function TimetablePage() {
                       <td
                         key={day}
                         onClick={() => openCreate(day, slotStart)}
-                        className={`border-s border-border/50 ${canEdit ? "cursor-pointer hover:bg-muted/60" : ""}`}
+                        className={`border-s border-border ${canEdit ? "cursor-pointer hover:bg-muted/60" : ""}`}
                         data-testid={`timetable-cell-${day}-${slotStart}`}
                       />
                     );
@@ -217,18 +214,24 @@ export default function TimetablePage() {
                   />
                 </Field>
                 <Field label={t("timetable.duration")}>
-                  <Select
-                    value={String(dialogState.duration_minutes)}
-                    onValueChange={(v) => setDialogState({ ...dialogState, duration_minutes: Number(v) })}
-                    disabled={!canEdit}
-                  >
-                    <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
-                    <SelectContent className="bg-popover">
-                      {DURATIONS.map((d) => (
-                        <SelectItem key={d} value={String(d)}>{t(`timetable.duration_${d}`)}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="grid grid-cols-4 gap-2">
+                    {DURATIONS.map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        disabled={!canEdit}
+                        onClick={() => setDialogState({ ...dialogState, duration_minutes: d })}
+                        data-testid={`timetable-duration-${d}`}
+                        className={`h-10 rounded-lg border text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                          dialogState.duration_minutes === d
+                            ? "border-accent bg-accent text-accent-foreground"
+                            : "border-border bg-background hover:bg-muted"
+                        }`}
+                      >
+                        {t(`timetable.duration_${d}`)}
+                      </button>
+                    ))}
+                  </div>
                 </Field>
                 <Field label={t("field.color")}>
                   <Input
