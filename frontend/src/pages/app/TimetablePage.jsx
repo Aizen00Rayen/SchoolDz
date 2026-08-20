@@ -15,7 +15,7 @@ import { api, extractError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
 
-const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+const DAYS = ["sat", "sun", "mon", "tue", "wed", "thu", "fri"];
 const DURATIONS = [60, 90, 120, 180];
 const SLOT_MINUTES = 30;
 const DEFAULT_COLOR = "#E53935";
