@@ -6,7 +6,7 @@ import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval,
   isSameMonth, isToday, format, addMonths, subMonths, addWeeks, subWeeks,
 } from "date-fns";
-import { ChevronLeft, ChevronRight, Copy, Download, Repeat, Send } from "lucide-react";
+import { ChevronLeft, ChevronRight, Copy, Download, Repeat, Send, X } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -131,6 +131,102 @@ export function RoomSelect({ value, onChange }) {
         ))}
       </SelectContent>
     </Select>
+  );
+}
+
+/** Single-student search-by-name-or-code field — the same search pattern as
+ * StudentPicker (ParentsPage.jsx) but for a single id instead of a list, for
+ * forms like Payments where a plain dropdown of every student doesn't scale
+ * past a few hundred records. */
+export function StudentSearchSelect({ value, onChange, placeholder }) {
+  const { t } = useI18n();
+  const [query, setQuery] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [open, setOpen] = useState(false);
+  const [label, setLabel] = useState("");
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(query.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const { data: results, isFetching } = useQuery({
+    queryKey: ["students-search", debounced],
+    queryFn: async () => (await api.get("/students", { params: { q: debounced, limit: 10 } })).data,
+    enabled: open && debounced.length > 0,
+  });
+
+  // Resolve a label for a pre-selected id (editing an existing record) that
+  // never came through a search result in this render.
+  useQuery({
+    queryKey: ["students-labels", value],
+    queryFn: async () => {
+      const { data } = await api.get("/students", { params: { ids: value } });
+      const s = data.items[0];
+      if (s) setLabel(`${s.first_name} ${s.last_name}`);
+      return data;
+    },
+    enabled: !!value && !label,
+  });
+
+  const select = (s) => {
+    onChange(s.id);
+    setLabel(`${s.first_name} ${s.last_name}`);
+    setQuery("");
+    setOpen(false);
+  };
+
+  const clear = () => {
+    onChange("");
+    setLabel("");
+    setQuery("");
+  };
+
+  if (value && label && !open) {
+    return (
+      <div className="flex items-center gap-2 h-10 px-3 rounded-lg border border-border bg-background text-sm">
+        <span className="flex-1 truncate font-medium">{label}</span>
+        <button type="button" onClick={clear} className="text-muted-foreground hover:text-destructive flex-shrink-0">
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative">
+      <Input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder={placeholder || t("picker.search_students")}
+        data-testid="student-search-select"
+      />
+      {open && debounced && (
+        <div className="absolute z-10 w-full border border-border rounded-lg mt-1.5 max-h-48 overflow-y-auto bg-popover shadow-md">
+          {isFetching ? (
+            <div className="text-xs text-muted-foreground p-2">{t("actions.loading")}</div>
+          ) : (results?.items || []).length === 0 ? (
+            <div className="text-xs text-muted-foreground p-2">{t("picker.no_students")}</div>
+          ) : (
+            results.items.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => select(s)}
+                className="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-start hover:bg-muted/60 cursor-pointer"
+                data-testid={`student-search-select-result-${s.id}`}
+              >
+                <span>{s.first_name} {s.last_name}</span>
+                <span className="text-[11px] font-mono text-muted-foreground ms-auto">{s.student_code}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
 import { api, downloadFrom } from "@/lib/api";
-import { PageHeader, Field } from "./_shared";
+import { PageHeader, Field, StatusPill } from "./_shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -103,6 +103,52 @@ export default function ReportsPage() {
       {finance?.expenses_scoped_out && (
         <p className="text-xs text-muted-foreground mb-6 -mt-3">{t("reports.expenses_scoped_out")}</p>
       )}
+
+      <div className="surface-card p-5 mb-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-display font-semibold text-lg">{t("reports.transactions")}</h3>
+          <span className="text-xs font-mono text-muted-foreground">
+            {(finance?.transactions || []).length}
+          </span>
+        </div>
+        {!finance?.transactions || finance.transactions.length === 0 ? (
+          <div className="text-sm text-muted-foreground text-center py-8">{t("reports.no_transactions")}</div>
+        ) : (
+          <div className="overflow-x-auto max-h-96 overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="border-b border-border sticky top-0 bg-card">
+                <tr>
+                  <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("reports.date")}</th>
+                  <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("reports.description")}</th>
+                  <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("field.kind")}</th>
+                  <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("field.status")}</th>
+                  <th className="text-end px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("field.amount")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {finance.transactions.map((tx, i) => (
+                  <tr key={i} className="border-b border-border last:border-0">
+                    <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{tx.date || "—"}</td>
+                    <td className="px-3 py-2">
+                      <div className="font-medium">{tx.description}</div>
+                      {tx.reference && <div className="text-[11px] font-mono text-muted-foreground">{tx.reference}</div>}
+                    </td>
+                    <td className="px-3 py-2 text-xs capitalize">
+                      {tx.type === "expense" ? categoryLabel(tx.kind, t) : t(`kind.${tx.kind}`)}
+                    </td>
+                    <td className="px-3 py-2">
+                      {tx.status ? <StatusPill status={tx.status} /> : <span className="text-xs text-muted-foreground">—</span>}
+                    </td>
+                    <td className={`px-3 py-2 text-end font-mono font-semibold ${tx.type === "expense" ? "text-destructive" : "text-success"}`}>
+                      {tx.type === "expense" ? "−" : "+"}{money(tx.amount)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
       {byCategory.length > 0 && (
         <div className="surface-card p-5 mb-6">

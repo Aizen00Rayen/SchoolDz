@@ -4326,15 +4326,50 @@ def finance_report(request):
     teacher_rows = compute_teacher_earnings(tid, request)
     teacher_total = round(sum(r['earned'] for r in teacher_rows), 2)
 
+    # Every individual money movement in the window — every payment
+    # (whatever its status) plus every expense — so the tenant can see
+    # exactly what happened, not just the totals. Expenses are left out
+    # when scoped to a group/teacher for the same reason expense_total is
+    # zeroed above: they aren't scoped that way, so including them here
+    # would misleadingly suggest they belong to that subset.
+    transactions = []
+    for p in payments:
+        transactions.append({
+            'date': (p.paid_at.isoformat() if p.paid_at else None) or (p.due_date.isoformat() if p.due_date else None),
+            'type': 'revenue',
+            'kind': p.kind,
+            'status': p.status,
+            'description': f'{p.student.first_name} {p.student.last_name}' if p.student else p.invoice_number,
+            'reference': p.invoice_number,
+            'amount': round(float(p.amount) - float(p.discount or 0), 2),
+        })
+    if not scoped_to_subset:
+        for e in expenses:
+            transactions.append({
+                'date': e.spent_at.isoformat() if e.spent_at else None,
+                'type': 'expense',
+                'kind': (e.category.key or e.category.name) if e.category else 'uncategorized',
+                'status': None,
+                'description': e.title,
+                'reference': None,
+                'amount': round(float(e.amount), 2),
+            })
+    transactions.sort(key=lambda t: t['date'] or '', reverse=True)
+
     if request.GET.get('type') in ('csv', 'xlsx'):
-        headers = ['Metric', 'Amount']
+        headers = ['Metric', 'Amount', 'Kind', 'Status', 'Description', 'Reference']
         rows = [
-            ['Collected', collected],
-            ['Outstanding', pending_amount],
-            ['Expenses', expense_total],
-            ['Teacher earnings', teacher_total],
-            ['Net', round(collected - expense_total - teacher_total, 2)],
-        ] + [[f'Expenses — {k}', v] for k, v in sorted(by_category.items())]
+            ['Collected', collected, '', '', '', ''],
+            ['Outstanding', pending_amount, '', '', '', ''],
+            ['Expenses', expense_total, '', '', '', ''],
+            ['Teacher earnings', teacher_total, '', '', '', ''],
+            ['Net', round(collected - expense_total - teacher_total, 2), '', '', '', ''],
+        ] + [[f'Expenses — {k}', v, '', '', '', ''] for k, v in sorted(by_category.items())]
+        rows.append(['', '', '', '', '', ''])
+        rows.append(['Transactions', 'Amount', 'Kind', 'Status', 'Description', 'Reference'])
+        rows += [[
+            t['date'] or '', t['amount'], f"{t['type']}: {t['kind']}", t['status'] or '', t['description'], t['reference'] or '',
+        ] for t in transactions]
         return export_rows(headers, rows, 'financial-report', request.GET.get('type'))
 
     return Response({
@@ -4347,4 +4382,5 @@ def finance_report(request):
         'payments_count': len(paid),
         'expenses_scoped_out': scoped_to_subset,
         'teachers': teacher_rows,
+        'transactions': transactions,
     })

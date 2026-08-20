@@ -6,6 +6,7 @@ import { AlertTriangle, Wallet, FileDown } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Field } from "./StudentsPage";
+import { StudentSearchSelect } from "./_shared";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -143,14 +144,7 @@ export default function PaymentsPage() {
       renderForm={(form, setForm) => (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label={t("field.student")} required>
-            <Select value={form.student_id || ""} onValueChange={(v) => setForm({ ...form, student_id: v })}>
-              <SelectTrigger className="bg-background"><SelectValue placeholder={t("placeholder.select_student")} /></SelectTrigger>
-              <SelectContent className="bg-popover max-h-72">
-                {(students?.items || []).map((s) => (
-                  <SelectItem key={s.id} value={s.id}>{s.first_name} {s.last_name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <StudentSearchSelect value={form.student_id} onChange={(id) => setForm({ ...form, student_id: id })} />
           </Field>
           <Field label={t("field.course")}>
             <Select value={form.course_id || ""} onValueChange={(v) => setForm({ ...form, course_id: v })}>
