@@ -8,7 +8,7 @@ import {
   Phone, Sparkles, Twitter, Users, X, ZoomIn, Youtube,
 } from "lucide-react";
 
-import { api, extractError, resolveFileUrl } from "@/lib/api";
+import { api, extractError, resolveFileUrl, safeExternalUrl } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Field } from "@/pages/app/_shared";
 import { Button } from "@/components/ui/button";
@@ -148,7 +148,7 @@ export default function EnrollPage() {
   const courses = school?.courses || [];
   const teachers = school?.teachers || [];
   const gallery = school?.gallery || [];
-  const socialEntries = Object.entries(school?.social_links || {}).filter(([, url]) => url);
+  const socialEntries = Object.entries(school?.social_links || {}).filter(([, url]) => safeExternalUrl(url));
   const hasLocation = school?.address || school?.phone || school?.map_url || socialEntries.length > 0;
   const selectedCourse = courses.find((c) => c.id === selectedCourseId) || courses[0];
   const accent = school?.accent_color || "#E53935";
@@ -359,8 +359,8 @@ export default function EnrollPage() {
                   </span>
                   <div>
                     <div className="text-sm font-medium">{school.address}</div>
-                    {school.map_url && (
-                      <a href={school.map_url} target="_blank" rel="noreferrer" className="text-xs hover:underline" style={{ color: accent }}>
+                    {safeExternalUrl(school.map_url) && (
+                      <a href={safeExternalUrl(school.map_url)} target="_blank" rel="noreferrer" className="text-xs hover:underline" style={{ color: accent }}>
                         احصل على الاتجاهات
                       </a>
                     )}
@@ -381,7 +381,7 @@ export default function EnrollPage() {
                     const Icon = SOCIAL_ICONS[platform];
                     return (
                       <a
-                        key={platform} href={url} target="_blank" rel="noreferrer" aria-label={platform}
+                        key={platform} href={safeExternalUrl(url)} target="_blank" rel="noreferrer" aria-label={platform}
                         className="w-9 h-9 rounded-full grid place-items-center transition-transform hover:scale-110"
                         style={{ backgroundColor: `${accent}1a`, color: accent }}
                       >

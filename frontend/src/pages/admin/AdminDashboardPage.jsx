@@ -344,7 +344,7 @@ export default function AdminDashboardPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full min-w-[760px] text-sm">
                 <thead className="bg-muted/40 border-b border-border">
                   <tr>
                     <Th>Workspace</Th>
@@ -463,7 +463,7 @@ export default function AdminDashboardPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full min-w-[760px] text-sm">
                 <thead className="bg-muted/40 border-b border-border">
                   <tr>
                     <Th>Name</Th>
@@ -575,7 +575,7 @@ export default function AdminDashboardPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full min-w-[760px] text-sm">
                 <thead className="bg-muted/40 border-b border-border">
                   <tr>
                     <Th>Code</Th>

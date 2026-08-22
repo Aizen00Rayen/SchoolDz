@@ -192,7 +192,8 @@ export default function UsersPage() {
         <EmptyState icon={Users} title={t("users.no_members_title")} description={t("users.no_members_desc")} />
       ) : (
         <div className="surface-card overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[620px] text-sm">
             <thead className="bg-muted/40 border-b border-border">
               <tr>
                 <th className="text-start px-4 py-2.5 text-xs uppercase tracking-widest text-muted-foreground font-medium">{t("field.name")}</th>
@@ -243,6 +244,7 @@ export default function UsersPage() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

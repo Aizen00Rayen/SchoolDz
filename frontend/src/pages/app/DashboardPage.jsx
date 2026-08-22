@@ -65,7 +65,7 @@ export default function DashboardPage() {
           weekday: "long", year: "numeric", month: "long", day: "numeric",
         })}`}
         actions={
-          <span className="text-xs px-3 py-1.5 rounded-full border border-border bg-card text-muted-foreground font-mono">
+          <span className="hidden sm:inline-block max-w-full truncate text-xs px-3 py-1.5 rounded-full border border-border bg-card text-muted-foreground font-mono">
             {user?.email}
           </span>
         }
@@ -75,7 +75,7 @@ export default function DashboardPage() {
       <motion.div
         initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
         data-testid={APPUI.dashboardKpi("net_profit_month")}
-        className={`surface-card p-5 mb-4 flex items-center gap-4 ${
+        className={`surface-card p-4 sm:p-5 mb-4 flex items-center gap-3 sm:gap-4 ${
           isWinning ? "border-success/30 bg-success/5" : "border-destructive/30 bg-destructive/5"
         }`}
       >
@@ -89,7 +89,7 @@ export default function DashboardPage() {
             {t("dashboard.net_profit_month")}
           </div>
           <div className="flex items-baseline gap-2 flex-wrap">
-            <span className={`font-mono text-2xl font-bold ${isWinning ? "text-success" : "text-destructive"}`}>
+            <span className={`font-mono text-xl sm:text-2xl font-bold ${isWinning ? "text-success" : "text-destructive"}`}>
               {isLoading ? <Skeleton className="h-7 w-32 inline-block" /> : money(netProfit, currency)}
             </span>
             <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${isWinning ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
@@ -108,31 +108,32 @@ export default function DashboardPage() {
         </div>
       </motion.div>
 
-      {/* KPI grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+      {/* KPI grid. On phones each card is a compact horizontal row — five
+          full-height stacked blocks would push the charts a whole screen down. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 mb-6 sm:mb-8">
         {KPI_CONFIG.map((k, i) => (
           <motion.div
             key={k.key}
             data-testid={APPUI.dashboardKpi(k.key)}
             initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.06 }}
-            className={`surface-card p-5 ${k.tone === "accent" ? "bg-primary text-primary-foreground border-primary" : ""}`}
+            className={`surface-card p-4 sm:p-5 flex items-center gap-3 sm:block ${k.tone === "accent" ? "bg-primary text-primary-foreground border-primary" : ""}`}
           >
-            <div className="flex items-start justify-between">
-              <div className={`w-9 h-9 rounded-lg grid place-items-center ${
+            <div className="flex items-start justify-between flex-shrink-0 sm:w-auto">
+              <div className={`w-9 h-9 rounded-lg grid place-items-center flex-shrink-0 ${
                 k.tone === "accent" ? "bg-accent text-accent-foreground" : "bg-muted"
               }`}>
                 <k.icon className="w-4 h-4" />
               </div>
-              <ArrowUpRight className={`w-4 h-4 ${k.tone === "accent" ? "text-primary-foreground/60" : "text-muted-foreground"}`} />
+              <ArrowUpRight className={`hidden sm:block w-4 h-4 ${k.tone === "accent" ? "text-primary-foreground/60" : "text-muted-foreground"}`} />
             </div>
-            <div className="mt-4">
-              <div className={`text-xs uppercase tracking-widest font-bold ${
+            <div className="sm:mt-4 min-w-0 flex-1">
+              <div className={`text-[10px] sm:text-xs uppercase tracking-widest font-bold ${
                 k.tone === "accent" ? "text-primary-foreground/70" : "text-muted-foreground"
               }`}>
                 {t(k.tKey)}
               </div>
-              <div className="font-mono text-3xl font-bold mt-1">
+              <div className="font-mono text-xl sm:text-2xl lg:text-3xl font-bold sm:mt-1 truncate">
                 {isLoading ? <Skeleton className="h-8 w-24" /> : formatValue(k, kpis[k.key], tenant?.currency)}
               </div>
             </div>
@@ -141,11 +142,11 @@ export default function DashboardPage() {
       </div>
 
       {/* Revenue chart + Today's sessions */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-8">
-        <div className="lg:col-span-2 surface-card p-5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4 mb-6 sm:mb-8">
+        <div className="lg:col-span-2 surface-card p-4 sm:p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="font-display font-semibold text-lg">{t("dashboard.revenue_trend")}</h3>
+              <h3 className="font-display font-semibold text-base sm:text-lg">{t("dashboard.revenue_trend")}</h3>
               <p className="text-xs text-muted-foreground">{t("dashboard.last6m")}</p>
             </div>
             {profitChangePct != null && (
@@ -154,7 +155,7 @@ export default function DashboardPage() {
               </div>
             )}
           </div>
-          <div className="h-64 min-h-[280px]">
+          <div className="h-[240px] sm:h-[280px]">
             {data?.revenue_trend && (
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={data.revenue_trend}>
@@ -190,9 +191,9 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="surface-card p-5">
+        <div className="surface-card p-4 sm:p-5">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-display font-semibold text-lg">{t("dashboard.today_sessions")}</h3>
+            <h3 className="font-display font-semibold text-base sm:text-lg">{t("dashboard.today_sessions")}</h3>
             <span className="text-xs font-mono text-muted-foreground">
               {data?.today_sessions?.length || 0}
             </span>
@@ -221,8 +222,8 @@ export default function DashboardPage() {
 
       {/* Money owed — receivables (students owe the school) vs payables
           (the school owes teachers/overpaid families) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-        <Link to="/app/payments" className="surface-card p-5 flex items-center gap-4 hover:border-warning/40 transition-colors">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4 mb-6 sm:mb-8">
+        <Link to="/app/payments" className="surface-card p-4 sm:p-5 flex items-center gap-3 sm:gap-4 hover:border-warning/40 transition-colors">
           <div className="w-11 h-11 rounded-xl grid place-items-center flex-shrink-0 bg-warning/10 text-warning">
             <HandCoins className="w-5 h-5" />
           </div>
@@ -238,7 +239,7 @@ export default function DashboardPage() {
             </div>
           </div>
         </Link>
-        <Link to="/app/teacher-payments" className="surface-card p-5 flex items-center gap-4 hover:border-info/40 transition-colors">
+        <Link to="/app/teacher-payments" className="surface-card p-4 sm:p-5 flex items-center gap-3 sm:gap-4 hover:border-info/40 transition-colors">
           <div className="w-11 h-11 rounded-xl grid place-items-center flex-shrink-0 bg-info/10 text-info">
             <PiggyBank className="w-5 h-5" />
           </div>
@@ -260,10 +261,10 @@ export default function DashboardPage() {
       </div>
 
       {/* Recent students + payments + at-risk */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="surface-card p-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+        <div className="surface-card p-4 sm:p-5">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-display font-semibold text-lg">{t("dashboard.recent_students")}</h3>
+            <h3 className="font-display font-semibold text-base sm:text-lg">{t("dashboard.recent_students")}</h3>
             <Users className="w-4 h-4 text-muted-foreground" />
           </div>
           <div className="space-y-1">
@@ -279,9 +280,9 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="surface-card p-5">
+        <div className="surface-card p-4 sm:p-5">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-display font-semibold text-lg">{t("dashboard.recent_payments")}</h3>
+            <h3 className="font-display font-semibold text-base sm:text-lg">{t("dashboard.recent_payments")}</h3>
             <Wallet className="w-4 h-4 text-muted-foreground" />
           </div>
           <div className="space-y-1">
@@ -302,9 +303,9 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        <div className="surface-card p-5">
+        <div className="surface-card p-4 sm:p-5">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-display font-semibold text-lg">{t("dashboard.at_risk")}</h3>
+            <h3 className="font-display font-semibold text-base sm:text-lg">{t("dashboard.at_risk")}</h3>
             <TriangleAlert className="w-4 h-4 text-warning" />
           </div>
           <div className="space-y-1">

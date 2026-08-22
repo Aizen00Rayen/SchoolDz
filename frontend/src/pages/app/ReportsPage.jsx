@@ -55,7 +55,7 @@ export default function ReportsPage() {
         }
       />
 
-      <div className="surface-card p-4 mb-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div className="surface-card p-4 mb-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
         <Field label={t("reports.from")}>
           <Input type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} data-testid="reports-from" />
         </Field>
@@ -92,7 +92,7 @@ export default function ReportsPage() {
         </Field>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4 mb-6">
         <Card icon={Wallet} label={t("reports.collected")} value={money(finance?.collected)} />
         <Card icon={TrendingDown} label={t("reports.outstanding")} value={money(finance?.outstanding)} />
         <Card icon={Receipt} label={t("reports.expenses")} value={money(finance?.expenses)} />
@@ -104,9 +104,9 @@ export default function ReportsPage() {
         <p className="text-xs text-muted-foreground mb-6 -mt-3">{t("reports.expenses_scoped_out")}</p>
       )}
 
-      <div className="surface-card p-5 mb-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="font-display font-semibold text-lg">{t("reports.transactions")}</h3>
+      <div className="surface-card p-4 sm:p-5 mb-6">
+        <div className="flex items-center justify-between mb-4 gap-2">
+          <h3 className="font-display font-semibold text-base sm:text-lg">{t("reports.transactions")}</h3>
           <span className="text-xs font-mono text-muted-foreground">
             {(finance?.transactions || []).length}
           </span>
@@ -115,7 +115,7 @@ export default function ReportsPage() {
           <div className="text-sm text-muted-foreground text-center py-8">{t("reports.no_transactions")}</div>
         ) : (
           <div className="overflow-x-auto max-h-96 overflow-y-auto">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[640px] text-sm">
               <thead className="border-b border-border sticky top-0 bg-card">
                 <tr>
                   <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("reports.date")}</th>
@@ -197,7 +197,7 @@ export default function ReportsPage() {
           <div className="text-sm text-muted-foreground text-center py-8">{t("dashboard.no_at_risk")}</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[640px] text-sm">
               <thead className="border-b border-border">
                 <tr>
                   <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("field.full_name")}</th>

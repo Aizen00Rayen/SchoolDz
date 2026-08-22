@@ -11,7 +11,22 @@ from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.throttling import AnonRateThrottle
 
 class BearerTokenAuthentication(TokenAuthentication):
+    """DRF's own Token model has no expiry — a key issued once stays valid
+    forever, so a token copied off a shared school PC or lifted from storage
+    never stops working. Age it out here instead, and delete the stale row so
+    the next login mints a fresh one. AUTH_TOKEN_MAX_AGE_DAYS = 0 disables."""
     keyword = 'Bearer'
+
+    def authenticate_credentials(self, key):
+        user, token = super().authenticate_credentials(key)
+        max_age_days = getattr(settings, 'AUTH_TOKEN_MAX_AGE_DAYS', 0)
+        if max_age_days:
+            from django.utils import timezone
+            from datetime import timedelta
+            if timezone.now() - token.created > timedelta(days=max_age_days):
+                token.delete()
+                raise AuthenticationFailed('Session expired — please sign in again.')
+        return user, token
 
 
 class LoginRateThrottle(AnonRateThrottle):
@@ -30,6 +45,15 @@ class EnrollmentRateThrottle(AnonRateThrottle):
     """Per-IP guard on the public self-enrollment endpoint — it creates a
     real user account + student record per call, unlike a plain lookup."""
     scope = 'enrollment'
+
+
+class StudentLookupRateThrottle(AnonRateThrottle):
+    """Per-IP guard on the no-login student badge lookup. Student codes are
+    sequential (STU-00001, STU-00002, ...) and a school's slug is public, so
+    without a limit this endpoint is a directory of every child's name and
+    photo, walkable in seconds. Rate comes from
+    DEFAULT_THROTTLE_RATES['student_lookup']."""
+    scope = 'student_lookup'
 
 
 from chargily_pay import ChargilyClient as SDKChargilyClient

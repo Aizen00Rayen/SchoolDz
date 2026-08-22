@@ -11,6 +11,32 @@ export function resolveFileUrl(path) {
   return `${BACKEND_URL}${path}`;
 }
 
+/** Only these schemes may come back from a stored, tenant-authored link
+ * (a school's map URL or social profiles) that we render as an href. Without
+ * the check a workspace owner could put `javascript:...` in Settings and have
+ * it run in the browser of every parent visiting their public page. */
+const SAFE_URL_SCHEMES = /^(https?:|mailto:|tel:)/i;
+
+export function safeExternalUrl(url) {
+  if (!url) return null;
+  const trimmed = String(url).trim();
+  if (SAFE_URL_SCHEMES.test(trimmed)) return trimmed;
+  // Bare "facebook.com/x" is a common way for owners to type these in.
+  if (/^[\w-]+(\.[\w-]+)+(\/|$)/.test(trimmed)) return `https://${trimmed}`;
+  return null;
+}
+
+/** Opens a file that lives behind the authenticated /uploads/* routes
+ * (teacher CVs and diplomas, medical excuse notes, quiz answer sheets). A
+ * plain <a href> can't carry the Bearer token those paths now require, so
+ * fetch it as a blob first — same approach as openInvoicePdf. */
+export async function openPrivateFile(path) {
+  const res = await api.get(resolveFileUrl(path), { responseType: "blob", baseURL: "" });
+  const url = URL.createObjectURL(res.data);
+  window.open(url, "_blank", "noopener");
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
 /** Fetches a payment's invoice PDF (auth'd — the endpoint needs the Bearer
  * token, so a plain <a href> won't carry it) and opens it in a new tab.
  * Used from both the staff Payments page and the parent portal. */

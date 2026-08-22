@@ -78,7 +78,7 @@ export default function LogsPage() {
           <EmptyState icon={ScrollText} title={t("menu.logs")} description={t("subtitle.logs")} />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[720px] text-sm">
               <thead className="bg-muted/40 border-b border-border">
                 <tr>
                   {["logs.when", "logs.user", "logs.category", "logs.action", "logs.description", "logs.ip"].map((k) => (

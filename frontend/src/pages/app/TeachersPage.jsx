@@ -10,7 +10,7 @@ import { Field, InviteButton, ExportMenu } from "./_shared";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { api, extractError, resolveFileUrl } from "@/lib/api";
+import { api, extractError, openPrivateFile, resolveFileUrl } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
 
@@ -94,12 +94,13 @@ function DocumentField({ label, url, uploadPath, teacherId, onUploaded }) {
   return (
     <div className="flex items-center gap-2">
       {url && (
-        <a
-          href={resolveFileUrl(url)} target="_blank" rel="noreferrer"
+        <button
+          type="button"
+          onClick={() => openPrivateFile(url).catch((e) => toast.error(extractError(e)))}
           className="flex items-center gap-1.5 text-xs text-accent hover:underline truncate"
         >
           <FileText className="w-3.5 h-3.5 flex-shrink-0" /> {t("teacher.view_document")} <ExternalLink className="w-3 h-3 flex-shrink-0" />
-        </a>
+        </button>
       )}
       <input ref={inputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf" className="hidden" onChange={onFileSelect} />
       <Button type="button" variant="outline" size="sm" disabled={uploadMut.isPending} onClick={() => inputRef.current?.click()}>

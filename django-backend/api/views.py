@@ -24,12 +24,12 @@ from rest_framework import viewsets, status, serializers
 from rest_framework.decorators import api_view, permission_classes, throttle_classes, action
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
-from rest_framework.exceptions import ValidationError, PermissionDenied, NotFound, APIException
+from rest_framework.exceptions import ValidationError, PermissionDenied, NotFound, APIException, NotAuthenticated
 from rest_framework.authtoken.models import Token
 
 from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_LEVELS
 from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, RoomSerializer, AttendanceSerializer, PaymentSerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer, TimetableEntrySerializer
-from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle, EnrollmentRateThrottle, log_activity
+from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle, EnrollmentRateThrottle, StudentLookupRateThrottle, log_activity
 
 # Single source of truth for pricing:
 PLANS_CONFIG = {
@@ -215,7 +215,15 @@ INVOICE_STATUS_AR = {
     'due_on': 'يُستحق في',
 }
 
-UPLOAD_SUBDIRS = {'logos', 'hero', 'teachers', 'courses', 'gallery', 'quizzes', 'submissions', 'documents', 'excuses'}
+# Anything under a public subdir is deliberately readable by anyone with the
+# link — it's the branding and course imagery rendered on a school's public
+# enrollment page, plus the quiz exercise sheet that the no-login take-link
+# has to show. Everything else is personal data (a teacher's CV and diploma, a
+# child's medical excuse note, a student's answer sheet) and is served only to
+# a signed-in member of the tenant that owns it — see serve_upload.
+PUBLIC_UPLOAD_SUBDIRS = {'logos', 'hero', 'teachers', 'courses', 'gallery', 'quizzes'}
+PRIVATE_UPLOAD_SUBDIRS = {'submissions', 'documents', 'excuses'}
+UPLOAD_SUBDIRS = PUBLIC_UPLOAD_SUBDIRS | PRIVATE_UPLOAD_SUBDIRS
 IMAGE_UPLOAD_EXTS = {'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif'}
 
 
@@ -603,6 +611,7 @@ def auth_login(request):
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
+@throttle_classes([StudentLookupRateThrottle])
 def public_student_lookup(request):
     """No-login lookup for the student mobile app: a student punches in their
     workspace slug + student code and gets back just enough to render their
@@ -1137,7 +1146,12 @@ def auth_reset_password(request):
         
         row.used = True
         row.save()
-        
+
+        # Resetting the password is how someone recovers a compromised
+        # account, so every session issued before this moment has to die with
+        # it — otherwise the attacker's Bearer token keeps working.
+        Token.objects.filter(user=user).delete()
+
     return Response({'ok': True})
 
 
@@ -4013,12 +4027,43 @@ def gallery_photo_detail(request, tenant_id, photo_id):
     return Response(SchoolGalleryPhotoSerializer(photo).data)
 
 
-# Serves uploaded tenant/teacher/course/gallery images directly.
+def _tenant_owns_upload(user, url):
+    """True when a record in the requesting user's own tenant references this
+    exact stored path. Filenames carry ~72 bits of entropy, but an unguessable
+    URL is still a bearer credential that leaks through referrers, history and
+    shared screenshots — so private files are checked against real ownership,
+    not just knowledge of the link."""
+    tenant_id = getattr(user, 'tenant_id', None)
+    if not tenant_id:
+        return False
+    if Teacher.objects.filter(tenant_id=tenant_id).filter(Q(cv_url=url) | Q(diploma_url=url)).exists():
+        return True
+    if Attendance.objects.filter(tenant_id=tenant_id, excuse_document_url=url).exists():
+        return True
+    if QuizSubmissionFile.objects.filter(tenant_id=tenant_id, file_url=url).exists():
+        return True
+    return False
+
+
+# Serves uploaded tenant/teacher/course/gallery images directly. Runs through
+# @api_view so DRF's Bearer authentication populates request.user — the
+# private-subdir check below depends on it, and a plain Django view would only
+# ever see AnonymousUser.
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def serve_upload(request, subdir, filename):
     if subdir not in UPLOAD_SUBDIRS:
         raise Http404("Not found")
+
+    if subdir in PRIVATE_UPLOAD_SUBDIRS:
+        user = request.user
+        if not getattr(user, 'is_authenticated', False):
+            raise NotAuthenticated('Authentication required')
+        if user.role == 'parent':
+            raise Http404("Not found")
+        if not user.is_super_admin() and not _tenant_owns_upload(user, f'/uploads/{subdir}/{filename}'):
+            # 404, not 403 — a wrong answer here would confirm the file exists.
+            raise Http404("Not found")
 
     file_path = os.path.join(settings.MEDIA_ROOT, subdir, filename)
     if not os.path.isfile(file_path):

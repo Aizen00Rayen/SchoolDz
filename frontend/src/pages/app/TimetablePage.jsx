@@ -136,7 +136,9 @@ export default function TimetablePage() {
       <PageHeader title={t("menu.timetable")} subtitle={t("subtitle.timetable")} />
       <div className="surface-card overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-xs border-collapse" data-testid="timetable-grid">
+          {/* Seven day columns can't shrink below readability — scroll the
+              grid sideways on phones rather than squeezing each day to 40px. */}
+          <table className="w-full min-w-[720px] text-xs border-collapse" data-testid="timetable-grid">
             <thead>
               <tr className="bg-muted/40 border-b border-border">
                 <th className="w-16 px-2 py-2 text-start font-medium text-muted-foreground" />

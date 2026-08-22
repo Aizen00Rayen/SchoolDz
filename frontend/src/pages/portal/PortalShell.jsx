@@ -23,8 +23,8 @@ export default function PortalShell() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <header className="h-14 border-b border-border glass-nav flex items-center gap-3 px-6 sticky top-0 z-30">
-        <div className="flex items-center gap-2.5">
+      <header className="h-14 border-b border-border glass-nav flex items-center gap-2 sm:gap-3 px-3 sm:px-6 sticky top-0 z-30">
+        <div className="flex items-center gap-2 min-w-0">
           <div className="w-7 h-7 rounded-md bg-primary grid place-items-center flex-shrink-0 overflow-hidden">
             {tenant?.logo_url ? (
               <img src={resolveFileUrl(tenant.logo_url)} alt={tenant?.name || "Workspace logo"} className="w-full h-full object-cover" />
@@ -34,11 +34,11 @@ export default function PortalShell() {
               </span>
             )}
           </div>
-          <div className="text-sm font-semibold">{tenant?.name || "Scolaris"}</div>
-          <span className="text-xs text-muted-foreground ms-2">Parent portal</span>
+          <div className="text-sm font-semibold truncate">{tenant?.name || "Scolaris"}</div>
+          <span className="hidden sm:inline text-xs text-muted-foreground ms-2 whitespace-nowrap">Parent portal</span>
         </div>
 
-        <div className="ms-auto flex items-center gap-2">
+        <div className="ms-auto flex items-center gap-0.5 sm:gap-2 flex-shrink-0">
           <span className="hidden md:block text-xs text-muted-foreground">{user?.name}</span>
           <Button variant="ghost" size="icon" asChild className="relative">
             <Link to="/portal/messages" aria-label="Messages">
@@ -62,7 +62,7 @@ export default function PortalShell() {
         </div>
       </header>
 
-      <main className="max-w-[960px] mx-auto px-6 py-8">
+      <main className="max-w-[960px] mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <Outlet />
       </main>
     </div>

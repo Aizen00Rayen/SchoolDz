@@ -198,7 +198,7 @@ export default function TeacherPaymentsPage() {
           <EmptyState icon={Wallet} title={t("menu.teacher_payments")} description={t("tp.set_percentage")} />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[640px] text-sm">
               <thead className="bg-muted/40 border-b border-border">
                 <tr>
                   {["menu.teachers", "tp.percentage", "tp.present_count", "tp.earned", "tp.paid_out", "tp.balance"].map((k) => (
@@ -252,7 +252,7 @@ export default function TeacherPaymentsPage() {
           <div className="p-6 text-sm text-muted-foreground">{t("crud.no_items_yet", { module: t("tp.payouts") })}</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[640px] text-sm">
               <thead className="bg-muted/40 border-b border-border">
                 <tr>
                   {["field.paid_at", "menu.teachers", "field.amount", "field.period", "field.notes"].map((k) => (

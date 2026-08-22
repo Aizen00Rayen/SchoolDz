@@ -1,10 +1,10 @@
-import { Link, NavLink, Outlet, useNavigate } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Award, BarChart3, BookOpen, Building2, CalendarClock, CalendarDays, ChevronsUpDown, ClipboardCheck,
-  DoorOpen, FileBarChart2, FileQuestion, GraduationCap, Globe, HandCoins, Languages, LogOut, MessageSquare, Moon,
-  PanelLeft, PanelLeftClose, Receipt, ScrollText, Search, Settings, Sun, Users, UserRound, Wallet, Layers, Table2,
+  DoorOpen, FileBarChart2, FileQuestion, GraduationCap, Globe, HandCoins, Languages, LogOut, Menu, MessageSquare, Moon,
+  PanelLeft, PanelLeftClose, Receipt, ScrollText, Search, Settings, Sun, Users, UserRound, Wallet, Layers, Table2, X,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth";
@@ -51,20 +51,40 @@ const NAV = [
 
 export default function AppShell() {
   const { user, tenant, logout } = useAuth();
-  const { t, lang, setLang } = useI18n();
+  const { t, lang, setLang, dir } = useI18n();
   const { theme, toggle } = useTheme();
   useTenantBranding(tenant);
   const nav = useNavigate();
+  const location = useLocation();
 
   const [cmdOpen, setCmdOpen] = useState(false);
   const [cmdQuery, setCmdQuery] = useState("");
   const [cmdResults, setCmdResults] = useState([]);
   const [cmdBusy, setCmdBusy] = useState(false);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("sidebar_collapsed") === "1");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
     localStorage.setItem("sidebar_collapsed", collapsed ? "1" : "0");
   }, [collapsed]);
+
+  // The drawer is an overlay on phones: close it whenever navigation happens,
+  // and stop the page behind it from scrolling while it's open.
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!mobileNavOpen) return undefined;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onEscape = (e) => e.key === "Escape" && setMobileNavOpen(false);
+    window.addEventListener("keydown", onEscape);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener("keydown", onEscape);
+    };
+  }, [mobileNavOpen]);
 
   useEffect(() => {
     const handler = (e) => {
@@ -84,6 +104,25 @@ export default function AppShell() {
       return;
     }
   }, [cmdOpen]);
+
+  // The collapsed "icon rail" only exists at lg+. Below that the sidebar is a
+  // full-width drawer, so a collapse preference saved on a desktop must not
+  // leave a phone user with an unlabelled strip of icons.
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const sync = () => setIsDesktop(mq.matches);
+    mq.addEventListener("change", sync);
+    window.addEventListener("resize", sync); // belt and braces: some embedded
+    sync();                                  // webviews don't fire mq change
+    return () => {
+      mq.removeEventListener("change", sync);
+      window.removeEventListener("resize", sync);
+    };
+  }, []);
+  const railMode = collapsed && isDesktop;
 
   useEffect(() => {
     if (!cmdQuery.trim()) {
@@ -130,13 +169,30 @@ export default function AppShell() {
   };
 
   return (
-    <div className={`min-h-screen bg-background text-foreground grid ${collapsed ? "grid-cols-[68px_1fr]" : "grid-cols-[240px_1fr]"} transition-[grid-template-columns] duration-200`}>
-      {/* Sidebar */}
+    <div className={`min-h-screen bg-background text-foreground lg:grid ${collapsed ? "lg:grid-cols-[68px_1fr]" : "lg:grid-cols-[240px_1fr]"} lg:transition-[grid-template-columns] lg:duration-200`}>
+      {/* Scrim behind the mobile drawer */}
+      {mobileNavOpen && (
+        <button
+          type="button"
+          aria-label={t("actions.close")}
+          onClick={() => setMobileNavOpen(false)}
+          className="fixed inset-0 z-40 bg-black/60 lg:hidden"
+        />
+      )}
+
+      {/* Sidebar — off-canvas drawer below lg, static grid column at lg+ */}
       <aside
         data-testid={APPUI.sidebar}
-        className="border-e border-border bg-card/40 flex flex-col h-screen sticky top-0 overflow-hidden"
+        className="mobile-drawer fixed inset-y-0 start-0 z-50 w-[264px] border-e border-border bg-card flex flex-col h-screen overflow-hidden lg:sticky lg:top-0 lg:z-auto lg:w-auto lg:bg-card/40"
+        style={{
+          transform: isDesktop
+            ? undefined
+            : mobileNavOpen
+              ? "translateX(0)"
+              : `translateX(${dir === "rtl" ? "100%" : "-100%"})`,
+        }}
       >
-        <div className={`p-4 border-b border-border flex items-center gap-1 ${collapsed ? "flex-col" : ""}`}>
+        <div className={`p-4 border-b border-border flex items-center gap-1 ${railMode ? "flex-col" : ""}`}>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -156,7 +212,7 @@ export default function AppShell() {
                     </span>
                   )}
                 </div>
-                {!collapsed && (
+                {!railMode && (
                   <>
                     <div className="min-w-0 flex-1 text-start">
                       <div className="text-sm font-semibold truncate">
@@ -195,13 +251,23 @@ export default function AppShell() {
           <Button
             variant="ghost"
             size="icon"
-            className="flex-shrink-0 h-8 w-8"
+            className="hidden lg:inline-flex flex-shrink-0 h-8 w-8"
             onClick={() => setCollapsed((v) => !v)}
             data-testid="sidebar-collapse-toggle"
             aria-label={t(collapsed ? "common.expand_sidebar" : "common.collapse_sidebar")}
             title={t(collapsed ? "common.expand_sidebar" : "common.collapse_sidebar")}
           >
             {collapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="lg:hidden flex-shrink-0 h-8 w-8"
+            onClick={() => setMobileNavOpen(false)}
+            data-testid="sidebar-close"
+            aria-label={t("actions.close")}
+          >
+            <X className="h-4 w-4" />
           </Button>
         </div>
 
@@ -216,9 +282,9 @@ export default function AppShell() {
               key={item.key}
               to={item.to}
               data-testid={APPUI.sidebarLink(item.key)}
-              title={collapsed ? t(`menu.${item.key}`) : undefined}
+              title={railMode ? t(`menu.${item.key}`) : undefined}
               className={({ isActive }) =>
-                `flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors ${collapsed ? "justify-center" : ""} ${
+                `flex items-center gap-2.5 px-3 py-2.5 lg:py-2 rounded-md text-sm transition-colors ${railMode ? "justify-center" : ""} ${
                   isActive
                     ? "bg-primary text-primary-foreground font-semibold"
                     : "text-muted-foreground hover:text-foreground hover:bg-muted"
@@ -226,13 +292,13 @@ export default function AppShell() {
               }
             >
               <item.icon className="w-4 h-4 flex-shrink-0" />
-              {!collapsed && <span className="truncate">{t(`menu.${item.key}`)}</span>}
+              {!railMode && <span className="truncate">{t(`menu.${item.key}`)}</span>}
             </NavLink>
           ))}
         </nav>
 
         <div className="p-3 border-t border-border">
-          {!collapsed && (
+          {!railMode && (
             <>
               <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2 px-2">
                 {t("common.plan_active")}
@@ -245,13 +311,13 @@ export default function AppShell() {
           )}
           <Button
             variant="outline"
-            size={collapsed ? "icon" : "sm"}
-            className={collapsed ? "w-full" : "w-full text-xs"}
+            size={railMode ? "icon" : "sm"}
+            className={railMode ? "w-full" : "w-full text-xs"}
             onClick={() => nav("/app/settings")}
             data-testid="sidebar-upgrade-button"
-            title={collapsed ? t("common.upgrade") : undefined}
+            title={railMode ? t("common.upgrade") : undefined}
           >
-            {collapsed ? <Layers className="w-4 h-4" /> : t("common.upgrade")}
+            {railMode ? <Layers className="w-4 h-4" /> : t("common.upgrade")}
           </Button>
         </div>
       </aside>
@@ -259,21 +325,33 @@ export default function AppShell() {
       {/* Main */}
       <div className="flex flex-col min-w-0">
         {/* Topbar */}
-        <header className="h-14 border-b border-border glass-nav flex items-center gap-3 px-6 sticky top-0 z-30">
+        <header className="h-14 border-b border-border glass-nav flex items-center gap-2 sm:gap-3 px-3 sm:px-6 sticky top-0 z-30">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="lg:hidden flex-shrink-0 h-9 w-9"
+            onClick={() => setMobileNavOpen(true)}
+            data-testid="mobile-nav-toggle"
+            aria-label={t("common.expand_sidebar")}
+          >
+            <Menu className="h-5 w-5" />
+          </Button>
+
           <button
             onClick={() => setCmdOpen(true)}
             data-testid={APPUI.topbarSearch}
-            className="flex items-center gap-2 w-full max-w-md h-9 rounded-lg border border-border bg-background text-muted-foreground px-3 text-sm hover:border-foreground/40 transition-colors"
+            aria-label={t("actions.search")}
+            className="flex items-center justify-center sm:justify-start gap-2 w-9 sm:w-full sm:max-w-md h-9 rounded-lg border border-border bg-background text-muted-foreground sm:px-3 text-sm hover:border-foreground/40 transition-colors flex-shrink-0 sm:flex-shrink"
           >
-            <Search className="w-4 h-4" />
-            <span>{t("actions.search")}</span>
-            <span className="ms-auto flex gap-1">
+            <Search className="w-4 h-4 flex-shrink-0" />
+            <span className="hidden sm:inline">{t("actions.search")}</span>
+            <span className="ms-auto hidden md:flex gap-1">
               <span className="kbd">⌘</span>
               <span className="kbd">K</span>
             </span>
           </button>
 
-          <div className="ms-auto flex items-center gap-1">
+          <div className="ms-auto flex items-center gap-0.5 sm:gap-1">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" data-testid={APPUI.langSwitcher} aria-label="Language">
@@ -299,17 +377,18 @@ export default function AppShell() {
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
-                  className="flex items-center gap-2 h-9 rounded-full ps-1 pe-3 hover:bg-muted transition-colors"
+                  className="flex items-center gap-2 h-9 rounded-full p-1 md:ps-1 md:pe-3 hover:bg-muted transition-colors"
                   data-testid={APPUI.userMenu}
+                  aria-label={user?.name || t("common.signed_in_as")}
                 >
                   <Avatar className="h-7 w-7">
                     <AvatarFallback className="text-xs bg-accent text-accent-foreground font-semibold">
                       {initials}
                     </AvatarFallback>
                   </Avatar>
-                  <div className="hidden md:block text-start leading-tight">
-                    <div className="text-xs font-medium">{user?.name}</div>
-                    <div className="text-[10px] text-muted-foreground capitalize">{user?.role}</div>
+                  <div className="hidden md:block text-start leading-tight max-w-[140px]">
+                    <div className="text-xs font-medium truncate">{user?.name}</div>
+                    <div className="text-[10px] text-muted-foreground capitalize truncate">{user?.role}</div>
                   </div>
                 </button>
               </DropdownMenuTrigger>
@@ -342,11 +421,11 @@ export default function AppShell() {
         {/* Page content */}
         <main className="flex-1 min-w-0">
           <motion.div
-            key={window.location.pathname}
+            key={location.pathname}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.25 }}
-            className="max-w-[1280px] mx-auto px-6 py-8"
+            className="max-w-[1280px] mx-auto px-4 sm:px-6 py-6 sm:py-8"
           >
             <Outlet />
           </motion.div>

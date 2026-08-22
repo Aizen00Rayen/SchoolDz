@@ -229,7 +229,7 @@ export default function QuizBuilderPage() {
           <div className="p-6 text-sm text-muted-foreground">{t("quiz.no_attempts")}</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[620px] text-sm">
               <thead className="bg-muted/40 border-b border-border">
                 <tr>
                   {["quiz.solver_name", "quiz.matched_student", "quiz.submitted_at", "quiz.score"].map((k) => (

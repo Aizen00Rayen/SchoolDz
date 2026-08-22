@@ -239,8 +239,16 @@ REST_FRAMEWORK = {
         'login': '10/min',
         'password_reset': '5/min',
         'enrollment': '5/min',
+        # Sequential student codes + a public school slug make this endpoint a
+        # child directory if it's left unmetered — see StudentLookupRateThrottle.
+        'student_lookup': '10/min',
     },
 }
+
+# How long a Bearer token stays valid (see BearerTokenAuthentication). DRF's
+# token model has no expiry of its own, so without this a key issued once is
+# accepted forever. 0 disables the check.
+AUTH_TOKEN_MAX_AGE_DAYS = int(os.environ.get('AUTH_TOKEN_MAX_AGE_DAYS', '30'))
 
 PASSWORD_HASHERS = [
     'api.hashers.LaravelBCryptPasswordHasher',

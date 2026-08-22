@@ -232,12 +232,12 @@ export function StudentSearchSelect({ value, onChange, placeholder }) {
 
 export function PageHeader({ title, subtitle, actions }) {
   return (
-    <div className="flex flex-wrap items-end justify-between gap-4 mb-8">
-      <div>
-        <h1 className="font-display text-3xl md:text-4xl font-bold tracking-tight">{title}</h1>
+    <div className="flex flex-wrap items-end justify-between gap-3 sm:gap-4 mb-6 sm:mb-8">
+      <div className="min-w-0">
+        <h1 className="font-display text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight break-words">{title}</h1>
         {subtitle && <p className="text-muted-foreground mt-1 text-sm">{subtitle}</p>}
       </div>
-      {actions && <div className="flex items-center gap-2">{actions}</div>}
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
   );
 }
@@ -433,6 +433,10 @@ export function CalendarGrid({ month: anchor, sessions, onDayClick, view = "mont
 
   return (
     <div className="border border-border rounded-xl overflow-hidden bg-card">
+      {/* Seven columns of session chips are unreadable under ~620px, so the
+          grid keeps its width and the container scrolls instead. */}
+      <div className="overflow-x-auto">
+      <div className="min-w-[620px]">
       <div className="grid grid-cols-7 border-b border-border bg-muted/40">
         {WEEKDAY_KEYS.map((d) => (
           <div key={d} className="text-center text-[11px] font-medium uppercase tracking-widest text-muted-foreground py-2">
@@ -477,6 +481,8 @@ export function CalendarGrid({ month: anchor, sessions, onDayClick, view = "mont
             </button>
           );
         })}
+      </div>
+      </div>
       </div>
     </div>
   );

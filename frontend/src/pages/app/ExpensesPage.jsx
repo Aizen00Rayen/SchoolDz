@@ -165,7 +165,7 @@ export default function ExpensesPage() {
         }
       />
 
-      <div className="surface-card p-4 mb-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div className="surface-card p-4 mb-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
         <Field label={t("reports.from")}>
           <Input type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
         </Field>
@@ -212,7 +212,7 @@ export default function ExpensesPage() {
           />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[680px] text-sm">
               <thead className="bg-muted/40 border-b border-border">
                 <tr>
                   {["field.spent_at", "field.title", "field.category", "field.amount", "field.method"].map((k) => (

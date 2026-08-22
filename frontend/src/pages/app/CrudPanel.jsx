@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Plus, Search, Trash2, Pencil } from "lucide-react";
@@ -106,6 +106,37 @@ export default function CrudPanel({
 
   const items = data?.items || [];
 
+  /** Edit/delete (plus any page-specific actions) for one record — rendered
+   * identically in the desktop table row and the phone card. A plain function,
+   * not a component, so it doesn't remount its buttons on every render. */
+  const rowActions = (row) => (
+    <div className="flex items-center justify-end gap-1 flex-shrink-0">
+      {renderRowActions?.(row)}
+      <Button
+        size="icon" variant="ghost"
+        onClick={() => openEdit(row)}
+        data-testid={APPUI.rowAction(moduleKey, row.id, "edit")}
+        className="h-10 w-10 md:h-8 md:w-8"
+        aria-label={t("actions.edit")}
+      >
+        <Pencil className="w-3.5 h-3.5" />
+      </Button>
+      <Button
+        size="icon" variant="ghost"
+        onClick={async () => {
+          if (await confirm({ title: t("confirm.delete_record"), destructive: true })) {
+            deleteMut.mutate(row.id);
+          }
+        }}
+        data-testid={APPUI.rowAction(moduleKey, row.id, "delete")}
+        className="h-10 w-10 md:h-8 md:w-8 text-destructive hover:bg-destructive/10"
+        aria-label={t("actions.delete")}
+      >
+        <Trash2 className="w-3.5 h-3.5" />
+      </Button>
+    </div>
+  );
+
   return (
     <div>
       <PageHeader
@@ -127,8 +158,8 @@ export default function CrudPanel({
         }
       />
 
-      <div className="flex items-center gap-2 mb-4">
-        <div className="relative flex-1 max-w-xs">
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <div className="relative flex-1 min-w-[160px] sm:max-w-xs">
           <Search className="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
             value={q}
@@ -139,7 +170,7 @@ export default function CrudPanel({
           />
         </div>
         {filterBar}
-        <div className="text-xs text-muted-foreground font-mono">
+        <div className="text-xs text-muted-foreground font-mono whitespace-nowrap">
           {data?.total ?? 0} {t(`menu.${moduleKey}`)}
         </div>
       </div>
@@ -159,7 +190,42 @@ export default function CrudPanel({
             )}
           />
         ) : (
-          <div className="overflow-x-auto">
+          <>
+          {/* Phones: one stacked card per record. A 6-to-10 column table can
+              only be read on a 375px screen by scrolling sideways through it,
+              which hides the row actions and the record you started on. */}
+          <div className="md:hidden divide-y divide-border">
+            {items.map((row) => (
+              <div
+                key={row.id}
+                data-testid={APPUI.row(moduleKey, row.id)}
+                className={`p-4 ${rowClassName ? rowClassName(row) : ""}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1 font-medium text-sm">
+                    {columns[0].render ? columns[0].render(row) : row[columns[0].key] ?? "—"}
+                  </div>
+                  {canEdit && rowActions(row)}
+                </div>
+                {columns.length > 1 && (
+                  <dl className="mt-3 grid grid-cols-[minmax(0,6.5rem)_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
+                    {columns.slice(1).map((c) => (
+                      <Fragment key={c.key}>
+                        <dt className="text-muted-foreground uppercase tracking-wide text-[10px] pt-0.5">
+                          {c.label}
+                        </dt>
+                        <dd className="min-w-0 break-words">
+                          {c.render ? c.render(row) : row[c.key] ?? "—"}
+                        </dd>
+                      </Fragment>
+                    ))}
+                  </dl>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/40 border-b border-border">
                 <tr>
@@ -185,29 +251,7 @@ export default function CrudPanel({
                     ))}
                     {canEdit && (
                       <td className="px-4 py-2 text-end">
-                        <div className="flex items-center justify-end gap-1">
-                          {renderRowActions?.(row)}
-                          <Button
-                            size="icon" variant="ghost"
-                            onClick={() => openEdit(row)}
-                            data-testid={APPUI.rowAction(moduleKey, row.id, "edit")}
-                            className="h-8 w-8"
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </Button>
-                          <Button
-                            size="icon" variant="ghost"
-                            onClick={async () => {
-                              if (await confirm({ title: t("confirm.delete_record"), destructive: true })) {
-                                deleteMut.mutate(row.id);
-                              }
-                            }}
-                            data-testid={APPUI.rowAction(moduleKey, row.id, "delete")}
-                            className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </Button>
-                        </div>
+                        {rowActions(row)}
                       </td>
                     )}
                   </tr>
@@ -215,6 +259,7 @@ export default function CrudPanel({
               </tbody>
             </table>
           </div>
+          </>
         )}
       </div>
 

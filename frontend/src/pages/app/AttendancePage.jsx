@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CheckCircle2, ClipboardCheck, ExternalLink, FileText, Loader2, RotateCcw, Save, Search, Upload } from "lucide-react";
 
-import { api, extractError, resolveFileUrl } from "@/lib/api";
+import { api, extractError, openPrivateFile, resolveFileUrl } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
 import { APPUI } from "@/constants/testIds";
@@ -61,12 +61,13 @@ function ExcuseCell({ record, canEdit, onChanged }) {
   return (
     <div className="flex items-center gap-2 flex-wrap">
       {record.excuse_document_url ? (
-        <a
-          href={resolveFileUrl(record.excuse_document_url)} target="_blank" rel="noreferrer"
+        <button
+          type="button"
+          onClick={() => openPrivateFile(record.excuse_document_url).catch((e) => toast.error(extractError(e)))}
           className="flex items-center gap-1 text-[11px] text-accent hover:underline"
         >
           <FileText className="w-3 h-3" /> {t("attendance.view_excuse")} <ExternalLink className="w-2.5 h-2.5" />
-        </a>
+        </button>
       ) : null}
       {canEdit && (
         <>
@@ -223,8 +224,8 @@ export default function AttendancePage() {
         />
       ) : (
         <div>
-          <div className="flex items-center gap-2 mb-4">
-            <div className="relative flex-1 max-w-xs">
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            <div className="relative flex-1 min-w-[160px] sm:max-w-xs">
               <Search className="absolute start-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
                 value={q}
@@ -239,7 +240,8 @@ export default function AttendancePage() {
             </div>
           </div>
           <div className="surface-card overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[680px] text-sm">
             <thead className="bg-muted/40 border-b border-border">
               <tr>
                 <th className="text-start px-4 py-2.5 text-xs uppercase tracking-widest text-muted-foreground font-medium">{t("field.student")}</th>
@@ -287,6 +289,7 @@ export default function AttendancePage() {
               ))}
             </tbody>
           </table>
+          </div>
           </div>
         </div>
       )}

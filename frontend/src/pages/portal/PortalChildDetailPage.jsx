@@ -18,7 +18,8 @@ function Table({ rows, isLoading, empty, columns }) {
   if (!rows.length) return <p className="text-sm text-muted-foreground py-8 text-center">{empty}</p>;
   return (
     <div className="surface-card overflow-hidden">
-      <table className="w-full text-sm">
+      <div className="overflow-x-auto">
+      <table className="w-full min-w-[520px] text-sm">
         <thead className="bg-muted/40 border-b border-border">
           <tr>
             {columns.map((c) => (
@@ -38,6 +39,7 @@ function Table({ rows, isLoading, empty, columns }) {
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

@@ -97,6 +97,25 @@
         @apply backdrop-blur-xl bg-background/80 backdrop-saturate-150 border-b border-border/60;
     }
 
+    /* Off-canvas nav drawer (phones/tablets). The open/closed transform is set
+       inline from React (see AppShell) rather than by a class here: `translateX`
+       is physical, so the closed position differs between LTR and RTL, and an
+       inline style can't be lost to a specificity fight with the utility
+       classes on the same element. This rule only supplies the easing. */
+    .mobile-drawer {
+        transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .mobile-drawer { transition: none; }
+    }
+    /* At lg+ the sidebar is a static grid column, never a drawer. This wins
+       over the inline style on purpose: if the JS that tracks the breakpoint
+       ever went stale, a leftover translate would push the desktop sidebar
+       clean off the screen. The layout must not depend on that state. */
+    @media (min-width: 1024px) {
+        .mobile-drawer { transform: none !important; }
+    }
+
     .kbd {
         @apply inline-flex items-center justify-center rounded border border-border bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground shadow-sm;
         min-width: 1.25rem;
