@@ -550,14 +550,36 @@ export function localInputToIso(value) {
   return Number.isNaN(d.getTime()) ? "" : d.toISOString();
 }
 
+/** "Group A — Math — High school · Year 2 / Experimental Sciences": groups
+ * are frequently named identically across courses (e.g. every course has
+ * its own "Group A"), so the bare group name alone doesn't disambiguate
+ * them in a dropdown. Folding in the course title and school
+ * level/year/specialty makes each option unique at a glance. */
+export function groupOptionLabel(g, courseMap, t) {
+  const course = courseMap[g.course_id];
+  if (!course) return g.name;
+  const parts = [t(`school_level.${course.school_level}`)];
+  if (course.school_year) parts.push(t("common.year_n", { n: course.school_year }));
+  if (course.specialty) parts.push(t(`specialty.${course.specialty}`));
+  const levelLabel = course.school_level ? ` · ${parts.join(" · ")}` : "";
+  return `${g.name} — ${course.title}${levelLabel}`;
+}
+
 /** "Make recurring" dialog — generates up to 12 weeks of sessions for a
  * group in one call. Shared between SessionsPage and CalendarPage so both
- * surfaces stay wired to the same /sessions/generate-recurring mutation. */
+ * surfaces stay wired to the same /sessions/generate-recurring mutation.
+ * Fetches courses itself (rather than taking them as a prop) so both call
+ * sites get the disambiguated group label for free. */
 export function RecurringDialog({ groups }) {
   const { t } = useI18n();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ group_id: "", start_at: nowLocalIso(), end_at: nowLocalIso(), weeks: 8 });
+  const { data: courses } = useQuery({
+    queryKey: ["courses-list"],
+    queryFn: async () => (await api.get("/courses")).data,
+  });
+  const courseMap = Object.fromEntries((courses?.items || []).map((c) => [c.id, c]));
 
   const mut = useMutation({
     mutationFn: () => api.post("/sessions/generate-recurring", {
@@ -593,7 +615,7 @@ export function RecurringDialog({ groups }) {
                 <SelectTrigger className="bg-background"><SelectValue placeholder={t("sessions.select_group")} /></SelectTrigger>
                 <SelectContent className="bg-popover">
                   {(groups?.items || []).map((g) => (
-                    <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>
+                    <SelectItem key={g.id} value={g.id}>{groupOptionLabel(g, courseMap, t)}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

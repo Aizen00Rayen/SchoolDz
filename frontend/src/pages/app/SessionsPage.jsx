@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import CrudPanel, { StatusPill } from "./CrudPanel";
 import { CalendarClock, Repeat } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Field, RecurringDialog, RoomSelect, isoToLocalInput, localInputToIso } from "./_shared";
+import { Field, RecurringDialog, RoomSelect, groupOptionLabel, isoToLocalInput, localInputToIso } from "./_shared";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -15,6 +15,7 @@ const DEFAULT_FORM = {
   group_id: "", teacher_id: "", room_id: "", start_at: new Date().toISOString(), end_at: new Date().toISOString(),
   topic: "", status: "scheduled",
 };
+
 
 /** Combined date + start/end time range picker for a session. form.start_at/
  * end_at always hold real UTC ISO strings (freshly defaulted, or loaded
@@ -70,8 +71,13 @@ export default function SessionsPage() {
     queryKey: ["teachers-list"],
     queryFn: async () => (await api.get("/teachers")).data,
   });
+  const { data: courses } = useQuery({
+    queryKey: ["courses-list"],
+    queryFn: async () => (await api.get("/courses")).data,
+  });
   const groupMap = Object.fromEntries((groups?.items || []).map((g) => [g.id, g]));
   const teacherMap = Object.fromEntries((teachers?.items || []).map((t) => [t.id, t]));
+  const courseMap = Object.fromEntries((courses?.items || []).map((c) => [c.id, c]));
 
   return (
     <CrudPanel
@@ -102,7 +108,10 @@ export default function SessionsPage() {
         },
         {
           key: "group", label: t("field.group"),
-          render: (r) => groupMap[r.group_id]?.name || "—",
+          render: (r) => {
+            const g = groupMap[r.group_id];
+            return g ? groupOptionLabel(g, courseMap, t) : "—";
+          },
         },
         { key: "topic", label: t("field.topic"), render: (r) => r.topic || <span className="text-muted-foreground">—</span> },
         { key: "room", label: t("field.room"), render: (r) => r.room_name || r.room || <span className="text-muted-foreground">—</span> },
@@ -125,7 +134,7 @@ export default function SessionsPage() {
               <SelectTrigger className="bg-background"><SelectValue placeholder={t("sessions.select_group")} /></SelectTrigger>
               <SelectContent className="bg-popover">
                 {(groups?.items || []).map((g) => (
-                  <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>
+                  <SelectItem key={g.id} value={g.id}>{groupOptionLabel(g, courseMap, t)}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
