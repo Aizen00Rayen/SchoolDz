@@ -2,7 +2,12 @@ django>=5.0,<6.0
 djangorestframework>=3.14.0,<3.16.0
 django-cors-headers>=4.0.0
 mysqlclient>=2.2.0
-requests>=2.32.0
+# Pinned low by chargily-pay, which depends on requests==2.31 exactly (every
+# published version does), so >=2.32 makes the dependency set unresolvable.
+# CVE-2024-35195 (a Session that keeps verify=False across requests) does not
+# apply here: the only outbound call is to a hardcoded Google HTTPS endpoint
+# and nothing in this codebase ever sets verify=False.
+requests>=2.31.0
 python-dotenv>=1.0.0
 bcrypt>=4.0.0
 gunicorn>=21.2.0
