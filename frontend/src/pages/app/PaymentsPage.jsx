@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import CrudPanel, { StatusPill } from "./CrudPanel";
-import { AlertTriangle, Wallet, FileDown } from "lucide-react";
+import { AlertTriangle, Wallet, FileDown, Info } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Field } from "./StudentsPage";
@@ -81,17 +81,20 @@ export default function PaymentsPage() {
       canCreate={canEdit}
       extraParams={balanceFilter !== "all" ? { balance_status: balanceFilter } : undefined}
       filterBar={(
-        <Select value={balanceFilter} onValueChange={setBalanceFilter}>
-          <SelectTrigger className="bg-background h-9 w-44" data-testid="payments-balance-filter">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent className="bg-popover">
-            <SelectItem value="all">{t("payments.balance_all")}</SelectItem>
-            <SelectItem value="owes">{t("payments.balance_owes")}</SelectItem>
-            <SelectItem value="overpaid">{t("payments.balance_overpaid")}</SelectItem>
-            <SelectItem value="settled">{t("payments.balance_settled")}</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-1.5">
+          <Select value={balanceFilter} onValueChange={setBalanceFilter}>
+            <SelectTrigger className="bg-background h-9 w-44" data-testid="payments-balance-filter">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-popover">
+              <SelectItem value="all">{t("payments.balance_all")}</SelectItem>
+              <SelectItem value="owes">{t("payments.balance_owes")}</SelectItem>
+              <SelectItem value="overpaid">{t("payments.balance_overpaid")}</SelectItem>
+              <SelectItem value="settled">{t("payments.balance_settled")}</SelectItem>
+            </SelectContent>
+          </Select>
+          <Info className="w-4 h-4 text-muted-foreground flex-shrink-0" title={t("payments.balance_explainer")} />
+        </div>
       )}
       columns={[
         {
@@ -119,8 +122,23 @@ export default function PaymentsPage() {
             const s = stuMap[r.student_id];
             const b = balanceMap[r.student_id];
             if (!s) return "—";
+            // The color reflects the student's overall running balance —
+            // total paid vs the real cost of every session actually attended
+            // — not the status of this one invoice. A student can have every
+            // past payment marked "paid" and still show as owing, simply
+            // because they attended a session more recently than their last
+            // payment. Spell that out in the tooltip so it doesn't read as
+            // a contradiction with the "Paid" pill sitting right next to it.
+            const currency = tenant?.currency || "DZD";
+            const tooltip = b
+              ? t("payments.balance_tooltip", {
+                  status: t(`payments.balance_${b.status}`),
+                  paid: `${Math.round(b.paid).toLocaleString()} ${currency}`,
+                  cost: `${Math.round(b.cost).toLocaleString()} ${currency}`,
+                })
+              : undefined;
             return (
-              <span className={`font-medium ${b ? BALANCE_CLS[b.status] : ""}`} title={b ? t(`payments.balance_${b.status}`) : undefined}>
+              <span className={`font-medium ${b ? BALANCE_CLS[b.status] : ""}`} title={tooltip}>
                 {s.first_name} {s.last_name}
               </span>
             );

@@ -237,7 +237,7 @@ export default function DashboardPage() {
             <div className="font-mono text-xl font-bold">
               {isLoading ? <Skeleton className="h-6 w-28" /> : money(kpis.receivables_total, currency)}
             </div>
-            <div className="text-xs text-muted-foreground">
+            <div className="text-xs text-muted-foreground" title={t("payments.balance_explainer")}>
               {t("dashboard.students_owing_count", { count: alerts.students_owing_count || 0 })}
             </div>
           </div>
