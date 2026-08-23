@@ -7,7 +7,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import CrudPanel, { StatusPill } from "./CrudPanel";
-import { Field, PageHeader } from "./_shared";
+import { Field, PageHeader, sessionGroupLabel } from "./_shared";
 import { useI18n } from "@/lib/i18n";
 import { api } from "@/lib/api";
 import { usePermission } from "@/lib/permissions";
@@ -66,7 +66,7 @@ function AvailabilityChecker() {
               )}
               {r.occupying_sessions?.length > 0 && (
                 <div className="text-xs text-muted-foreground mt-1.5 pt-1.5 border-t border-border">
-                  {t("rooms.occupied_by")}: {r.occupying_sessions.map((s) => s.group_name || s.course_title).filter(Boolean).join(", ")}
+                  {t("rooms.occupied_by")}: {r.occupying_sessions.map((s) => sessionGroupLabel(s, t)).filter(Boolean).join(", ")}
                 </div>
               )}
             </div>

@@ -215,6 +215,29 @@ INVOICE_STATUS_AR = {
     'due_on': 'يُستحق في',
 }
 
+# Payment.kind/method choices store identical value/label pairs (e.g.
+# ('cash', 'cash')), so get_FOO_display() just returns the raw English key —
+# these translate what the invoice actually prints, matching the same
+# Arabic wording already used for kind.*/method.* in the frontend (i18n.jsx)
+# so a school sees the same word on-screen and on the printed invoice.
+INVOICE_KIND_AR = {
+    'registration': 'تسجيل',
+    'monthly': 'شهري',
+    'course': 'دورة',
+    'per_session': 'بالحصة',
+    'other': 'آخر',
+}
+INVOICE_METHOD_AR = {
+    'cash': 'نقدًا',
+    'card': 'بطاقة',
+    'bank_transfer': 'تحويل بنكي',
+    'cheque': 'شيك',
+    'other': 'آخر',
+}
+INVOICE_CURRENCY_AR = {
+    'DZD': 'دج',
+}
+
 # Anything under a public subdir is deliberately readable by anyone with the
 # link — it's the branding and course imagery rendered on a school's public
 # enrollment page, plus the quiz exercise sheet that the no-login take-link
@@ -1025,18 +1048,24 @@ def payment_invoice_pdf(request, payment_id):
         status_label = INVOICE_STATUS_AR.get(payment.status, payment.get_status_display())
         status_line = status_label
 
+    kind_label_ar = INVOICE_KIND_AR.get(payment.kind, payment.get_kind_display())
+
     item_sub_parts = []
     if payment.group:
         item_sub_parts.append(payment.group.name)
     # Only add the kind label when it isn't already the item title (that
     # happens when there's no linked course — kind is the title itself then).
     if payment.course:
-        item_sub_parts.append(payment.get_kind_display().capitalize())
+        item_sub_parts.append(kind_label_ar)
 
     subtotal = payment.amount
     discount = payment.discount or 0
     total = subtotal - discount
+    currency_code = tenant.currency or 'DZD'
 
+    # Handed to Algerian parents, so the whole document — not just the
+    # status — reads in Arabic: numeric dates (no English month names),
+    # Arabic kind/method/currency wording, RTL template.
     context = {
         'primary_color': tenant.primary_color or '#0A0A0B',
         'accent_color': tenant.accent_color or '#E53935',
@@ -1049,18 +1078,18 @@ def payment_invoice_pdf(request, payment_id):
         'tenant_currency': None,
         'logo_data_uri': logo_data_uri,
         'invoice_number': payment.invoice_number or payment.id,
-        'issued_date': payment.created_at.strftime('%d %b %Y'),
+        'issued_date': payment.created_at.strftime('%d/%m/%Y'),
         'student_name': f"{student.first_name} {student.last_name}",
         'guardian_name': student.parent.name if student.parent else None,
-        'method_label': payment.get_method_display().replace('_', ' ').capitalize(),
-        'due_date': payment.due_date.strftime('%d %b %Y') if payment.due_date and payment.status != 'paid' else None,
+        'method_label': INVOICE_METHOD_AR.get(payment.method, payment.get_method_display()),
+        'due_date': payment.due_date.strftime('%d/%m/%Y') if payment.due_date and payment.status != 'paid' else None,
         'student_code': student.student_code,
-        'item_title': payment.course.title if payment.course else payment.get_kind_display().capitalize(),
+        'item_title': payment.course.title if payment.course else kind_label_ar,
         'item_sub': ' · '.join(item_sub_parts),
         'subtotal': f"{subtotal:,.2f}",
         'discount': f"{discount:,.2f}",
         'total': f"{total:,.2f}",
-        'currency': tenant.currency or 'DZD',
+        'currency': INVOICE_CURRENCY_AR.get(currency_code, currency_code),
     }
 
     html_string = render_to_string('invoice.html', context)
@@ -1718,6 +1747,13 @@ def dashboard_summary(request):
     exp_month_data = Expense.objects.filter(tenant_id=tid, spent_at__gte=month_start.date()).aggregate(total=Sum('amount'))
     expenses_month = float(exp_month_data['total'] or 0)
 
+    # Teachers' share of revenue — the piece that never reaches the
+    # institution. Reports already nets this out of its own "net" figure;
+    # the dashboard's net_profit_month didn't, which overstated what the
+    # school actually keeps by the full amount owed to teachers.
+    teacher_earnings_today = compute_teacher_earned_total(tid, date_from=day_start.date(), date_to=day_end.date())
+    teacher_earnings_month = compute_teacher_earned_total(tid, date_from=month_start.date())
+
     # Money owed to/by the school — receivables from students who've used
     # more than they've paid for, payables from what's earned-but-unpaid to
     # teachers plus students who've overpaid (the school owes them back).
@@ -1782,11 +1818,16 @@ def dashboard_summary(request):
 
         m_total = float(m_rev_data['total'] or 0)
         m_expenses = float(m_exp_data['total'] or 0)
+        # Kept as its own series rather than folded into 'expenses' — that
+        # field mirrors the Expenses page's own total, and silently padding
+        # it with the teacher share would make the two pages disagree.
+        m_teacher = compute_teacher_earned_total(tid, date_from=m_date.date(), date_to=m_end.date())
         trend.append({
             'month': m_date.strftime('%b'),
             'revenue': round(m_total, 2),
             'expenses': round(m_expenses, 2),
-            'profit': round(m_total - m_expenses, 2),
+            'teacher_earnings': round(m_teacher, 2),
+            'profit': round(m_total - m_expenses - m_teacher, 2),
         })
 
     at_risk_students = compute_at_risk_students(tid)
@@ -1801,7 +1842,9 @@ def dashboard_summary(request):
             'revenue_month': round(revenue_month, 2),
             'expenses_today': round(expenses_today, 2),
             'expenses_month': round(expenses_month, 2),
-            'net_profit_month': round(revenue_month - expenses_month, 2),
+            'teacher_earnings_today': round(teacher_earnings_today, 2),
+            'teacher_earnings_month': round(teacher_earnings_month, 2),
+            'net_profit_month': round(revenue_month - teacher_earnings_month - expenses_month, 2),
             'outstanding': round(outstanding, 2),
             'receivables_total': receivables_total,
             'payables_total': payables_total,
@@ -2092,6 +2135,149 @@ def attendance_upload_excuse(request, attendance_id):
     attendance.excuse_document_url = new_url
     attendance.save(update_fields=['excuse_document_url'])
     return Response(AttendanceSerializer(attendance).data)
+
+
+ATTENDANCE_STATUS_AR = {
+    'present': 'حاضر',
+    'late': 'متأخر',
+    'excused': 'معذور',
+    'absent': 'غائب',
+}
+
+
+def _file_data_uri(path):
+    try:
+        with open(path, 'rb') as f:
+            raw = f.read()
+        mime = mimetypes.guess_type(path)[0] or 'application/octet-stream'
+        return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+    except OSError:
+        return None
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def attendance_session_print(request, session_id):
+    """One printable PDF for a session's saved attendance: a roster (student,
+    status, time marked) followed by every attached excuse document — a
+    photo is embedded as its own page in the same render, a PDF excuse note
+    is spliced in afterwards with pypdf (WeasyPrint can render HTML into a
+    PDF but can't graft an already-existing PDF's pages into that output by
+    itself). One combined file, so nothing needs opening separately."""
+    user = request.user
+    tid = user.tenant_id
+    if not tid:
+        raise PermissionDenied('User has no tenant')
+    if user.role == 'parent':
+        raise PermissionDenied('Forbidden')
+    if not user.is_super_admin() and user.get_permission('attendance') == 'hidden':
+        raise PermissionDenied('Forbidden')
+
+    session = ClassSession.objects.filter(id=session_id, tenant_id=tid).select_related(
+        'group', 'group__course', 'group__teacher', 'course', 'teacher', 'room_ref',
+    ).first()
+    if not session:
+        raise NotFound('Session not found')
+
+    tenant = Tenant.objects.filter(id=tid).first()
+    group = session.group
+    course = session.course or (group.course if group else None)
+    teacher = session.teacher or (group.teacher if group else None)
+
+    attendance_qs = Attendance.objects.filter(tenant_id=tid, session_id=session_id).select_related('student').order_by(
+        'student__first_name', 'student__last_name',
+    )
+    if not attendance_qs.exists():
+        return Response({'error': 'No attendance has been saved for this session yet'}, status=status.HTTP_400_BAD_REQUEST)
+
+    logo_data_uri = None
+    if tenant and tenant.logo_url:
+        filename = tenant.logo_url.rsplit('/', 1)[-1]
+        logo_data_uri = _file_data_uri(os.path.join(settings.MEDIA_ROOT, 'logos', filename))
+
+    counts = {'present': 0, 'late': 0, 'excused': 0, 'absent': 0}
+    rows = []
+    image_docs = []
+    pdf_docs = []  # merged in after the WeasyPrint render, see below
+    for a in attendance_qs:
+        counts[a.status] = counts.get(a.status, 0) + 1
+        has_document = bool(a.excuse_document_url)
+        if has_document:
+            ext = a.excuse_document_url.rsplit('.', 1)[-1].lower()
+            filename = a.excuse_document_url.rsplit('/', 1)[-1]
+            disk_path = os.path.join(settings.MEDIA_ROOT, 'excuses', filename)
+            student_label = f'{a.student.first_name} {a.student.last_name}'
+            if ext == 'pdf':
+                pdf_docs.append({'student_name': student_label, 'path': disk_path})
+            else:
+                data_uri = _file_data_uri(disk_path)
+                if data_uri:
+                    image_docs.append({'student_name': student_label, 'data_uri': data_uri})
+                else:
+                    has_document = False
+        rows.append({
+            'student_name': f'{a.student.first_name} {a.student.last_name}',
+            'student_code': a.student.student_code,
+            'status': a.status,
+            'status_label': ATTENDANCE_STATUS_AR.get(a.status, a.status),
+            'marked_at': timezone.localtime(a.marked_at).strftime('%H:%M'),
+            'has_document': has_document,
+        })
+
+    if group and course:
+        group_label = f'{group.name} — {course.title}'
+    elif group:
+        group_label = group.name
+    else:
+        group_label = '—'
+
+    context = {
+        'primary_color': (tenant.primary_color if tenant else None) or '#0A0A0B',
+        'accent_color': (tenant.accent_color if tenant else None) or '#E53935',
+        'tenant_name': tenant.name if tenant else '',
+        'tenant_initial': ((tenant.name if tenant else None) or 'S')[0].upper(),
+        'logo_data_uri': logo_data_uri,
+        'printed_at': timezone.localtime(timezone.now()).strftime('%d/%m/%Y %H:%M'),
+        'group_label': group_label,
+        'session_datetime': f"{timezone.localtime(session.start_at).strftime('%d/%m/%Y %H:%M')} — {timezone.localtime(session.end_at).strftime('%H:%M')}",
+        'teacher_name': f'{teacher.first_name} {teacher.last_name}' if teacher else None,
+        'topic': session.topic,
+        'rows': rows,
+        'counts': counts,
+        'image_docs': image_docs,
+    }
+
+    html_string = render_to_string('attendance_roster.html', context)
+    pdf_bytes = HTML(string=html_string).write_pdf()
+
+    if pdf_docs:
+        from pypdf import PdfReader, PdfWriter
+
+        writer = PdfWriter()
+        for page in PdfReader(io.BytesIO(pdf_bytes)).pages:
+            writer.add_page(page)
+
+        for doc in pdf_docs:
+            label_html = render_to_string('attendance_doc_label.html', {
+                'primary_color': context['primary_color'],
+                'student_name': doc['student_name'],
+            })
+            label_bytes = HTML(string=label_html).write_pdf()
+            for page in PdfReader(io.BytesIO(label_bytes)).pages:
+                writer.add_page(page)
+            try:
+                for page in PdfReader(doc['path']).pages:
+                    writer.add_page(page)
+            except Exception:
+                pass  # a missing/corrupt file shouldn't break the whole roster
+
+        out = io.BytesIO()
+        writer.write(out)
+        pdf_bytes = out.getvalue()
+
+    response = HttpResponse(pdf_bytes, content_type='application/pdf')
+    response['Content-Disposition'] = f'inline; filename="attendance-{session_id}.pdf"'
+    return response
 
 
 @api_view(['POST'])
@@ -3295,10 +3481,19 @@ class RoomViewSet(TenantScopedViewSet):
             ).exclude(status='cancelled').select_related('group', 'course')
             by_room = {}
             for s in occupied_sessions:
+                # Groups are frequently named the same across different
+                # courses ("Groupe A" everywhere), so the room card needs the
+                # same course/level disambiguation the group picker uses
+                # elsewhere — school_level etc. ride along for the frontend
+                # to build that label, same as it already does for groups.
+                course = s.course
                 by_room.setdefault(s.room_ref_id, []).append({
                     'session_id': s.id,
                     'group_name': s.group.name if s.group else None,
-                    'course_title': s.course.title if s.course else None,
+                    'course_title': course.title if course else None,
+                    'school_level': course.school_level if course else None,
+                    'school_year': course.school_year if course else None,
+                    'specialty': course.specialty if course else None,
                     'start_at': s.start_at,
                     'end_at': s.end_at,
                 })
@@ -3623,7 +3818,18 @@ def compute_student_balances(tenant_id):
     status is tracked by attendance, not by manually re-deriving what's
     "owed" from enrollment alone. Returns {student_id: {paid, cost, balance,
     status}}, status one of 'owes' (they owe the school), 'overpaid' (the
-    school owes them), 'settled'."""
+    school owes them), 'settled'.
+
+    Cost is accumulated per (student, course) before being summed, because a
+    'fixed_sessions' course's price is a flat total for the whole course —
+    sessions_count is how many sessions that flat price covers, not a rate.
+    A group that keeps running past its nominal session count (a make-up
+    class, a term that overran by a week) must not silently keep inflating
+    what that student owes for a course they already paid for in full, so a
+    fixed_sessions course's cost is capped at its price. 'per_session' and
+    'per_month' have no such cap — they're deliberately unit-rate and
+    recurring, so cost is meant to keep pace with however much was actually
+    attended."""
     attendance = Attendance.objects.filter(tenant_id=tenant_id, status__in=['present', 'excused'])
 
     sessions = ClassSession.objects.filter(tenant_id=tenant_id).values('id', 'course_id', 'group__course_id')
@@ -3635,16 +3841,26 @@ def compute_student_balances(tenant_id):
         if course_id:
             course_ids.add(course_id)
 
-    price_per_session = {}
-    for c in Course.objects.filter(id__in=course_ids).values('id', 'price', 'pricing_type', 'sessions_count'):
-        price_per_session[c['id']] = course_per_session_price(c['price'], c['pricing_type'], c['sessions_count'])
+    courses = {c['id']: c for c in Course.objects.filter(id__in=course_ids).values('id', 'price', 'pricing_type', 'sessions_count')}
+    price_per_session = {
+        cid: course_per_session_price(c['price'], c['pricing_type'], c['sessions_count'])
+        for cid, c in courses.items()
+    }
 
-    cost = {}
+    cost_by_student_course = {}
     for a in attendance.values('student_id', 'session_id'):
         course_id = session_course.get(a['session_id'])
         if not course_id:
             continue
-        cost[a['student_id']] = cost.get(a['student_id'], 0.0) + price_per_session.get(course_id, 0.0)
+        key = (a['student_id'], course_id)
+        cost_by_student_course[key] = cost_by_student_course.get(key, 0.0) + price_per_session.get(course_id, 0.0)
+
+    cost = {}
+    for (student_id, course_id), amount in cost_by_student_course.items():
+        course = courses.get(course_id)
+        if course and course['pricing_type'] == 'fixed_sessions':
+            amount = min(amount, float(course['price'] or 0))
+        cost[student_id] = cost.get(student_id, 0.0) + amount
 
     paid = {}
     payments = Payment.objects.filter(tenant_id=tenant_id, status='paid').values('student_id', 'amount', 'discount')
@@ -4186,6 +4402,48 @@ def filter_by_date_range(queryset, request, field):
     if date_to:
         queryset = queryset.filter(**{f'{field}__lte': date_to})
     return queryset
+
+
+def compute_teacher_earned_total(tenant_id, date_from=None, date_to=None):
+    """Sum of every teacher's earned share (percentage x per-session price,
+    for every present attendance) in an optional date window — the slice of
+    collected revenue that belongs to teachers, not the school. A lighter
+    sibling of compute_teacher_earnings(): no per-teacher breakdown, no
+    already-paid-out figure, just the one number the dashboard and revenue
+    trend need to net revenue down to what the institution actually keeps.
+    Takes explicit dates rather than a request, since the dashboard has no
+    ?from=/?to= of its own to read via filter_by_date_range."""
+    attendance = Attendance.objects.filter(tenant_id=tenant_id, status='present')
+    if date_from:
+        attendance = attendance.filter(session__start_at__date__gte=date_from)
+    if date_to:
+        attendance = attendance.filter(session__start_at__date__lte=date_to)
+
+    sessions = ClassSession.objects.filter(tenant_id=tenant_id).values(
+        'id', 'teacher_id', 'group__teacher_id', 'course_id', 'group__course_id',
+    )
+    session_info = {}
+    course_ids = set()
+    for s in sessions:
+        course_id = s['course_id'] or s['group__course_id']
+        session_info[s['id']] = {'teacher_id': s['teacher_id'] or s['group__teacher_id'], 'course_id': course_id}
+        if course_id:
+            course_ids.add(course_id)
+
+    price_per_session = {
+        c['id']: course_per_session_price(c['price'], c['pricing_type'], c['sessions_count'])
+        for c in Course.objects.filter(id__in=course_ids).values('id', 'price', 'pricing_type', 'sessions_count')
+    }
+    teacher_pct = dict(Teacher.objects.filter(tenant_id=tenant_id).values_list('id', 'payment_percentage'))
+
+    total = 0.0
+    for a in attendance.values('session_id'):
+        info = session_info.get(a['session_id'])
+        if not info or not info['teacher_id']:
+            continue
+        pct = float(teacher_pct.get(info['teacher_id']) or 0)
+        total += price_per_session.get(info['course_id'], 0.0) * pct / 100
+    return round(total, 2)
 
 
 def compute_teacher_earnings(tenant_id, request):

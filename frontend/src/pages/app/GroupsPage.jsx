@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Field } from "./StudentsPage";
 import { StudentPicker } from "./ParentsPage";
-import { RoomSelect, SchoolLevelCell } from "./_shared";
+import { RoomSelect, SchoolLevelCell, courseOptionLabel } from "./_shared";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -17,17 +17,6 @@ const DEFAULT_FORM = {
   course_id: "", name: "", teacher_id: "", room_id: "", capacity: 20,
   schedule: "", status: "active", student_ids: [],
 };
-
-/** "Math — High school · Year 2 / Experimental Sciences", so the year and
- * specialty a course was set up for is visible right in the course dropdown,
- * not just discoverable after the fact. */
-function courseOptionLabel(c, t) {
-  if (!c.school_level) return c.title;
-  const parts = [t(`school_level.${c.school_level}`)];
-  if (c.school_year) parts.push(t("common.year_n", { n: c.school_year }));
-  if (c.specialty) parts.push(t(`specialty.${c.specialty}`));
-  return `${c.title} — ${parts.join(" · ")}`;
-}
 
 export default function GroupsPage() {
   const { t } = useI18n();

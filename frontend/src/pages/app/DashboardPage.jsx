@@ -6,7 +6,7 @@ import {
 import { motion } from "framer-motion";
 import {
   ArrowUpRight, ArrowDownRight, GraduationCap, Wallet, Receipt, TrendingUp, TrendingDown,
-  Users, ClipboardCheck, Clock, TriangleAlert, HandCoins, PiggyBank,
+  Users, ClipboardCheck, Clock, TriangleAlert, HandCoins, PiggyBank, Banknote,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -19,6 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 const KPI_CONFIG = [
   { key: "students_total", tKey: "kpi.students", icon: GraduationCap, tone: "default" },
   { key: "revenue_month", tKey: "kpi.revenue_month", icon: Wallet, tone: "accent", format: "currency" },
+  { key: "teacher_earnings_month", tKey: "kpi.teacher_earnings_month", icon: Banknote, tone: "default", format: "currency" },
   { key: "expenses_month", tKey: "kpi.expenses_month", icon: Receipt, tone: "default", format: "currency" },
   { key: "attendance_pct", tKey: "kpi.attendance", icon: ClipboardCheck, tone: "default", format: "percent" },
   { key: "sessions_today", tKey: "kpi.sessions_today", icon: Clock, tone: "default" },
@@ -103,14 +104,14 @@ export default function DashboardPage() {
             )}
           </div>
           <div className="text-xs text-muted-foreground mt-0.5">
-            {money(kpis.revenue_month, currency)} {t("dashboard.revenue_label")} − {money(kpis.expenses_month, currency)} {t("dashboard.expenses_label")}
+            {money(kpis.revenue_month, currency)} {t("dashboard.revenue_label")} − {money(kpis.teacher_earnings_month, currency)} {t("dashboard.teacher_earnings_label")} − {money(kpis.expenses_month, currency)} {t("dashboard.expenses_label")}
           </div>
         </div>
       </motion.div>
 
       {/* KPI grid. On phones each card is a compact horizontal row — five
           full-height stacked blocks would push the charts a whole screen down. */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 mb-6 sm:mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4 mb-6 sm:mb-8">
         {KPI_CONFIG.map((k, i) => (
           <motion.div
             key={k.key}
@@ -183,6 +184,8 @@ export default function DashboardPage() {
                   />
                   <Area type="monotone" dataKey="revenue" stroke="hsl(var(--accent))"
                         strokeWidth={2} fill="url(#rev)" name="revenue" />
+                  <Line type="monotone" dataKey="teacher_earnings" stroke="hsl(var(--info))"
+                        strokeWidth={2} dot={false} name="teacher_earnings" />
                   <Line type="monotone" dataKey="expenses" stroke="hsl(var(--destructive))"
                         strokeWidth={2} dot={false} name="expenses" />
                 </ComposedChart>

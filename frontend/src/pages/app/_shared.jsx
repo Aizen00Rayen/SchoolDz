@@ -112,6 +112,18 @@ export function SchoolLevelCell({ row }) {
   );
 }
 
+/** "Math — High school · Year 2 / Experimental Sciences": a course option
+ * folds in the school level/year/specialty it was set up for, since a bare
+ * course title alone doesn't say which class it targets. Shared by the
+ * Groups and Payments course pickers/columns. */
+export function courseOptionLabel(c, t) {
+  if (!c.school_level) return c.title;
+  const parts = [t(`school_level.${c.school_level}`)];
+  if (c.school_year) parts.push(t("common.year_n", { n: c.school_year }));
+  if (c.specialty) parts.push(t(`specialty.${c.specialty}`));
+  return `${c.title} — ${parts.join(" · ")}`;
+}
+
 /** Room dropdown sourced from /rooms, used by Groups and Sessions forms
  * instead of a free-text field — lets the Rooms occupancy view actually
  * know which sessions are in which room. */
@@ -563,6 +575,22 @@ export function groupOptionLabel(g, courseMap, t) {
   if (course.specialty) parts.push(t(`specialty.${course.specialty}`));
   const levelLabel = course.school_level ? ` · ${parts.join(" · ")}` : "";
   return `${g.name} — ${course.title}${levelLabel}`;
+}
+
+/** Same disambiguated "Group — Course · Level · Year · Specialty" label as
+ * groupOptionLabel, but for call sites that only have a flat object (a room
+ * occupancy row from /rooms, not a real Group + a separate courseMap) —
+ * e.g. the room availability card, which gets group_name/course_title/
+ * school_level/school_year/specialty already flattened by the API. */
+export function sessionGroupLabel(row, t) {
+  if (!row.group_name) return row.course_title || "";
+  if (!row.course_title) return row.group_name;
+  const parts = [];
+  if (row.school_level) parts.push(t(`school_level.${row.school_level}`));
+  if (row.school_year) parts.push(t("common.year_n", { n: row.school_year }));
+  if (row.specialty) parts.push(t(`specialty.${row.specialty}`));
+  const levelLabel = parts.length ? ` · ${parts.join(" · ")}` : "";
+  return `${row.group_name} — ${row.course_title}${levelLabel}`;
 }
 
 /** "Make recurring" dialog — generates up to 12 weeks of sessions for a

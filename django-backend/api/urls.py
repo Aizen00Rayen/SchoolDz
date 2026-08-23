@@ -88,6 +88,8 @@ urlpatterns = [
     # Attendance
     path('attendance/session/<str:session_id>/', views.attendance_for_session, name='attendance_for_session'),
     path('attendance/session/<str:session_id>', views.attendance_for_session, name='attendance_for_session_noslash'),
+    path('attendance/session/<str:session_id>/print/', views.attendance_session_print, name='attendance_session_print'),
+    path('attendance/session/<str:session_id>/print', views.attendance_session_print, name='attendance_session_print_noslash'),
     path('attendance/student/<str:student_id>/', views.attendance_for_student, name='attendance_for_student'),
     path('attendance/student/<str:student_id>', views.attendance_for_student, name='attendance_for_student_noslash'),
     *_both('attendance/<str:attendance_id>/excuse-document', views.attendance_upload_excuse, 'attendance_upload_excuse'),

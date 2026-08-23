@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html dir="rtl" lang="ar">
 <head>
 <meta charset="utf-8">
 <style>
@@ -12,6 +12,8 @@
   * { box-sizing: border-box; }
   body {
     margin: 0;
+    direction: rtl;
+    text-align: right;
     color: #1c1b19;
     font-family: "DejaVu Sans", sans-serif;
     font-size: 7.92pt;
@@ -22,8 +24,12 @@
     margin: -11mm -10mm 9mm;
   }
 
+  /* row-reverse (not `direction`) mirrors these rows — a physical flip that
+     doesn't depend on WeasyPrint resolving flex main-axis direction from
+     the `direction` property, so the layout is correct either way. */
   .head {
     display: flex;
+    flex-direction: row-reverse;
     justify-content: space-between;
     align-items: flex-start;
     gap: 11.52pt;
@@ -31,7 +37,7 @@
     margin-bottom: 11.52pt;
     border-bottom: 0.72pt solid #dedad2;
   }
-  .brand { display: flex; align-items: center; gap: 7.2pt; }
+  .brand { display: flex; flex-direction: row-reverse; align-items: center; gap: 7.2pt; }
   .brand-mark {
     width: 24.48pt; height: 24.48pt; border-radius: 4.32pt;
     background: {{ primary_color }};
@@ -50,7 +56,7 @@
   }
   .brand-sub { font-size: 6.12pt; color: #8a8478; margin-top: 1.44pt; }
 
-  .doc-meta { text-align: right; }
+  .doc-meta { text-align: left; }
   .doc-eyebrow {
     font-size: 5.76pt; font-weight: bold; letter-spacing: 1.08pt; text-transform: uppercase;
     color: {{ accent_color }}; margin-bottom: 2.88pt;
@@ -60,6 +66,7 @@
 
   .grid-meta {
     display: flex;
+    flex-direction: row-reverse;
     justify-content: space-between;
     margin-bottom: 15.84pt;
   }
@@ -71,22 +78,25 @@
   .meta-value { font-size: 7.56pt; font-weight: bold; }
   .meta-sub { font-size: 6.48pt; color: #55504a; margin-top: 1.44pt; font-family: "DejaVu Sans Mono", monospace; }
 
+  /* Description is the first (rightmost, read-first) column; Amount the
+     second (leftmost) — markup order below matches this directly rather
+     than relying on `dir` to reorder table columns. */
   table.items { width: 100%; border-collapse: collapse; margin-bottom: 2.88pt; }
   table.items thead th {
-    text-align: left; font-size: 5.4pt; font-weight: bold; letter-spacing: 0.72pt; text-transform: uppercase;
+    text-align: right; font-size: 5.4pt; font-weight: bold; letter-spacing: 0.72pt; text-transform: uppercase;
     color: #8a8478; padding: 0 0 5.76pt; border-bottom: 0.86pt solid #c7c1b6;
   }
-  table.items thead th.num { text-align: right; }
+  table.items thead th.num { text-align: left; }
   table.items tbody td { padding: 7.2pt 0; border-bottom: 0.72pt solid #dedad2; font-size: 7.56pt; vertical-align: top; }
   table.items tbody td.num {
-    text-align: right; font-family: "DejaVu Sans Mono", monospace; white-space: nowrap;
+    text-align: left; font-family: "DejaVu Sans Mono", monospace; white-space: nowrap;
   }
   .item-title { font-weight: bold; }
   .item-sub { font-size: 6.12pt; color: #8a8478; margin-top: 1.44pt; }
 
-  .totals-wrap { display: flex; justify-content: flex-end; margin-top: 8.64pt; }
+  .totals-wrap { display: flex; justify-content: flex-start; margin-top: 8.64pt; }
   .totals { width: 144pt; }
-  .totals-row { display: flex; justify-content: space-between; font-size: 6.84pt; padding: 3.6pt 0; color: #55504a; }
+  .totals-row { display: flex; flex-direction: row-reverse; justify-content: space-between; font-size: 6.84pt; padding: 3.6pt 0; color: #55504a; }
   .totals-row .val { font-family: "DejaVu Sans Mono", monospace; }
   .totals-row.discount .val { color: {{ overdue_color }}; }
   .totals-row.grand {
@@ -98,7 +108,7 @@
   .stamp {
     display: inline-block;
     margin-top: 4.32pt;
-    transform: rotate(-6deg);
+    transform: rotate(6deg);
     border: 1.15pt solid {{ stamp_color }};
     color: {{ stamp_color }};
     font-family: "DejaVu Serif", serif;
@@ -112,11 +122,11 @@
 
   .foot {
     margin-top: 18.72pt; padding-top: 10.08pt; border-top: 0.72pt solid #dedad2;
-    display: flex; justify-content: space-between; align-items: flex-end; gap: 10.08pt;
+    display: flex; flex-direction: row-reverse; justify-content: space-between; align-items: flex-end; gap: 10.08pt;
   }
   .foot-note { font-size: 6.12pt; color: #55504a; line-height: 1.5; max-width: 230.4pt; }
   .foot-note strong { color: #1c1b19; }
-  .foot-currency { font-size: 5.4pt; color: #8a8478; text-align: right; font-family: "DejaVu Sans Mono", monospace; }
+  .foot-currency { font-size: 5.4pt; color: #8a8478; text-align: left; font-family: "DejaVu Sans Mono", monospace; }
 </style>
 </head>
 <body>
@@ -133,25 +143,25 @@
       </div>
     </div>
     <div class="doc-meta">
-      <div class="doc-eyebrow">Invoice</div>
+      <div class="doc-eyebrow">فاتورة</div>
       <div class="doc-number">{{ invoice_number }}</div>
-      <div class="doc-date">Issued {{ issued_date }}</div>
+      <div class="doc-date">تاريخ الإصدار: {{ issued_date }}</div>
     </div>
   </div>
 
   <div class="grid-meta">
     <div>
-      <div class="meta-label">Billed to</div>
+      <div class="meta-label">الفوترة باسم</div>
       <div class="meta-value">{{ student_name }}</div>
-      {% if guardian_name %}<div class="meta-sub">Guardian: {{ guardian_name }}</div>{% endif %}
+      {% if guardian_name %}<div class="meta-sub">ولي الأمر: {{ guardian_name }}</div>{% endif %}
     </div>
     <div>
-      <div class="meta-label">Payment method</div>
+      <div class="meta-label">طريقة الدفع</div>
       <div class="meta-value">{{ method_label }}</div>
-      {% if due_date %}<div class="meta-sub">Due {{ due_date }}</div>{% endif %}
+      {% if due_date %}<div class="meta-sub">تاريخ الاستحقاق: {{ due_date }}</div>{% endif %}
     </div>
     <div>
-      <div class="meta-label">Status</div>
+      <div class="meta-label">الحالة</div>
       <div class="meta-value">{{ status_line }}</div>
       <div class="meta-sub">{{ student_code }}</div>
       <div class="stamp">{{ status_label }}</div>
@@ -160,7 +170,7 @@
 
   <table class="items">
     <thead>
-      <tr><th>Description</th><th class="num">Amount</th></tr>
+      <tr><th>البيان</th><th class="num">المبلغ</th></tr>
     </thead>
     <tbody>
       <tr>
@@ -176,25 +186,25 @@
   <div class="totals-wrap">
     <div class="totals">
       <div class="totals-row">
-        <span>Subtotal</span>
+        <span>المجموع الفرعي</span>
         <span class="val">{{ subtotal }}</span>
       </div>
       {% if discount and discount != "0.00" %}
       <div class="totals-row discount">
-        <span>Discount</span>
+        <span>الخصم</span>
         <span class="val">&minus;{{ discount }}</span>
       </div>
       {% endif %}
       <div class="totals-row grand">
-        <span>Total ({{ currency }})</span>
+        <span>المجموع ({{ currency }})</span>
         <span class="val">{{ total }}</span>
       </div>
     </div>
   </div>
 
   <div class="foot">
-    <div class="foot-note">Thank you for choosing <strong>{{ tenant_name }}</strong>. This invoice was generated automatically and is valid without a signature.</div>
-    <div class="foot-currency">Amounts in {{ currency }}</div>
+    <div class="foot-note">شكرًا لاختياركم <strong>{{ tenant_name }}</strong>. هذه الفاتورة صادرة آليًا وهي صالحة بدون توقيع.</div>
+    <div class="foot-currency">المبالغ بـ {{ currency }}</div>
   </div>
 </body>
 </html>

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8">
+<style>
+  @page { size: A4; margin: 16mm 14mm; }
+  body {
+    margin: 0; direction: rtl; text-align: center; color: #1c1b19;
+    font-family: "DejaVu Sans", sans-serif;
+    display: flex; align-items: center; justify-content: center; height: 265mm;
+  }
+  .band { position: fixed; top: 0; right: 0; left: 0; height: 6mm; background: {{ primary_color }}; }
+  .wrap { text-align: center; }
+  .eyebrow {
+    font-size: 8pt; font-weight: bold; letter-spacing: 1.5pt; text-transform: uppercase;
+    color: #8a8478; margin-bottom: 6pt;
+  }
+  .name { font-family: "DejaVu Serif", serif; font-size: 16pt; font-weight: bold; }
+</style>
+</head>
+<body>
+  <div class="band"></div>
+  <div class="wrap">
+    <div class="eyebrow">مبرر غياب</div>
+    <div class="name">{{ student_name }}</div>
+  </div>
+</body>
+</html>

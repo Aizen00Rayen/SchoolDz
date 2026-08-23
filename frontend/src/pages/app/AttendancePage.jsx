@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, ClipboardCheck, ExternalLink, FileText, Loader2, RotateCcw, Save, Search, Upload } from "lucide-react";
+import { CheckCircle2, ClipboardCheck, ExternalLink, FileText, Loader2, Printer, RotateCcw, Save, Search, Upload } from "lucide-react";
 
 import { api, extractError, openPrivateFile, resolveFileUrl } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
 import { APPUI } from "@/constants/testIds";
-import { PageHeader, EmptyState } from "./_shared";
+import { PageHeader, EmptyState, groupOptionLabel } from "./_shared";
 import { Button } from "@/components/ui/button";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -107,10 +107,26 @@ export default function AttendancePage() {
     queryKey: ["groups-list"],
     queryFn: async () => (await api.get("/groups")).data,
   });
+  const { data: courses } = useQuery({
+    queryKey: ["courses-list"],
+    queryFn: async () => (await api.get("/courses")).data,
+  });
+  const { data: teachers } = useQuery({
+    queryKey: ["teachers-list"],
+    queryFn: async () => (await api.get("/teachers")).data,
+  });
   const { data: students } = useQuery({
     queryKey: ["students-list"],
     queryFn: async () => (await api.get("/students")).data,
   });
+  const courseMap = useMemo(
+    () => Object.fromEntries((courses?.items || []).map((c) => [c.id, c])),
+    [courses],
+  );
+  const teacherMap = useMemo(
+    () => Object.fromEntries((teachers?.items || []).map((tr) => [tr.id, tr])),
+    [teachers],
+  );
 
   const selectedSession = useMemo(
     () => (sessions?.items || []).find((s) => s.id === sessionId),
@@ -161,6 +177,24 @@ export default function AttendancePage() {
     [existing],
   );
 
+  // Print becomes available once this session actually has saved attendance
+  // to print — before that there's nothing on record to put on the roster.
+  const hasSavedAttendance = (existing?.items || []).length > 0;
+  const [printing, setPrinting] = useState(false);
+  const printRoster = async () => {
+    setPrinting(true);
+    try {
+      const res = await api.get(`/attendance/session/${sessionId}/print`, { responseType: "blob" });
+      const url = URL.createObjectURL(res.data);
+      window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch (e) {
+      toast.error(extractError(e));
+    } finally {
+      setPrinting(false);
+    }
+  };
+
   const enrolled = (selectedGroup?.student_ids || []).map((id) => studentMap[id]).filter(Boolean);
   const visibleEnrolled = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -177,17 +211,30 @@ export default function AttendancePage() {
         title={t("menu.attendance")}
         subtitle={t("subtitle.attendance")}
         actions={
-          canEdit ? (
-          <Button
-            onClick={() => saveMut.mutate()}
-            disabled={!sessionId || saveMut.isPending || Object.keys(marks).length === 0}
-            data-testid={APPUI.attendanceSave}
-            className="bg-accent hover:bg-accent/90 text-accent-foreground"
-          >
-            <Save className="w-4 h-4 me-2" />
-            {t("attendance.save")}
-          </Button>
-          ) : null
+          <div className="flex items-center gap-2">
+            {hasSavedAttendance && (
+              <Button
+                variant="outline"
+                onClick={printRoster}
+                disabled={printing}
+                data-testid="attendance-print"
+              >
+                {printing ? <Loader2 className="w-4 h-4 me-2 animate-spin" /> : <Printer className="w-4 h-4 me-2" />}
+                {t("attendance.print")}
+              </Button>
+            )}
+            {canEdit && (
+              <Button
+                onClick={() => saveMut.mutate()}
+                disabled={!sessionId || saveMut.isPending || Object.keys(marks).length === 0}
+                data-testid={APPUI.attendanceSave}
+                className="bg-accent hover:bg-accent/90 text-accent-foreground"
+              >
+                <Save className="w-4 h-4 me-2" />
+                {t("attendance.save")}
+              </Button>
+            )}
+          </div>
         }
       />
 
@@ -200,9 +247,13 @@ export default function AttendancePage() {
           <SelectContent className="bg-popover max-h-96">
             {(sessions?.items || []).map((s) => {
               const g = (groups?.items || []).find((gg) => gg.id === s.group_id);
+              const teacher = teacherMap[s.teacher_id || g?.teacher_id];
+              const groupLabel = g ? groupOptionLabel(g, courseMap, t) : t("field.group");
               return (
                 <SelectItem key={s.id} value={s.id}>
-                  {new Date(s.start_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })} — {g?.name || t("field.group")} · {s.topic || "—"}
+                  {new Date(s.start_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })} — {groupLabel}
+                  {teacher ? ` · ${teacher.first_name} ${teacher.last_name}` : ""}
+                  {s.topic ? ` · ${s.topic}` : ""}
                 </SelectItem>
               );
             })}

@@ -6,7 +6,7 @@ import { AlertTriangle, Wallet, FileDown } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Field } from "./StudentsPage";
-import { StudentSearchSelect } from "./_shared";
+import { StudentSearchSelect, courseOptionLabel } from "./_shared";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -128,7 +128,10 @@ export default function PaymentsPage() {
         },
         {
           key: "course", label: t("field.course"),
-          render: (r) => courseMap[r.course_id]?.title || <span className="text-muted-foreground">—</span>,
+          render: (r) => {
+            const c = courseMap[r.course_id];
+            return c ? courseOptionLabel(c, t) : <span className="text-muted-foreground">—</span>;
+          },
         },
         {
           key: "amount", label: t("field.amount"),
@@ -151,7 +154,7 @@ export default function PaymentsPage() {
               <SelectTrigger className="bg-background"><SelectValue placeholder="—" /></SelectTrigger>
               <SelectContent className="bg-popover">
                 {(courses?.items || []).map((c) => (
-                  <SelectItem key={c.id} value={c.id}>{c.title}</SelectItem>
+                  <SelectItem key={c.id} value={c.id}>{courseOptionLabel(c, t)}</SelectItem>
                 ))}
               </SelectContent>
             </Select>

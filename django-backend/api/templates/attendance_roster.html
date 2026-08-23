@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8">
+<style>
+  @page {
+    size: A4;
+    margin: 16mm 14mm;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    direction: rtl;
+    text-align: right;
+    color: #1c1b19;
+    font-family: "DejaVu Sans", sans-serif;
+    font-size: 9.5pt;
+  }
+  .band { height: 6mm; background: {{ primary_color }}; margin: -16mm -14mm 8mm; }
+
+  .head {
+    display: flex; flex-direction: row-reverse; justify-content: space-between; align-items: flex-start;
+    gap: 12pt; padding-bottom: 10pt; margin-bottom: 12pt; border-bottom: 1pt solid #dedad2;
+  }
+  .brand { display: flex; flex-direction: row-reverse; align-items: center; gap: 8pt; }
+  .brand-mark {
+    width: 26pt; height: 26pt; border-radius: 5pt; background: {{ primary_color }}; color: #fff;
+    text-align: center; line-height: 26pt; font-family: "DejaVu Serif", serif; font-weight: bold; font-size: 12pt;
+  }
+  .brand-mark img { width: 26pt; height: 26pt; border-radius: 5pt; object-fit: cover; display: block; }
+  .brand-name { font-family: "DejaVu Serif", serif; font-size: 12pt; font-weight: bold; }
+  .doc-meta { text-align: left; }
+  .doc-eyebrow {
+    font-size: 6.5pt; font-weight: bold; letter-spacing: 1.2pt; text-transform: uppercase;
+    color: {{ accent_color }}; margin-bottom: 3pt;
+  }
+  .doc-title { font-family: "DejaVu Sans Mono", monospace; font-size: 9pt; font-weight: bold; }
+
+  .session-meta {
+    display: flex; flex-direction: row-reverse; flex-wrap: wrap; gap: 18pt; margin-bottom: 14pt;
+  }
+  .session-meta .item { min-width: 100pt; }
+  .meta-label {
+    font-size: 6.2pt; font-weight: bold; letter-spacing: 0.8pt; text-transform: uppercase; color: #8a8478; margin-bottom: 2.5pt;
+  }
+  .meta-value { font-size: 9.5pt; font-weight: bold; }
+
+  table.roster { width: 100%; border-collapse: collapse; margin-bottom: 4pt; }
+  table.roster thead th {
+    text-align: right; font-size: 6.8pt; font-weight: bold; letter-spacing: 0.8pt; text-transform: uppercase;
+    color: #8a8478; padding: 0 4pt 6pt; border-bottom: 1pt solid #c7c1b6;
+  }
+  table.roster thead th.center { text-align: center; }
+  table.roster tbody td {
+    padding: 6.5pt 4pt; border-bottom: 0.75pt solid #dedad2; font-size: 8.8pt; vertical-align: middle;
+  }
+  table.roster tbody td.center { text-align: center; }
+  table.roster tbody td.time {
+    font-family: "DejaVu Sans Mono", monospace; font-size: 8pt; color: #55504a; text-align: center;
+  }
+  .student-code { font-size: 7.2pt; color: #8a8478; font-family: "DejaVu Sans Mono", monospace; }
+
+  .pill {
+    display: inline-block; padding: 1.5pt 7pt; border-radius: 999pt; font-size: 7.6pt; font-weight: bold;
+  }
+  .pill.present { background: #e4f3ea; color: #1f7a4d; }
+  .pill.late { background: #fbf1dc; color: #b5790a; }
+  .pill.excused { background: #e8eef9; color: #2b5fa8; }
+  .pill.absent { background: #fbeaea; color: #b23a2e; }
+
+  .doc-note { font-size: 7.2pt; color: #8a8478; margin-top: 1pt; }
+
+  .summary {
+    display: flex; flex-direction: row-reverse; gap: 10pt; margin-top: 14pt; padding-top: 10pt; border-top: 1pt solid #dedad2;
+  }
+  .summary .chip {
+    font-size: 7.6pt; color: #55504a; background: #f4f2ef; border-radius: 6pt; padding: 4pt 9pt;
+  }
+  .summary .chip strong { color: #1c1b19; }
+
+  .foot { margin-top: 16pt; font-size: 6.8pt; color: #8a8478; text-align: center; }
+
+  .doc-page {
+    page-break-before: always;
+    display: flex; align-items: center; justify-content: center;
+    height: calc(297mm - 32mm - 12mm);
+  }
+  .doc-page img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  .doc-page-label {
+    position: absolute; top: 0; right: 0; font-size: 8pt; color: #8a8478;
+    font-family: "DejaVu Sans Mono", monospace;
+  }
+</style>
+</head>
+<body>
+  <div class="band"></div>
+
+  <div class="head">
+    <div class="brand">
+      <div class="brand-mark">
+        {% if logo_data_uri %}<img src="{{ logo_data_uri }}">{% else %}{{ tenant_initial }}{% endif %}
+      </div>
+      <div class="brand-name">{{ tenant_name }}</div>
+    </div>
+    <div class="doc-meta">
+      <div class="doc-eyebrow">كشف الحضور</div>
+      <div class="doc-title" dir="ltr">{{ printed_at }}</div>
+    </div>
+  </div>
+
+  <div class="session-meta">
+    <div class="item">
+      <div class="meta-label">المجموعة</div>
+      <div class="meta-value">{{ group_label }}</div>
+    </div>
+    <div class="item">
+      <div class="meta-label">التاريخ والتوقيت</div>
+      <div class="meta-value" dir="ltr">{{ session_datetime }}</div>
+    </div>
+    {% if teacher_name %}
+    <div class="item">
+      <div class="meta-label">الأستاذ</div>
+      <div class="meta-value">{{ teacher_name }}</div>
+    </div>
+    {% endif %}
+    {% if topic %}
+    <div class="item">
+      <div class="meta-label">الموضوع</div>
+      <div class="meta-value">{{ topic }}</div>
+    </div>
+    {% endif %}
+  </div>
+
+  <table class="roster">
+    <thead>
+      <tr>
+        <th>التلميذ</th>
+        <th class="center">الحالة</th>
+        <th class="center">وقت التسجيل</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>
+          {{ row.student_name }}
+          <div class="student-code">{{ row.student_code }}</div>
+        </td>
+        <td class="center">
+          <span class="pill {{ row.status }}">{{ row.status_label }}</span>
+          {% if row.has_document %}<div class="doc-note">مرفق مبرر — انظر الصفحات المرفقة</div>{% endif %}
+        </td>
+        <td class="time">{{ row.marked_at }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="summary">
+    <span class="chip"><strong>{{ counts.present }}</strong> حاضر</span>
+    <span class="chip"><strong>{{ counts.late }}</strong> متأخر</span>
+    <span class="chip"><strong>{{ counts.excused }}</strong> معذور</span>
+    <span class="chip"><strong>{{ counts.absent }}</strong> غائب</span>
+  </div>
+
+  <div class="foot">تم إنشاء هذا الكشف آليًا من منصة {{ tenant_name }}</div>
+
+  {% for doc in image_docs %}
+  <div class="doc-page">
+    <img src="{{ doc.data_uri }}">
+  </div>
+  {% endfor %}
+</body>
+</html>
