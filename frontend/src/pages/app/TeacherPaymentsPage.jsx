@@ -16,7 +16,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { PageHeader, EmptyState, LoadingRows, Field } from "./_shared";
+import { PageHeader, EmptyState, LoadingRows, Field, groupOptionLabel } from "./_shared";
 
 const EMPTY_PAYOUT = {
   teacher_id: "", amount: "", paid_at: new Date().toISOString().slice(0, 10),
@@ -59,6 +59,11 @@ export default function TeacherPaymentsPage() {
     queryKey: ["groups"],
     queryFn: () => api.get("/groups").then((r) => r.data),
   });
+  const { data: courses } = useQuery({
+    queryKey: ["courses-list"],
+    queryFn: () => api.get("/courses").then((r) => r.data),
+  });
+  const courseMap = Object.fromEntries((courses?.items || []).map((c) => [c.id, c]));
 
   const rows = data?.items || [];
   const totals = data?.totals || {};
@@ -167,7 +172,7 @@ export default function TeacherPaymentsPage() {
             <SelectContent className="bg-popover">
               <SelectItem value="__all">{t("reports.all_groups")}</SelectItem>
               {(groups?.items || []).map((g) => (
-                <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>
+                <SelectItem key={g.id} value={g.id}>{groupOptionLabel(g, courseMap, t)}</SelectItem>
               ))}
             </SelectContent>
           </Select>

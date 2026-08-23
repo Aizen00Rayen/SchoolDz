@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
 import { api, downloadFrom } from "@/lib/api";
-import { PageHeader, Field, StatusPill } from "./_shared";
+import { PageHeader, Field, StatusPill, groupOptionLabel } from "./_shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -34,6 +34,11 @@ export default function ReportsPage() {
     queryKey: ["groups"],
     queryFn: async () => (await api.get("/groups")).data,
   });
+  const { data: courses } = useQuery({
+    queryKey: ["courses-list"],
+    queryFn: async () => (await api.get("/courses")).data,
+  });
+  const courseMap = Object.fromEntries((courses?.items || []).map((c) => [c.id, c]));
   const { data: teachers } = useQuery({
     queryKey: ["teachers"],
     queryFn: async () => (await api.get("/teachers")).data,
@@ -71,7 +76,7 @@ export default function ReportsPage() {
             <SelectContent className="bg-popover">
               <SelectItem value="__all">{t("reports.all_groups")}</SelectItem>
               {(groups?.items || []).map((g) => (
-                <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>
+                <SelectItem key={g.id} value={g.id}>{groupOptionLabel(g, courseMap, t)}</SelectItem>
               ))}
             </SelectContent>
           </Select>
