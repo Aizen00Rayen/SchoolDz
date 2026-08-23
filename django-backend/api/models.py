@@ -9,6 +9,12 @@ def generate_uuid():
 # The tabs an owner/director can grant secretary/accountant/teacher users
 # access to, and the levels each can be set to. Kept here (not just in the
 # frontend) so serializers/views validate against the same source of truth.
+# Roles that belong inside the staff workspace at all. 'parent'/'student' are
+# external-facing logins served by their own dedicated endpoints (the portal
+# and the public badge lookup), and must never reach a staff-only view — see
+# require_staff_tenant() in views.py.
+STAFF_ROLES = ('owner', 'director', 'secretary', 'accountant', 'teacher')
+
 PERMISSION_MODULES = [
     'dashboard', 'students', 'teachers', 'parents', 'courses', 'groups',
     'sessions', 'calendar', 'timetable', 'rooms', 'payments', 'expenses', 'teacher_payments',

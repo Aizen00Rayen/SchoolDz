@@ -10,14 +10,14 @@ import mimetypes
 import requests
 import openpyxl
 from PIL import Image, ImageOps
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from django.conf import settings
 from django.db import transaction
 from django.db.models import Q, Sum, F, Count
 from django.http import FileResponse, Http404, HttpResponse
 from django.template.loader import render_to_string
 from django.utils import timezone
-from django.utils.dateparse import parse_datetime
+from django.utils.dateparse import parse_date, parse_datetime
 from django.shortcuts import redirect
 from weasyprint import HTML
 from rest_framework import viewsets, status, serializers
@@ -27,7 +27,7 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, PermissionDenied, NotFound, APIException, NotAuthenticated
 from rest_framework.authtoken.models import Token
 
-from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_LEVELS
+from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_LEVELS, STAFF_ROLES
 from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, RoomSerializer, AttendanceSerializer, PaymentSerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer, TimetableEntrySerializer
 from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle, EnrollmentRateThrottle, StudentLookupRateThrottle, log_activity
 
@@ -110,6 +110,28 @@ def prorate_upgrade_amount(tenant, new_plan):
     new_remaining_cost = (new_price / cycle_days) * days_remaining
 
     return max(0, int(round(new_remaining_cost - unused_credit)))
+
+
+def require_staff_tenant(user):
+    """Guard for the staff-only function-based views, returning the caller's
+    tenant id.
+
+    TenantScopedViewSet.get_queryset() already refuses role='parent' outright,
+    which is why every CRUD route is safe. The function-based views don't
+    inherit that, and relying on get_permission() instead is not equivalent:
+    that helper falls through to DEFAULT_MODULE_PERMISSIONS, which describes
+    *staff* defaults, so a parent silently inherited 'view' on any module
+    whose default isn't 'hidden' — enough to read the school's P&L, its
+    global search index and every student's balance. Roles outside the staff
+    set have no business on these endpoints at all, so gate on the role
+    itself rather than on a per-module default.
+    """
+    tenant_id = getattr(user, 'tenant_id', None)
+    if not tenant_id:
+        raise PermissionDenied('User has no tenant')
+    if not user.is_super_admin() and user.role not in STAFF_ROLES:
+        raise PermissionDenied('Forbidden')
+    return tenant_id
 
 
 def course_per_session_price(price, pricing_type, sessions_count):
@@ -467,7 +489,17 @@ class TenantScopedViewSet(viewsets.ModelViewSet):
         self._log_model_action('create', instance)
 
     def perform_update(self, serializer):
-        instance = serializer.save()
+        # Pin the tenant explicitly rather than trusting the payload. The
+        # serializers keep tenant_id read-only, so this is belt-and-braces —
+        # but tenant isolation is the one control where a single regression
+        # (someone making the field writable again for convenience) silently
+        # turns an update into a cross-tenant record move, so it's re-asserted
+        # at the point of save instead of only being enforced one layer up.
+        original_tenant_id = getattr(serializer.instance, 'tenant_id', None)
+        if original_tenant_id is not None:
+            instance = serializer.save(tenant_id=original_tenant_id)
+        else:
+            instance = serializer.save()
         self._log_model_action('update', instance)
 
     def perform_destroy(self, instance):
@@ -1692,10 +1724,8 @@ def apply_remote_status(checkout, remote_status):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def dashboard_summary(request):
-    tid = request.user.tenant_id
-    if not tid:
-        return Response({'error': 'no tenant'}, status=status.HTTP_400_BAD_REQUEST)
-        
+    tid = require_staff_tenant(request.user)
+
     now = timezone.now()
     # Today range in local time or simple date comparison
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -1934,10 +1964,8 @@ def global_search(request):
     if not q:
         return Response({'error': 'Query parameter q is required'}, status=status.HTTP_400_BAD_REQUEST)
         
-    tid = request.user.tenant_id
-    if not tid:
-        return Response({'results': []})
-        
+    tid = require_staff_tenant(request.user)
+
     results = []
     
     # Students
@@ -3785,9 +3813,7 @@ class PaymentViewSet(TenantScopedViewSet):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def payments_overdue(request):
-    tid = request.user.tenant_id
-    if not tid:
-        raise PermissionDenied('User has no tenant')
+    tid = require_staff_tenant(request.user)
 
     items = Payment.objects.filter(
         tenant_id=tid,
@@ -3885,9 +3911,7 @@ def compute_student_balances(tenant_id):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def payments_balances(request):
-    tid = request.user.tenant_id
-    if not tid:
-        raise PermissionDenied('User has no tenant')
+    tid = require_staff_tenant(request.user)
 
     balances = compute_student_balances(tid)
     students = Student.objects.filter(tenant_id=tid, id__in=balances.keys())
@@ -4160,6 +4184,129 @@ def admin_set_tenant_status(request, tenant_id):
     tenant.status = status_val
     tenant.save()
     
+    return Response(TenantSerializer(tenant).data)
+
+
+MAX_EXTEND_DAYS = 3650  # 10 years — a sane ceiling, not a real business limit
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def admin_set_tenant_subscription(request, tenant_id):
+    """Super-admin subscription control: change a tenant's plan and/or move
+    its expiry date, without going through Chargily. Covers the cases the
+    payment flow can't — comping a school, granting a trial, fixing a
+    payment that arrived out-of-band (cash, bank transfer), or correcting a
+    mistake.
+
+    Extension is relative to whichever is later, now or the current expiry:
+    extending a still-active subscription adds to the time remaining rather
+    than truncating it, while extending an already-expired one starts the
+    clock today instead of from a date in the past (which would otherwise
+    leave it expired even after "extending" it).
+    """
+    if not request.user.is_super_admin():
+        raise PermissionDenied('Forbidden')
+
+    tenant = Tenant.objects.filter(id=tenant_id).first()
+    if not tenant:
+        raise NotFound('Not found')
+
+    plan = request.data.get('plan')
+    billing_cycle = request.data.get('billing_cycle')
+    extend_days = request.data.get('extend_days')
+    expires_at_raw = request.data.get('expires_at')
+
+    if plan is not None and plan not in PLANS_CONFIG['tiers']:
+        return Response({'error': 'Invalid plan'}, status=status.HTTP_400_BAD_REQUEST)
+    if billing_cycle is not None and billing_cycle not in ['monthly', 'annual']:
+        return Response({'error': 'Invalid billing cycle'}, status=status.HTTP_400_BAD_REQUEST)
+    if extend_days is not None and expires_at_raw:
+        return Response(
+            {'error': 'Send either extend_days or expires_at, not both'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    now = timezone.now()
+    before = {
+        'plan': tenant.plan,
+        'status': tenant.status,
+        'expires_at': tenant.plan_expires_at.isoformat() if tenant.plan_expires_at else None,
+    }
+
+    new_expiry = None
+    if extend_days is not None:
+        try:
+            days = int(extend_days)
+        except (TypeError, ValueError):
+            return Response({'error': 'extend_days must be an integer'}, status=status.HTTP_400_BAD_REQUEST)
+        if days < 1 or days > MAX_EXTEND_DAYS:
+            return Response(
+                {'error': f'extend_days must be between 1 and {MAX_EXTEND_DAYS}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        base = tenant.plan_expires_at if (tenant.plan_expires_at and tenant.plan_expires_at > now) else now
+        new_expiry = base + timedelta(days=days)
+    elif expires_at_raw:
+        parsed = parse_datetime(expires_at_raw)
+        if parsed is None:
+            parsed_date = parse_date(expires_at_raw)
+            if parsed_date is None:
+                return Response({'error': 'expires_at must be an ISO date or datetime'}, status=status.HTTP_400_BAD_REQUEST)
+            parsed = datetime.combine(parsed_date, time(23, 59, 59))
+        if timezone.is_naive(parsed):
+            parsed = timezone.make_aware(parsed)
+        if parsed > now + timedelta(days=MAX_EXTEND_DAYS):
+            return Response(
+                {'error': f'expires_at cannot be more than {MAX_EXTEND_DAYS} days out'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        new_expiry = parsed
+
+    if plan is None and billing_cycle is None and new_expiry is None:
+        return Response({'error': 'Nothing to update'}, status=status.HTTP_400_BAD_REQUEST)
+
+    with transaction.atomic():
+        if plan is not None:
+            tier = PLANS_CONFIG['tiers'][plan]
+            tenant.plan = plan
+            # Seat/student caps belong to the tier, so they move with it —
+            # otherwise a downgrade would leave the old, larger allowance.
+            tenant.max_students = tier['max_students']
+            tenant.max_users = tier['max_users']
+            if not tenant.plan_started_at:
+                tenant.plan_started_at = now
+        if billing_cycle is not None:
+            tenant.billing_cycle = billing_cycle
+        if new_expiry is not None:
+            tenant.plan_expires_at = new_expiry
+            if not tenant.plan_started_at:
+                tenant.plan_started_at = now
+
+        # Granting time to a locked-out workspace is the whole point of this
+        # endpoint, so let it back in — but never override a deliberate
+        # 'suspended', which is a moderation decision, not a billing one.
+        if (
+            tenant.status in ('pending_payment', 'expired')
+            and tenant.plan
+            and tenant.plan_expires_at
+            and tenant.plan_expires_at > now
+        ):
+            tenant.status = 'active'
+
+        tenant.save()
+
+    log_activity(
+        request, tenant.id, 'update', category='billing',
+        entity_type='tenant', entity_id=tenant.id,
+        description=(
+            f"Super admin changed subscription: plan {before['plan']} -> {tenant.plan}, "
+            f"status {before['status']} -> {tenant.status}, "
+            f"expires {before['expires_at']} -> "
+            f"{tenant.plan_expires_at.isoformat() if tenant.plan_expires_at else None}"
+        ),
+    )
+
     return Response(TenantSerializer(tenant).data)
 
 
@@ -4626,11 +4773,9 @@ def finance_report(request):
     """Payments + expenses + net for a date range, optionally narrowed to one
     group or teacher. Backs the Reports page and its Excel export."""
     user = request.user
-    if not user.tenant_id:
-        raise PermissionDenied('User has no tenant')
+    tid = require_staff_tenant(user)
     if user.get_permission('reports') == 'hidden':
         raise PermissionDenied('Forbidden')
-    tid = user.tenant_id
 
     payments = Payment.objects.filter(tenant_id=tid).select_related('student', 'group', 'course')
     payments = filter_by_date_range(payments, request, 'due_date')

@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import {
-  ArrowUpRight, Building2, GraduationCap, LogOut, Moon, Sun, Tag,
+  ArrowUpRight, Building2, CalendarClock, GraduationCap, LogOut, Moon, Sun, Tag,
   ShieldCheck, Trash2, Users, Wallet, PowerOff, Power, Pencil, Plus,
 } from "lucide-react";
 
@@ -41,6 +41,13 @@ const EMPTY_TENANT_FORM = {
   name: "", slug: "", center_type: "tutoring",
   owner_name: "", owner_email: "", owner_password: "",
   plan: "premium", duration_days: 30,
+};
+
+// "" for plan means "leave the tenant's current plan alone" — the endpoint
+// treats an absent plan as no-change, so the admin can extend time without
+// being forced to restate the tier.
+const EMPTY_SUBSCRIPTION_FORM = {
+  plan: "", billing_cycle: "", mode: "extend", extend_days: 30, expires_at: "",
 };
 
 const USER_ROLES = [
@@ -92,6 +99,65 @@ export default function AdminDashboardPage() {
     },
     onError: (e) => toast.error(extractError(e)),
   });
+
+  // Plan / subscription-duration control. Separate from statusMut above:
+  // that one is a moderation switch (suspend/reactivate), this one is the
+  // billing lever — change tier, add time, or set an exact end date.
+  // `subOpen` is deliberately separate from `subTenant` rather than deriving
+  // open={!!subTenant}: clearing the tenant on save would unmount the dialog's
+  // content in the same tick the dialog starts closing, and Radix then never
+  // gets to undo the `pointer-events: none` it puts on <body> for a modal —
+  // leaving the whole page unclickable. Same shape as the tenant/coupon
+  // dialogs above.
+  const [subOpen, setSubOpen] = useState(false);
+  const [subTenant, setSubTenant] = useState(null);
+  const [subForm, setSubForm] = useState(EMPTY_SUBSCRIPTION_FORM);
+
+  const openSubscription = (tt) => {
+    setSubTenant(tt);
+    setSubOpen(true);
+    setSubForm({
+      ...EMPTY_SUBSCRIPTION_FORM,
+      plan: tt.plan || "",
+      billing_cycle: tt.billing_cycle || "",
+      expires_at: tt.plan_expires_at ? isoToLocalInput(tt.plan_expires_at) : "",
+    });
+  };
+
+  const subscriptionMut = useMutation({
+    mutationFn: ({ id, payload }) =>
+      api.patch(`/admin/tenants/${id}/subscription`, payload).then((r) => r.data),
+    onSuccess: (updated) => {
+      toast.success(
+        updated?.plan_expires_at
+          ? `Subscription updated — expires ${new Date(updated.plan_expires_at).toLocaleDateString()}`
+          : "Subscription updated",
+      );
+      qc.invalidateQueries({ queryKey: ["admin-platform"] });
+      setSubOpen(false);
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
+  const submitSubscription = (e) => {
+    e.preventDefault();
+    const payload = {};
+    if (subForm.plan && subForm.plan !== subTenant.plan) payload.plan = subForm.plan;
+    if (subForm.billing_cycle && subForm.billing_cycle !== subTenant.billing_cycle) {
+      payload.billing_cycle = subForm.billing_cycle;
+    }
+    if (subForm.mode === "extend") {
+      const days = parseInt(subForm.extend_days, 10);
+      if (days > 0) payload.extend_days = days;
+    } else if (subForm.expires_at) {
+      payload.expires_at = localInputToIso(subForm.expires_at);
+    }
+    if (Object.keys(payload).length === 0) {
+      toast.error("Nothing to change");
+      return;
+    }
+    subscriptionMut.mutate({ id: subTenant.id, payload });
+  };
 
   const [tenantOpen, setTenantOpen] = useState(false);
   const [tenantForm, setTenantForm] = useState(EMPTY_TENANT_FORM);
@@ -351,6 +417,7 @@ export default function AdminDashboardPage() {
                     <Th>Slug</Th>
                     <Th>Plan</Th>
                     <Th>Status</Th>
+                    <Th>Expires</Th>
                     <Th>Users</Th>
                     <Th>Students</Th>
                     <Th>Created</Th>
@@ -389,6 +456,28 @@ export default function AdminDashboardPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3"><StatusPill status={tt.status} /></td>
+                      <td className="px-4 py-3 text-xs">
+                        {tt.plan_expires_at ? (() => {
+                          const days = Math.ceil(
+                            (new Date(tt.plan_expires_at) - Date.now()) / 86400000,
+                          );
+                          const tone = days < 0
+                            ? "text-destructive"
+                            : days <= 7
+                              ? "text-warning"
+                              : "text-muted-foreground";
+                          return (
+                            <div>
+                              <div className="font-mono">
+                                {new Date(tt.plan_expires_at).toLocaleDateString()}
+                              </div>
+                              <div className={`text-[10px] ${tone}`}>
+                                {days < 0 ? `${Math.abs(days)}d overdue` : `${days}d left`}
+                              </div>
+                            </div>
+                          );
+                        })() : <span className="text-muted-foreground">—</span>}
+                      </td>
                       <td className="px-4 py-3 font-mono text-xs">{tt.users_count ?? 0}</td>
                       <td className="px-4 py-3 font-mono text-xs">{tt.students_count ?? 0}</td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">
@@ -396,6 +485,15 @@ export default function AdminDashboardPage() {
                       </td>
                       <td className="px-4 py-2 text-end">
                         <div className="inline-flex items-center gap-1">
+                          <Button
+                            size="sm" variant="outline"
+                            onClick={() => openSubscription(tt)}
+                            data-testid={`admin-subscription-${tt.id}`}
+                            className="h-8 text-xs"
+                          >
+                            <CalendarClock className="w-3 h-3 me-1" />
+                            Plan &amp; duration
+                          </Button>
                           {tt.status !== "suspended" ? (
                             <Button
                               size="sm" variant="outline"
@@ -876,6 +974,146 @@ export default function AdminDashboardPage() {
               </Button>
             </div>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Plan & subscription-duration dialog */}
+      <Dialog open={subOpen} onOpenChange={setSubOpen}>
+        <DialogContent className="max-w-lg bg-card">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl">Plan &amp; duration</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {subTenant?.name} — currently{" "}
+              <span className="font-medium capitalize">{subTenant?.plan || "no plan"}</span>
+              {subTenant?.plan_expires_at
+                ? `, expiring ${new Date(subTenant.plan_expires_at).toLocaleDateString()}`
+                : ", no expiry set"}
+            </DialogDescription>
+          </DialogHeader>
+
+          {subTenant && (
+            <form onSubmit={submitSubscription} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Plan</Label>
+                  <Select
+                    value={subForm.plan || "__keep"}
+                    onValueChange={(v) => setSubForm({ ...subForm, plan: v === "__keep" ? "" : v })}
+                  >
+                    <SelectTrigger className="bg-background" data-testid="admin-sub-plan">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-popover">
+                      <SelectItem value="__keep">Keep current</SelectItem>
+                      {COUPON_PLANS.map((pl) => (
+                        <SelectItem key={pl} value={pl} className="capitalize">{pl}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Billing cycle</Label>
+                  <Select
+                    value={subForm.billing_cycle || "__keep"}
+                    onValueChange={(v) => setSubForm({ ...subForm, billing_cycle: v === "__keep" ? "" : v })}
+                  >
+                    <SelectTrigger className="bg-background" data-testid="admin-sub-cycle">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="bg-popover">
+                      <SelectItem value="__keep">Keep current</SelectItem>
+                      <SelectItem value="monthly">Monthly</SelectItem>
+                      <SelectItem value="annual">Annual</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Plain buttons rather than a Select: a two-option switch that
+                  drives which field below is active should be visible at a
+                  glance, not hidden behind a dropdown. */}
+              <div className="space-y-1.5">
+                <Label className="text-xs font-medium">Duration</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { key: "extend", label: "Add time" },
+                    { key: "absolute", label: "Set end date" },
+                  ].map((m) => (
+                    <button
+                      key={m.key}
+                      type="button"
+                      onClick={() => setSubForm({ ...subForm, mode: m.key })}
+                      data-testid={`admin-sub-mode-${m.key}`}
+                      className={`h-10 rounded-lg border text-sm font-medium transition-colors ${
+                        subForm.mode === m.key
+                          ? "border-accent bg-accent text-accent-foreground"
+                          : "border-border bg-background hover:bg-muted"
+                      }`}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {subForm.mode === "extend" ? (
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Days to add</Label>
+                  <Input
+                    type="number" min={1} max={3650}
+                    value={subForm.extend_days}
+                    onChange={(e) => setSubForm({ ...subForm, extend_days: e.target.value })}
+                    data-testid="admin-sub-days"
+                  />
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {DURATION_PRESETS.map((pr) => (
+                      <button
+                        key={pr.days}
+                        type="button"
+                        onClick={() => setSubForm({ ...subForm, extend_days: pr.days })}
+                        className="text-[11px] px-2 py-1 rounded-md border border-border hover:bg-muted transition-colors"
+                      >
+                        +{pr.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground pt-1">
+                    Added on top of the time remaining. If the subscription has already
+                    lapsed, the new period starts today.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-medium">Expires on</Label>
+                  <Input
+                    type="datetime-local"
+                    value={subForm.expires_at}
+                    onChange={(e) => setSubForm({ ...subForm, expires_at: e.target.value })}
+                    data-testid="admin-sub-expires"
+                  />
+                </div>
+              )}
+
+              <p className="text-[11px] text-muted-foreground">
+                A workspace locked out for non-payment is let back in automatically once
+                its new expiry is in the future. A suspended one stays suspended.
+              </p>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <Button type="button" variant="outline" onClick={() => setSubOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={subscriptionMut.isPending}
+                  data-testid="admin-sub-submit"
+                  className="bg-accent hover:bg-accent/90 text-accent-foreground"
+                >
+                  {subscriptionMut.isPending ? "Saving…" : "Save"}
+                </Button>
+              </div>
+            </form>
+          )}
         </DialogContent>
       </Dialog>
 
