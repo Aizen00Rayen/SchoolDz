@@ -19,35 +19,14 @@ import {
 const ROLE_VALUES = ["owner", "director", "secretary", "accountant", "teacher", "parent"];
 const LEVELS = ["hidden", "view", "edit"];
 
-// Sensible starting point when a role is first picked — the owner can then
-// customize every row before saving. Only secretary/accountant/teacher are
-// ever limited; owner/director always have full access (see isFullAccessRole).
-const ROLE_PRESETS = {
-  secretary: {
-    dashboard: "view", students: "edit", parents: "edit", teachers: "edit", courses: "edit",
-    groups: "edit", sessions: "edit", calendar: "view", attendance: "edit", grades: "edit",
-    messages: "edit", quizzes: "hidden", payments: "view", expenses: "hidden",
-    teacher_payments: "hidden", website: "hidden", reports: "view", logs: "hidden",
-    users: "hidden", settings: "hidden", trips: "hidden",
-  },
-  accountant: {
-    dashboard: "view", students: "view", courses: "view", payments: "edit",
-    expenses: "edit", teacher_payments: "edit", reports: "view",
-    teachers: "hidden", parents: "hidden", groups: "hidden", sessions: "hidden",
-    calendar: "hidden", attendance: "hidden", grades: "hidden", messages: "hidden",
-    quizzes: "hidden", website: "hidden", logs: "hidden", users: "hidden", settings: "hidden", trips: "hidden",
-  },
-  teacher: {
-    dashboard: "view", students: "view", groups: "view", sessions: "view", calendar: "view",
-    attendance: "edit", grades: "edit", quizzes: "edit",
-    teachers: "hidden", parents: "hidden", courses: "hidden", payments: "hidden",
-    expenses: "hidden", teacher_payments: "hidden", messages: "hidden", website: "hidden",
-    reports: "hidden", logs: "hidden", users: "hidden", settings: "hidden", trips: "hidden",
-  },
-};
+// A new limited-role (secretary/accountant/teacher) user starts with full
+// edit access to every page — the owner can then dial any individual page
+// down (or back up) before saving, or later from this same form. Owner/
+// director always have full access regardless (see isFullAccessRole).
+const FULL_PERMISSIONS = Object.fromEntries(PERMISSION_MODULES.map((m) => [m, "edit"]));
 const EMPTY_PERMISSIONS = Object.fromEntries(PERMISSION_MODULES.map((m) => [m, "hidden"]));
 
-const DEFAULT_FORM = { name: "", email: "", password: "", role: "secretary", phone: "", permissions: ROLE_PRESETS.secretary };
+const DEFAULT_FORM = { name: "", email: "", password: "", role: "secretary", phone: "", permissions: FULL_PERMISSIONS };
 
 function PermissionMatrix({ permissions, onChange }) {
   const { t } = useI18n();
@@ -110,7 +89,7 @@ export default function UsersPage() {
   };
 
   const onRoleChange = (role) => {
-    setForm((f) => ({ ...f, role, permissions: ROLE_PRESETS[role] ? { ...EMPTY_PERMISSIONS, ...ROLE_PRESETS[role] } : f.permissions }));
+    setForm((f) => ({ ...f, role, permissions: isFullAccessRole(role) ? f.permissions : FULL_PERMISSIONS }));
   };
 
   const createMut = useMutation({
