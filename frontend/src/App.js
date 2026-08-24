@@ -34,6 +34,7 @@ import CalendarPage from "@/pages/app/CalendarPage";
 import TimetablePage from "@/pages/app/TimetablePage";
 import AttendancePage from "@/pages/app/AttendancePage";
 import PaymentsPage from "@/pages/app/PaymentsPage";
+import DebtsPage from "@/pages/app/DebtsPage";
 import GradesPage from "@/pages/app/GradesPage";
 import QuizzesPage from "@/pages/app/QuizzesPage";
 import QuizBuilderPage from "@/pages/app/QuizBuilderPage";
@@ -174,6 +175,7 @@ function App() {
                     <Route path="timetable" element={<TimetablePage />} />
                     <Route path="attendance" element={<AttendancePage />} />
                     <Route path="payments" element={<PaymentsPage />} />
+                    <Route path="debts" element={<DebtsPage />} />
                     <Route path="grades" element={<GradesPage />} />
                     <Route path="quizzes" element={<QuizzesPage />} />
                     <Route path="quizzes/:id" element={<QuizBuilderPage />} />

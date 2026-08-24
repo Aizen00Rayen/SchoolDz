@@ -3965,10 +3965,13 @@ def payments_balances(request):
     tid = require_staff_tenant(request.user)
 
     balances = compute_student_balances(tid)
-    students = Student.objects.filter(tenant_id=tid, id__in=balances.keys())
+    students = Student.objects.filter(tenant_id=tid, id__in=balances.keys()).select_related('parent')
     rows = [{
         'student_id': s.id,
         'student_name': f'{s.first_name} {s.last_name}',
+        'student_phone': s.phone,
+        'parent_name': s.parent.name if s.parent else None,
+        'parent_phone': s.parent.phone if s.parent else None,
         **balances[s.id],
     } for s in students]
     rows.sort(key=lambda r: r['balance'])

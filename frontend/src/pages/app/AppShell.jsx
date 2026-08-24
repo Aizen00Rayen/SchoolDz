@@ -2,7 +2,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-do
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
-  Award, BarChart3, BookOpen, Building2, CalendarClock, CalendarDays, ChevronsUpDown, ClipboardCheck,
+  Award, BarChart3, BookOpen, Building2, CalendarClock, CalendarDays, ChevronDown, ChevronsUpDown, ChevronRight, CircleDollarSign, ClipboardCheck,
   DoorOpen, FileBarChart2, FileQuestion, GraduationCap, Globe, HandCoins, Languages, LogOut, Menu, MessageSquare, Moon,
   PanelLeft, PanelLeftClose, Plane, Receipt, ScrollText, Search, Settings, Sun, Users, UserRound, Wallet, Layers, Table2, X,
 } from "lucide-react";
@@ -67,6 +67,7 @@ const NAV_GROUPS = [
     key: "finance",
     items: [
       { key: "payments", to: "/app/payments", icon: Wallet, module: "payments" },
+      { key: "debts", to: "/app/debts", icon: CircleDollarSign, module: "payments" },
       { key: "expenses", to: "/app/expenses", icon: Receipt, module: "expenses" },
       { key: "teacher_payments", to: "/app/teacher-payments", icon: HandCoins, module: "teacher_payments" },
     ],
@@ -103,10 +104,28 @@ export default function AppShell() {
   const [cmdBusy, setCmdBusy] = useState(false);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("sidebar_collapsed") === "1");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  // Per-category collapse state for the sidebar's section headers — {key:
+  // true} means minimized. Missing/false means expanded (today's behavior),
+  // so existing users don't lose any visible nav item on first load.
+  const [collapsedSections, setCollapsedSections] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("sidebar_collapsed_sections") || "{}");
+    } catch {
+      return {};
+    }
+  });
 
   useEffect(() => {
     localStorage.setItem("sidebar_collapsed", collapsed ? "1" : "0");
   }, [collapsed]);
+
+  useEffect(() => {
+    localStorage.setItem("sidebar_collapsed_sections", JSON.stringify(collapsedSections));
+  }, [collapsedSections]);
+
+  const toggleSection = (key) => {
+    setCollapsedSections((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   // The drawer is an overlay on phones: close it whenever navigation happens,
   // and stop the page behind it from scrolling while it's open.
@@ -320,6 +339,12 @@ export default function AppShell() {
               (!n.module || getModulePermission(user, n.module) !== "hidden")
             );
             if (items.length === 0) return null;
+            // A section marked collapsed still shows itself expanded while
+            // the current page lives inside it — minimizing "Finance" should
+            // never hide the Payments link out from under whoever's on it.
+            const isSectionActive = items.some((item) => location.pathname.startsWith(item.to));
+            const isCollapsible = !railMode && group.key !== "overview";
+            const isCollapsed = isCollapsible && !!collapsedSections[group.key] && !isSectionActive;
             return (
               <div
                 key={group.key}
@@ -329,11 +354,19 @@ export default function AppShell() {
                     : "mb-4 last:mb-0"
                 }
               >
-                {!railMode && group.key !== "overview" && (
-                  <div className="px-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-                    {t(`nav_category.${group.key}`)}
-                  </div>
+                {isCollapsible && (
+                  <button
+                    type="button"
+                    onClick={() => toggleSection(group.key)}
+                    className="w-full flex items-center justify-between gap-1 px-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors"
+                    aria-expanded={!isCollapsed}
+                    data-testid={`sidebar-section-toggle-${group.key}`}
+                  >
+                    <span>{t(`nav_category.${group.key}`)}</span>
+                    {isCollapsed ? <ChevronRight className="w-3 h-3 flex-shrink-0" /> : <ChevronDown className="w-3 h-3 flex-shrink-0" />}
+                  </button>
                 )}
+                {(!isCollapsible || !isCollapsed) && (
                 <div className="space-y-0.5">
                   {items.map((item) => (
                     <NavLink
@@ -354,6 +387,7 @@ export default function AppShell() {
                     </NavLink>
                   ))}
                 </div>
+                )}
               </div>
             );
           })}
