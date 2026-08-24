@@ -67,7 +67,7 @@ const NAV_GROUPS = [
     key: "finance",
     items: [
       { key: "payments", to: "/app/payments", icon: Wallet, module: "payments" },
-      { key: "debts", to: "/app/debts", icon: CircleDollarSign, module: "payments" },
+      { key: "debts", to: "/app/debts", icon: CircleDollarSign, module: "debts" },
       { key: "expenses", to: "/app/expenses", icon: Receipt, module: "expenses" },
       { key: "teacher_payments", to: "/app/teacher-payments", icon: HandCoins, module: "teacher_payments" },
     ],

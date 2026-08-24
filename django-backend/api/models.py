@@ -17,7 +17,7 @@ STAFF_ROLES = ('owner', 'director', 'secretary', 'accountant', 'teacher')
 
 PERMISSION_MODULES = [
     'dashboard', 'students', 'teachers', 'parents', 'courses', 'groups',
-    'sessions', 'calendar', 'timetable', 'rooms', 'payments', 'expenses', 'teacher_payments',
+    'sessions', 'calendar', 'timetable', 'rooms', 'payments', 'debts', 'expenses', 'teacher_payments',
     'grades', 'attendance', 'messages', 'quizzes', 'website', 'reports',
     'logs', 'users', 'settings', 'trips',
 ]

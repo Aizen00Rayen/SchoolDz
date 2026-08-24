@@ -3962,7 +3962,13 @@ def compute_student_balances(tenant_id):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def payments_balances(request):
-    tid = require_staff_tenant(request.user)
+    user = request.user
+    tid = require_staff_tenant(user)
+    # Shared by the Payments page (balance coloring/filter) and the standalone
+    # Debts page — a user only granted one of those two modules must still be
+    # able to load it, so this only blocks someone with neither.
+    if user.get_permission('payments') == 'hidden' and user.get_permission('debts') == 'hidden':
+        raise PermissionDenied('Forbidden')
 
     balances = compute_student_balances(tid)
     students = Student.objects.filter(tenant_id=tid, id__in=balances.keys()).select_related('parent')
