@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import {
   Award, BarChart3, BookOpen, Building2, CalendarClock, CalendarDays, ChevronsUpDown, ClipboardCheck,
   DoorOpen, FileBarChart2, FileQuestion, GraduationCap, Globe, HandCoins, Languages, LogOut, Menu, MessageSquare, Moon,
-  PanelLeft, PanelLeftClose, Receipt, ScrollText, Search, Settings, Sun, Users, UserRound, Wallet, Layers, Table2, X,
+  PanelLeft, PanelLeftClose, Plane, Receipt, ScrollText, Search, Settings, Sun, Users, UserRound, Wallet, Layers, Table2, X,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth";
@@ -24,29 +24,69 @@ import {
 } from "@/components/ui/command";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
-const NAV = [
-  { key: "dashboard", to: "/app/dashboard", icon: BarChart3, module: "dashboard" },
-  { key: "students", to: "/app/students", icon: GraduationCap, module: "students" },
-  { key: "parents", to: "/app/parents", icon: UserRound, module: "parents" },
-  { key: "teachers", to: "/app/teachers", icon: Users, module: "teachers" },
-  { key: "courses", to: "/app/courses", icon: BookOpen, module: "courses" },
-  { key: "groups", to: "/app/groups", icon: Layers, module: "groups" },
-  { key: "sessions", to: "/app/sessions", icon: CalendarClock, module: "sessions" },
-  { key: "calendar", to: "/app/calendar", icon: CalendarDays, premiumOnly: true, module: "calendar" },
-  { key: "timetable", to: "/app/timetable", icon: Table2, module: "timetable" },
-  { key: "rooms", to: "/app/rooms", icon: DoorOpen, module: "rooms" },
-  { key: "attendance", to: "/app/attendance", icon: ClipboardCheck, module: "attendance" },
-  { key: "payments", to: "/app/payments", icon: Wallet, module: "payments" },
-  { key: "expenses", to: "/app/expenses", icon: Receipt, module: "expenses" },
-  { key: "teacher_payments", to: "/app/teacher-payments", icon: HandCoins, module: "teacher_payments" },
-  { key: "grades", to: "/app/grades", icon: Award, module: "grades" },
-  { key: "quizzes", to: "/app/quizzes", icon: FileQuestion, premiumOnly: true, module: "quizzes" },
-  { key: "website", to: "/app/website", icon: Globe, premiumOnly: true, module: "website" },
-  { key: "reports", to: "/app/reports", icon: FileBarChart2, module: "reports" },
-  { key: "logs", to: "/app/logs", icon: ScrollText, module: "logs" },
-  { key: "messages", to: "/app/messages", icon: MessageSquare, standardPlusOnly: true, module: "messages" },
-  { key: "users", to: "/app/users", icon: Users, adminOnly: true },
-  { key: "settings", to: "/app/settings", icon: Settings, module: "settings" },
+// Grouped under category headers so a 20+ item sidebar stays scannable —
+// "overview" renders with no header (dashboard just sits at the top), every
+// other group gets an uppercase label that collapses away in rail mode
+// (see the railMode divider fallback in the render below).
+const NAV_GROUPS = [
+  {
+    key: "overview",
+    items: [
+      { key: "dashboard", to: "/app/dashboard", icon: BarChart3, module: "dashboard" },
+    ],
+  },
+  {
+    key: "people",
+    items: [
+      { key: "students", to: "/app/students", icon: GraduationCap, module: "students" },
+      { key: "parents", to: "/app/parents", icon: UserRound, module: "parents" },
+      { key: "teachers", to: "/app/teachers", icon: Users, module: "teachers" },
+    ],
+  },
+  {
+    key: "academics",
+    items: [
+      { key: "courses", to: "/app/courses", icon: BookOpen, module: "courses" },
+      { key: "groups", to: "/app/groups", icon: Layers, module: "groups" },
+      { key: "sessions", to: "/app/sessions", icon: CalendarClock, module: "sessions" },
+      { key: "calendar", to: "/app/calendar", icon: CalendarDays, premiumOnly: true, module: "calendar" },
+      { key: "timetable", to: "/app/timetable", icon: Table2, module: "timetable" },
+      { key: "rooms", to: "/app/rooms", icon: DoorOpen, module: "rooms" },
+      { key: "attendance", to: "/app/attendance", icon: ClipboardCheck, module: "attendance" },
+      { key: "grades", to: "/app/grades", icon: Award, module: "grades" },
+      { key: "quizzes", to: "/app/quizzes", icon: FileQuestion, premiumOnly: true, module: "quizzes" },
+    ],
+  },
+  {
+    key: "activities",
+    items: [
+      { key: "trips", to: "/app/trips", icon: Plane, module: "trips" },
+    ],
+  },
+  {
+    key: "finance",
+    items: [
+      { key: "payments", to: "/app/payments", icon: Wallet, module: "payments" },
+      { key: "expenses", to: "/app/expenses", icon: Receipt, module: "expenses" },
+      { key: "teacher_payments", to: "/app/teacher-payments", icon: HandCoins, module: "teacher_payments" },
+    ],
+  },
+  {
+    key: "insights",
+    items: [
+      { key: "reports", to: "/app/reports", icon: FileBarChart2, module: "reports" },
+      { key: "logs", to: "/app/logs", icon: ScrollText, module: "logs" },
+    ],
+  },
+  {
+    key: "administration",
+    items: [
+      { key: "messages", to: "/app/messages", icon: MessageSquare, standardPlusOnly: true, module: "messages" },
+      { key: "website", to: "/app/website", icon: Globe, premiumOnly: true, module: "website" },
+      { key: "users", to: "/app/users", icon: Users, adminOnly: true },
+      { key: "settings", to: "/app/settings", icon: Settings, module: "settings" },
+    ],
+  },
 ];
 
 export default function AppShell() {
@@ -271,30 +311,52 @@ export default function AppShell() {
           </Button>
         </div>
 
-        <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
-          {NAV.filter((n) =>
-            (!n.adminOnly || isAdmin) &&
-            (!n.premiumOnly || isPremium) &&
-            (!n.standardPlusOnly || isStandardPlus) &&
-            (!n.module || getModulePermission(user, n.module) !== "hidden")
-          ).map((item) => (
-            <NavLink
-              key={item.key}
-              to={item.to}
-              data-testid={APPUI.sidebarLink(item.key)}
-              title={railMode ? t(`menu.${item.key}`) : undefined}
-              className={({ isActive }) =>
-                `flex items-center gap-2.5 px-3 py-2.5 lg:py-2 rounded-md text-sm transition-colors ${railMode ? "justify-center" : ""} ${
-                  isActive
-                    ? "bg-primary text-primary-foreground font-semibold"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                }`
-              }
-            >
-              <item.icon className="w-4 h-4 flex-shrink-0" />
-              {!railMode && <span className="truncate">{t(`menu.${item.key}`)}</span>}
-            </NavLink>
-          ))}
+        <nav className="flex-1 p-3 overflow-y-auto">
+          {NAV_GROUPS.map((group) => {
+            const items = group.items.filter((n) =>
+              (!n.adminOnly || isAdmin) &&
+              (!n.premiumOnly || isPremium) &&
+              (!n.standardPlusOnly || isStandardPlus) &&
+              (!n.module || getModulePermission(user, n.module) !== "hidden")
+            );
+            if (items.length === 0) return null;
+            return (
+              <div
+                key={group.key}
+                className={
+                  railMode
+                    ? "mt-2 pt-2 border-t border-border first:mt-0 first:pt-0 first:border-0"
+                    : "mb-4 last:mb-0"
+                }
+              >
+                {!railMode && group.key !== "overview" && (
+                  <div className="px-3 pb-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                    {t(`nav_category.${group.key}`)}
+                  </div>
+                )}
+                <div className="space-y-0.5">
+                  {items.map((item) => (
+                    <NavLink
+                      key={item.key}
+                      to={item.to}
+                      data-testid={APPUI.sidebarLink(item.key)}
+                      title={railMode ? t(`menu.${item.key}`) : undefined}
+                      className={({ isActive }) =>
+                        `flex items-center gap-2.5 px-3 py-2.5 lg:py-2 rounded-md text-sm transition-colors ${railMode ? "justify-center" : ""} ${
+                          isActive
+                            ? "bg-primary text-primary-foreground font-semibold"
+                            : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                        }`
+                      }
+                    >
+                      <item.icon className="w-4 h-4 flex-shrink-0" />
+                      {!railMode && <span className="truncate">{t(`menu.${item.key}`)}</span>}
+                    </NavLink>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </nav>
 
         <div className="p-3 border-t border-border">

@@ -28,21 +28,21 @@ const ROLE_PRESETS = {
     groups: "edit", sessions: "edit", calendar: "view", attendance: "edit", grades: "edit",
     messages: "edit", quizzes: "hidden", payments: "view", expenses: "hidden",
     teacher_payments: "hidden", website: "hidden", reports: "view", logs: "hidden",
-    users: "hidden", settings: "hidden",
+    users: "hidden", settings: "hidden", trips: "hidden",
   },
   accountant: {
     dashboard: "view", students: "view", courses: "view", payments: "edit",
     expenses: "edit", teacher_payments: "edit", reports: "view",
     teachers: "hidden", parents: "hidden", groups: "hidden", sessions: "hidden",
     calendar: "hidden", attendance: "hidden", grades: "hidden", messages: "hidden",
-    quizzes: "hidden", website: "hidden", logs: "hidden", users: "hidden", settings: "hidden",
+    quizzes: "hidden", website: "hidden", logs: "hidden", users: "hidden", settings: "hidden", trips: "hidden",
   },
   teacher: {
     dashboard: "view", students: "view", groups: "view", sessions: "view", calendar: "view",
     attendance: "edit", grades: "edit", quizzes: "edit",
     teachers: "hidden", parents: "hidden", courses: "hidden", payments: "hidden",
     expenses: "hidden", teacher_payments: "hidden", messages: "hidden", website: "hidden",
-    reports: "hidden", logs: "hidden", users: "hidden", settings: "hidden",
+    reports: "hidden", logs: "hidden", users: "hidden", settings: "hidden", trips: "hidden",
   },
 };
 const EMPTY_PERMISSIONS = Object.fromEntries(PERMISSION_MODULES.map((m) => [m, "hidden"]));

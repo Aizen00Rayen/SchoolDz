@@ -27,8 +27,8 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, PermissionDenied, NotFound, APIException, NotAuthenticated
 from rest_framework.authtoken.models import Token
 
-from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_LEVELS, STAFF_ROLES
-from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, RoomSerializer, AttendanceSerializer, PaymentSerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer, TimetableEntrySerializer
+from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Trip, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_LEVELS, STAFF_ROLES
+from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, RoomSerializer, AttendanceSerializer, PaymentSerializer, TripSerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer, TimetableEntrySerializer
 from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle, EnrollmentRateThrottle, StudentLookupRateThrottle, log_activity
 
 # Single source of truth for pricing:
@@ -247,6 +247,7 @@ INVOICE_KIND_AR = {
     'monthly': 'شهري',
     'course': 'دورة',
     'per_session': 'بالحصة',
+    'trip': 'رحلة مدرسية',
     'other': 'آخر',
 }
 INVOICE_METHOD_AR = {
@@ -1085,9 +1086,11 @@ def payment_invoice_pdf(request, payment_id):
     item_sub_parts = []
     if payment.group:
         item_sub_parts.append(payment.group.name)
+    if payment.trip:
+        item_sub_parts.append(payment.trip.destination)
     # Only add the kind label when it isn't already the item title (that
-    # happens when there's no linked course — kind is the title itself then).
-    if payment.course:
+    # happens when there's no linked course/trip — kind is the title itself then).
+    if payment.course or payment.trip:
         item_sub_parts.append(kind_label_ar)
 
     subtotal = payment.amount
@@ -1116,7 +1119,7 @@ def payment_invoice_pdf(request, payment_id):
         'method_label': INVOICE_METHOD_AR.get(payment.method, payment.get_method_display()),
         'due_date': payment.due_date.strftime('%d/%m/%Y') if payment.due_date and payment.status != 'paid' else None,
         'student_code': student.student_code,
-        'item_title': payment.course.title if payment.course else kind_label_ar,
+        'item_title': payment.trip.title if payment.trip else (payment.course.title if payment.course else kind_label_ar),
         'item_sub': ' · '.join(item_sub_parts),
         'subtotal': f"{subtotal:,.2f}",
         'discount': f"{discount:,.2f}",
@@ -3652,6 +3655,54 @@ class GroupViewSet(TenantScopedViewSet):
         return Response(GroupSerializer(group).data)
 
 
+class TripViewSet(TenantScopedViewSet):
+    queryset = Trip.objects.all()
+    serializer_class = TripSerializer
+    module_key = 'trips'
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        q = request.GET.get('q')
+        if q:
+            queryset = queryset.filter(Q(title__icontains=q) | Q(destination__icontains=q))
+        queryset = queryset.prefetch_related('students').order_by('-trip_date', '-created_at')[:500]
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({'items': serializer.data, 'total': len(serializer.data)})
+
+    def create(self, request, *args, **kwargs):
+        self.check_module_edit()
+        data = request.data.copy()
+        student_ids = data.pop('student_ids', None)
+
+        serializer = self.get_serializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        trip = serializer.instance
+
+        if student_ids:
+            students = Student.objects.filter(id__in=student_ids, tenant_id=trip.tenant_id)
+            trip.students.set(students)
+
+        return Response(self.get_serializer(trip).data, status=status.HTTP_200_OK)
+
+    def update(self, request, *args, **kwargs):
+        self.check_module_edit()
+        instance = self.get_object()
+        data = request.data.copy()
+        student_ids = data.pop('student_ids', None)
+
+        partial = kwargs.pop('partial', False)
+        serializer = self.get_serializer(instance, data=data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+
+        if student_ids is not None:
+            students = Student.objects.filter(id__in=student_ids, tenant_id=instance.tenant_id)
+            instance.students.set(students)
+
+        return Response(self.get_serializer(instance).data, status=status.HTTP_200_OK)
+
+
 class ClassSessionViewSet(TenantScopedViewSet):
     queryset = ClassSession.objects.all()
     serializer_class = ClassSessionSerializer
@@ -4459,13 +4510,19 @@ def serve_frontend(request, path=''):
 
 def ensure_default_expense_categories(tenant_id):
     """Seed DEFAULT_EXPENSE_CATEGORIES the first time a tenant touches
-    expenses. Stored per tenant (not global) so a tenant can rename or delete
-    the ones they don't use without affecting anyone else."""
-    if ExpenseCategory.objects.filter(tenant_id=tenant_id).exists():
-        return
-    ExpenseCategory.objects.bulk_create([
-        ExpenseCategory(tenant_id=tenant_id, key=key) for key in DEFAULT_EXPENSE_CATEGORIES
-    ])
+    expenses, and backfill any keys added to that list later (e.g. 'trip')
+    that this tenant never had. Only ever adds keys the tenant has literally
+    never seen — it can't resurrect one a tenant deliberately deleted, since
+    that would require the key to have existed in DEFAULT_EXPENSE_CATEGORIES
+    at some point before this tenant was seeded, then been removed here."""
+    existing_keys = set(
+        ExpenseCategory.objects.filter(tenant_id=tenant_id, key__isnull=False).values_list('key', flat=True)
+    )
+    missing = [key for key in DEFAULT_EXPENSE_CATEGORIES if key not in existing_keys]
+    if missing:
+        ExpenseCategory.objects.bulk_create([
+            ExpenseCategory(tenant_id=tenant_id, key=key) for key in missing
+        ])
 
 
 class ExpenseCategoryViewSet(TenantScopedViewSet):

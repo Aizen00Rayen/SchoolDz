@@ -19,7 +19,7 @@ PERMISSION_MODULES = [
     'dashboard', 'students', 'teachers', 'parents', 'courses', 'groups',
     'sessions', 'calendar', 'timetable', 'rooms', 'payments', 'expenses', 'teacher_payments',
     'grades', 'attendance', 'messages', 'quizzes', 'website', 'reports',
-    'logs', 'users', 'settings',
+    'logs', 'users', 'settings', 'trips',
 ]
 PERMISSION_LEVELS = ['hidden', 'view', 'edit']
 
@@ -507,11 +507,15 @@ class Payment(models.Model):
     student = models.ForeignKey(Student, on_delete=models.CASCADE, db_column='student_id', related_name='payments')
     course = models.ForeignKey(Course, on_delete=models.SET_NULL, null=True, blank=True, db_column='course_id', related_name='payments')
     group = models.ForeignKey(Group, on_delete=models.SET_NULL, null=True, blank=True, db_column='group_id', related_name='payments')
+    # A payment is for either a course or a trip, never both — the frontend
+    # form only shows one selector at a time based on which the user picked.
+    trip = models.ForeignKey('Trip', on_delete=models.SET_NULL, null=True, blank=True, db_column='trip_id', related_name='payments')
     KIND_CHOICES = [
         ('registration', 'registration'),
         ('monthly', 'monthly'),
         ('course', 'course'),
         ('per_session', 'per_session'),
+        ('trip', 'trip'),
         ('other', 'other'),
     ]
     kind = models.CharField(max_length=50, choices=KIND_CHOICES, default='monthly')
@@ -543,6 +547,26 @@ class Payment(models.Model):
 
     class Meta:
         db_table = 'payments'
+
+
+class Trip(models.Model):
+    """A school outing — a group of students going somewhere for a price,
+    separate from the regular Course/Group enrollment model since a trip is
+    a one-off event rather than an ongoing class."""
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='trips')
+    title = models.CharField(max_length=255)
+    destination = models.CharField(max_length=255)
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    trip_date = models.DateField(null=True, blank=True)
+    notes = models.TextField(null=True, blank=True)
+    students = models.ManyToManyField(Student, related_name='trips', db_table='trip_student', blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'trips'
+        ordering = ['-trip_date', '-created_at']
 
 
 class Grade(models.Model):
@@ -771,7 +795,7 @@ class SchoolGalleryPhoto(models.Model):
 # translate them; tenant-added categories carry a free-text `name` instead.
 DEFAULT_EXPENSE_CATEGORIES = [
     'rent', 'salaries', 'utilities', 'supplies', 'maintenance',
-    'marketing', 'transport', 'taxes', 'equipment', 'other',
+    'marketing', 'transport', 'taxes', 'equipment', 'trip', 'other',
 ]
 
 

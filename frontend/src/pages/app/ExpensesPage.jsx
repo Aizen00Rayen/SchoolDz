@@ -27,7 +27,7 @@ const EMPTY_FORM = {
 // Mirrors DEFAULT_EXPENSE_CATEGORIES in django-backend/api/models.py.
 export const DEFAULT_EXPENSE_KEYS = [
   "rent", "salaries", "utilities", "supplies", "maintenance",
-  "marketing", "transport", "taxes", "equipment", "other",
+  "marketing", "transport", "taxes", "equipment", "trip", "other",
 ];
 
 /** A predefined category carries a `key` the UI translates; a tenant-created

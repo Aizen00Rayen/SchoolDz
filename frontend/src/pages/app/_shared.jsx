@@ -124,6 +124,14 @@ export function courseOptionLabel(c, t) {
   return `${c.title} — ${parts.join(" · ")}`;
 }
 
+/** "Trip — Destination · Date" — same disambiguation need as courses: two
+ * trips can share a title (e.g. an annual "End of year outing") or a
+ * destination, so the picker needs both plus the date to tell them apart. */
+export function tripOptionLabel(trip) {
+  const parts = [trip.destination, trip.trip_date].filter(Boolean);
+  return parts.length ? `${trip.title} — ${parts.join(" · ")}` : trip.title;
+}
+
 /** Room dropdown sourced from /rooms, used by Groups and Sessions forms
  * instead of a free-text field — lets the Rooms occupancy view actually
  * know which sessions are in which room. */

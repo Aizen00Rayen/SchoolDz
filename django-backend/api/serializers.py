@@ -7,7 +7,7 @@ from rest_framework import serializers
 # student list out into a tenant they registered themselves. Nothing
 # legitimate needs it writable: creation sets the tenant server-side via
 # perform_create()'s save(tenant_id=...) kwarg, which bypasses this field.
-from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Grade, ChargilyCheckout, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry
+from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Trip, Grade, ChargilyCheckout, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry
 
 class TenantSerializer(serializers.ModelSerializer):
     class Meta:
@@ -156,10 +156,27 @@ class PaymentSerializer(serializers.ModelSerializer):
     group_id = serializers.PrimaryKeyRelatedField(
         queryset=Group.objects.all(), source='group', allow_null=True, required=False
     )
+    trip_id = serializers.PrimaryKeyRelatedField(
+        queryset=Trip.objects.all(), source='trip', allow_null=True, required=False
+    )
 
     class Meta:
         model = Payment
-        exclude = ['tenant', 'student', 'course', 'group']
+        exclude = ['tenant', 'student', 'course', 'group', 'trip']
+
+
+class TripSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)
+    student_ids = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Trip
+        exclude = ['tenant', 'students']
+
+    def get_student_ids(self, obj):
+        # See GroupSerializer.get_student_ids — .all() hits the prefetch
+        # cache, .values_list() would re-query per row.
+        return [s.id for s in obj.students.all()]
 
 
 class GradeSerializer(serializers.ModelSerializer):

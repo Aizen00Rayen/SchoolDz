@@ -27,6 +27,7 @@ import ParentsPage from "@/pages/app/ParentsPage";
 import TeachersPage from "@/pages/app/TeachersPage";
 import CoursesPage from "@/pages/app/CoursesPage";
 import GroupsPage from "@/pages/app/GroupsPage";
+import TripsPage from "@/pages/app/TripsPage";
 import SessionsPage from "@/pages/app/SessionsPage";
 import RoomsPage from "@/pages/app/RoomsPage";
 import CalendarPage from "@/pages/app/CalendarPage";
@@ -166,6 +167,7 @@ function App() {
                     <Route path="teachers" element={<TeachersPage />} />
                     <Route path="courses" element={<CoursesPage />} />
                     <Route path="groups" element={<GroupsPage />} />
+                    <Route path="trips" element={<TripsPage />} />
                     <Route path="sessions" element={<SessionsPage />} />
                     <Route path="rooms" element={<RoomsPage />} />
                     <Route path="calendar" element={<CalendarPage />} />

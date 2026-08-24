@@ -5,8 +5,9 @@ import CrudPanel, { StatusPill } from "./CrudPanel";
 import { AlertTriangle, Wallet, FileDown, Info } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 import { Field } from "./StudentsPage";
-import { StudentSearchSelect, courseOptionLabel } from "./_shared";
+import { StudentSearchSelect, courseOptionLabel, tripOptionLabel } from "./_shared";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -24,7 +25,7 @@ const BALANCE_CLS = {
 };
 
 const DEFAULT_FORM = {
-  student_id: "", course_id: "", kind: "monthly",
+  student_id: "", payment_for: "course", course_id: "", trip_id: "", kind: "monthly",
   amount: 0, discount: 0, method: "cash", status: "paid", reference: "", notes: "",
 };
 
@@ -40,6 +41,10 @@ export default function PaymentsPage() {
     queryKey: ["courses-list"],
     queryFn: async () => (await api.get("/courses")).data,
   });
+  const { data: trips } = useQuery({
+    queryKey: ["trips-list"],
+    queryFn: async () => (await api.get("/trips")).data,
+  });
   const { data: overdue } = useQuery({
     queryKey: ["payments-overdue"],
     queryFn: async () => (await api.get("/payments/overdue")).data,
@@ -51,6 +56,7 @@ export default function PaymentsPage() {
   const [balanceFilter, setBalanceFilter] = useState("all");
   const stuMap = Object.fromEntries((students?.items || []).map((s) => [s.id, s]));
   const courseMap = Object.fromEntries((courses?.items || []).map((c) => [c.id, c]));
+  const tripMap = Object.fromEntries((trips?.items || []).map((tr) => [tr.id, tr]));
   const balanceMap = Object.fromEntries((balances?.items || []).map((b) => [b.student_id, b]));
 
   return (
@@ -147,6 +153,10 @@ export default function PaymentsPage() {
         {
           key: "course", label: t("field.course"),
           render: (r) => {
+            if (r.trip_id) {
+              const trip = tripMap[r.trip_id];
+              return trip ? tripOptionLabel(trip) : <span className="text-muted-foreground">—</span>;
+            }
             const c = courseMap[r.course_id];
             return c ? courseOptionLabel(c, t) : <span className="text-muted-foreground">—</span>;
           },
@@ -162,21 +172,61 @@ export default function PaymentsPage() {
         { key: "method", label: t("field.method"), render: (r) => <span className="capitalize text-xs">{t(`method.${r.method}`)}</span> },
         { key: "status", label: t("field.status"), render: (r) => <StatusPill status={r.status} /> },
       ]}
-      renderForm={(form, setForm) => (
+      renderForm={(form, setForm) => {
+        const forType = form.payment_for || (form.trip_id ? "trip" : "course");
+        return (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label={t("field.student")} required>
             <StudentSearchSelect value={form.student_id} onChange={(id) => setForm({ ...form, student_id: id })} />
           </Field>
-          <Field label={t("field.course")}>
-            <Select value={form.course_id || ""} onValueChange={(v) => setForm({ ...form, course_id: v })}>
-              <SelectTrigger className="bg-background"><SelectValue placeholder="—" /></SelectTrigger>
-              <SelectContent className="bg-popover">
-                {(courses?.items || []).map((c) => (
-                  <SelectItem key={c.id} value={c.id}>{courseOptionLabel(c, t)}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
+          <div>
+            <Label className="text-xs font-medium mb-1.5 block">{t("payments.for")}</Label>
+            <div className="inline-flex rounded-md border border-border overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, payment_for: "course", trip_id: "" })}
+                className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                  forType === "course" ? "bg-accent text-accent-foreground" : "bg-background hover:bg-muted text-muted-foreground"
+                }`}
+                data-testid="payments-for-course"
+              >
+                {t("payments.for_course")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, payment_for: "trip", course_id: "" })}
+                className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                  forType === "trip" ? "bg-accent text-accent-foreground" : "bg-background hover:bg-muted text-muted-foreground"
+                }`}
+                data-testid="payments-for-trip"
+              >
+                {t("payments.for_trip")}
+              </button>
+            </div>
+          </div>
+          {forType === "trip" ? (
+            <Field label={t("field.trip")}>
+              <Select value={form.trip_id || ""} onValueChange={(v) => setForm({ ...form, trip_id: v })}>
+                <SelectTrigger className="bg-background"><SelectValue placeholder="—" /></SelectTrigger>
+                <SelectContent className="bg-popover">
+                  {(trips?.items || []).map((tr) => (
+                    <SelectItem key={tr.id} value={tr.id}>{tripOptionLabel(tr)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          ) : (
+            <Field label={t("field.course")}>
+              <Select value={form.course_id || ""} onValueChange={(v) => setForm({ ...form, course_id: v })}>
+                <SelectTrigger className="bg-background"><SelectValue placeholder="—" /></SelectTrigger>
+                <SelectContent className="bg-popover">
+                  {(courses?.items || []).map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{courseOptionLabel(c, t)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
           <Field label={t("field.kind")}>
             <Select value={form.kind || "monthly"} onValueChange={(v) => setForm({ ...form, kind: v })}>
               <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
@@ -185,6 +235,7 @@ export default function PaymentsPage() {
                 <SelectItem value="monthly">{t("kind.monthly")}</SelectItem>
                 <SelectItem value="course">{t("kind.course")}</SelectItem>
                 <SelectItem value="per_session">{t("kind.per_session")}</SelectItem>
+                <SelectItem value="trip">{t("kind.trip")}</SelectItem>
                 <SelectItem value="other">{t("kind.other")}</SelectItem>
               </SelectContent>
             </Select>
@@ -223,7 +274,8 @@ export default function PaymentsPage() {
             <Input value={form.reference || ""} onChange={(e) => setForm({ ...form, reference: e.target.value })} placeholder="TXN-1234" />
           </Field>
         </div>
-      )}
+        );
+      }}
       />
     </div>
   );
