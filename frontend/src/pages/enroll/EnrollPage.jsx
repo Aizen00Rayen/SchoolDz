@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Check, ChevronLeft, ChevronRight, Facebook, Filter, Instagram, Linkedin, Loader2, MapPin, Music2,
-  Phone, Search, Sparkles, Twitter, X, ZoomIn, Youtube,
+  Phone, Search, Twitter, X, ZoomIn, Youtube,
 } from "lucide-react";
 
 import { api, extractError, resolveFileUrl, safeExternalUrl } from "@/lib/api";
@@ -63,16 +63,17 @@ const fadeUp = {
   transition: { duration: 0.6, ease: [0.2, 0.8, 0.2, 1] },
 };
 
-/** Eyebrow + big font-display heading, in the tenant's own accent color —
- * matches the marketing landing page's section-header convention, just
- * driven by per-school branding instead of the platform theme. */
+/** Eyebrow (a short colored rule + bold label — Arabic has no letter-case,
+ * so the uppercase+tracking trick this used to lean on did nothing) + a
+ * heavy Cairo heading, in the tenant's own accent color. */
 function SectionHeading({ eyebrow, title, accent, center }) {
   return (
-    <motion.div {...fadeUp} className={`mb-6 ${center ? "text-center" : ""}`}>
-      <p className="text-xs font-bold uppercase tracking-[0.2em] mb-2" style={{ color: accent }}>
-        {eyebrow}
-      </p>
-      <h2 className="font-display text-3xl md:text-4xl font-bold tracking-tight">{title}</h2>
+    <motion.div {...fadeUp} className={`mb-8 ${center ? "text-center" : ""}`}>
+      <div className={`flex items-center gap-2 mb-3 ${center ? "justify-center" : ""}`}>
+        <span className="w-6 h-[3px] rounded-full flex-shrink-0" style={{ backgroundColor: accent }} />
+        <p className="font-arabic text-xs font-bold tracking-wide" style={{ color: accent }}>{eyebrow}</p>
+      </div>
+      <h2 className="font-arabic text-3xl md:text-4xl font-bold tracking-tight">{title}</h2>
     </motion.div>
   );
 }
@@ -138,7 +139,11 @@ function GalleryLightbox({ photos, index, onClose, onNav }) {
 /** One course tile in the catalog grid — deliberately compact (a school
  * with 20-30 open courses used to render as one endless stacked list) and
  * fully clickable, opening the enrollment dialog rather than expanding an
- * inline form that would push everything below it down the page. */
+ * inline form that would push everything below it down the page. A course
+ * with no photo gets a flat tint of its own color plus a faint paper-grain
+ * texture instead of a two-color gradient — a gradient between an arbitrary
+ * course color and the school's accent can clash badly depending on what a
+ * school picked; a single tone never does. */
 function CourseCard({ course: c, accent, currency, onSelect, index }) {
   const totalSeats = c.groups.reduce((s, g) => s + g.seats_left, 0);
   const scarce = c.groups.some((g) => g.seats_left_is_low);
@@ -153,9 +158,10 @@ function CourseCard({ course: c, accent, currency, onSelect, index }) {
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, margin: "-40px" }}
       transition={{ duration: 0.4, delay: Math.min(index, 6) * 0.05 }}
-      className="group text-start rounded-2xl border border-border bg-card overflow-hidden flex flex-col transition-all hover:shadow-xl hover:-translate-y-1"
+      className="group text-start rounded-xl border border-border bg-card overflow-hidden flex flex-col transition-all hover:shadow-lg hover:border-[var(--card-accent)]"
+      style={{ "--card-accent": accent }}
     >
-      <div className="relative h-32 overflow-hidden">
+      <div className={`relative h-28 overflow-hidden ${!c.image_url ? "noise-bg" : ""}`}>
         {c.image_url ? (
           <img
             src={resolveFileUrl(c.image_url)}
@@ -165,12 +171,12 @@ function CourseCard({ course: c, accent, currency, onSelect, index }) {
         ) : (
           <div
             className="w-full h-full transition-transform duration-500 group-hover:scale-105"
-            style={{ background: `linear-gradient(135deg, ${c.color || accent}, ${accent})` }}
+            style={{ backgroundColor: c.color || accent }}
           />
         )}
         {(scarce || allFull) && (
           <span
-            className={`absolute top-2 start-2 text-[10px] font-bold px-2 py-1 rounded-full ${
+            className={`absolute top-2 start-2 text-[10px] font-bold px-2 py-1 rounded-md ${
               allFull ? "bg-black/70 text-white" : "text-white"
             }`}
             style={allFull ? undefined : { backgroundColor: accent }}
@@ -181,15 +187,20 @@ function CourseCard({ course: c, accent, currency, onSelect, index }) {
       </div>
       <div className="p-4 flex flex-col flex-1">
         {levelLabel && (
-          <p className="text-[11px] font-bold mb-1 truncate" style={{ color: accent }}>{levelLabel}</p>
+          <span
+            className="inline-flex self-start text-[10px] font-bold px-2 py-0.5 rounded-full border mb-2 truncate max-w-full"
+            style={{ borderColor: `${accent}40`, color: accent }}
+          >
+            {levelLabel}
+          </span>
         )}
-        <h3 className="font-semibold mb-1 line-clamp-1">{c.title}</h3>
+        <h3 className="font-semibold leading-snug mb-1 line-clamp-1">{c.title}</h3>
         {c.description && <p className="text-xs text-muted-foreground line-clamp-2 mb-3 flex-1">{c.description}</p>}
         <div className="flex items-center justify-between mt-auto pt-3 border-t border-border/60">
           <span className="text-[11px] text-muted-foreground">
             {c.pricing_type === "per_session" ? "لكل حصة" : c.pricing_type === "per_month" ? "شهرياً" : `${c.sessions_count || ""} حصة`}
           </span>
-          <span className="font-mono font-bold text-sm">
+          <span className="font-mono font-extrabold text-sm" style={{ color: accent }}>
             {Number(c.price).toLocaleString()} {currency}
           </span>
         </div>
@@ -327,7 +338,7 @@ export default function EnrollPage() {
     return (
       <div dir="rtl" className="min-h-screen grid place-items-center bg-background text-center px-6">
         <div>
-          <h1 className="text-2xl font-bold mb-2">المدرسة غير موجودة</h1>
+          <h1 className="font-arabic text-2xl font-bold mb-2">المدرسة غير موجودة</h1>
           <p className="text-muted-foreground">تحقق من الرابط الذي تم تزويدك به.</p>
         </div>
       </div>
@@ -339,16 +350,7 @@ export default function EnrollPage() {
 
   return (
     <div dir="rtl" className="min-h-screen bg-background overflow-x-hidden">
-      <style>{`
-        @keyframes enrollBlobFloat {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          33% { transform: translate(30px, -20px) scale(1.08); }
-          66% { transform: translate(-20px, 15px) scale(0.96); }
-        }
-        .enroll-blob { animation: enrollBlobFloat 14s ease-in-out infinite; }
-      `}</style>
-
-      {/* Hero — centered, colorful, animated */}
+      {/* Hero */}
       {school.hero_image_url ? (
         <div className="relative h-80 md:h-[26rem] overflow-hidden">
           <img src={resolveFileUrl(school.hero_image_url)} alt="" className="absolute inset-0 w-full h-full object-cover scale-105" />
@@ -358,43 +360,41 @@ export default function EnrollPage() {
               {school.logo_url && (
                 <img src={resolveFileUrl(school.logo_url)} alt={school.name} className="w-20 h-20 rounded-2xl object-cover mx-auto mb-4 border-2 border-white/80 shadow-2xl" />
               )}
-              <h1 className="font-display text-4xl md:text-6xl font-bold tracking-tight text-white">{school.name}</h1>
+              <h1 className="font-arabic text-4xl md:text-6xl font-extrabold tracking-tight text-white">{school.name}</h1>
             </motion.div>
           </div>
         </div>
       ) : (
-        <div className="relative overflow-hidden border-b border-border" style={{ backgroundColor: `${accent}08` }}>
+        <div className="relative overflow-hidden border-b border-border">
+          <div className="absolute inset-0 grid-hero opacity-60" />
           <div
-            className="enroll-blob absolute -top-24 -start-24 w-80 h-80 rounded-full blur-3xl opacity-25 pointer-events-none"
+            className="absolute -top-32 start-1/2 -translate-x-1/2 w-[36rem] h-[36rem] rounded-full blur-3xl opacity-[0.15] pointer-events-none"
             style={{ backgroundColor: accent }}
           />
-          <div
-            className="enroll-blob absolute -bottom-24 -end-24 w-80 h-80 rounded-full blur-3xl opacity-20 pointer-events-none"
-            style={{ backgroundColor: primary, animationDelay: "-7s" }}
-          />
-          <div className="relative max-w-5xl mx-auto px-6 py-16 md:py-20 flex flex-col items-center text-center">
+          <div className="relative max-w-5xl mx-auto px-6 py-20 md:py-24 flex flex-col items-center text-center">
             <motion.div initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
               {school.logo_url ? (
-                <img src={resolveFileUrl(school.logo_url)} alt={school.name} className="w-20 h-20 rounded-2xl object-cover mx-auto mb-4 shadow-xl" />
+                <img src={resolveFileUrl(school.logo_url)} alt={school.name} className="w-20 h-20 rounded-2xl object-cover mx-auto mb-5 shadow-xl" />
               ) : (
                 <div
-                  className="w-20 h-20 rounded-2xl grid place-items-center mx-auto mb-4 text-white font-bold text-3xl shadow-xl"
+                  className="w-20 h-20 rounded-2xl grid place-items-center mx-auto mb-5 text-white font-arabic font-extrabold text-3xl shadow-xl"
                   style={{ backgroundColor: primary }}
                 >
                   {school.name?.[0]?.toUpperCase()}
                 </div>
               )}
-              <span
-                className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.2em] px-3 py-1 rounded-full mb-4"
-                style={{ color: accent, backgroundColor: `${accent}1a` }}
-              >
-                <Sparkles className="w-3 h-3" /> التسجيل مفتوح
-              </span>
-              <h1 className="font-display text-4xl md:text-6xl font-bold tracking-tight">{school.name}</h1>
+              <div className="inline-flex items-center gap-2 mb-5">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-60" style={{ backgroundColor: accent }} />
+                  <span className="relative inline-flex rounded-full h-2 w-2" style={{ backgroundColor: accent }} />
+                </span>
+                <span className="font-arabic text-xs font-bold tracking-wide" style={{ color: accent }}>التسجيل مفتوح الآن</span>
+              </div>
+              <h1 className="font-arabic text-5xl md:text-7xl font-extrabold tracking-tight">{school.name}</h1>
               {courses.length > 0 && (
                 <Button
                   onClick={scrollToCourses}
-                  className="mt-6 text-white shadow-lg hover:shadow-xl transition-shadow"
+                  className="font-arabic font-bold mt-7 text-white shadow-lg hover:shadow-xl transition-shadow"
                   style={{ backgroundColor: accent }}
                 >
                   تصفح الدورات المتاحة
@@ -407,37 +407,39 @@ export default function EnrollPage() {
 
       {/* About */}
       {school.enrollment_description && (
-        <motion.div {...fadeUp} className="max-w-5xl mx-auto px-6 pt-12 text-center">
-          <p className="text-muted-foreground text-lg max-w-2xl mx-auto">{school.enrollment_description}</p>
+        <motion.div {...fadeUp} className="max-w-5xl mx-auto px-6 pt-14 text-center">
+          <p className="text-muted-foreground text-lg max-w-2xl mx-auto leading-relaxed">{school.enrollment_description}</p>
         </motion.div>
       )}
 
       {/* Gallery — hover zoom + click-to-enlarge lightbox */}
       {gallery.length > 0 && (
-        <div className="max-w-5xl mx-auto px-6 pt-14">
-          <SectionHeading eyebrow="معرض الصور" title="لمحة من الداخل" accent={accent} />
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {gallery.map((p, i) => (
-              <motion.button
-                key={p.id}
-                type="button"
-                onClick={() => setLightboxIndex(i)}
-                initial={{ opacity: 0, scale: 0.94 }}
-                whileInView={{ opacity: 1, scale: 1 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.4, delay: i * 0.05 }}
-                className="relative rounded-xl overflow-hidden group cursor-zoom-in"
-              >
-                <img
-                  src={resolveFileUrl(p.image_url)}
-                  alt={p.caption || ""}
-                  className="w-full h-32 md:h-36 object-cover transition-transform duration-500 group-hover:scale-110"
-                />
-                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
-                  <ZoomIn className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-                </div>
-              </motion.button>
-            ))}
+        <div className="border-t border-border/60 mt-14">
+          <div className="max-w-5xl mx-auto px-6 py-16 md:py-20">
+            <SectionHeading eyebrow="معرض الصور" title="لمحة من الداخل" accent={accent} />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {gallery.map((p, i) => (
+                <motion.button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setLightboxIndex(i)}
+                  initial={{ opacity: 0, scale: 0.94 }}
+                  whileInView={{ opacity: 1, scale: 1 }}
+                  viewport={{ once: true }}
+                  transition={{ duration: 0.4, delay: i * 0.05 }}
+                  className="relative rounded-xl overflow-hidden group cursor-zoom-in"
+                >
+                  <img
+                    src={resolveFileUrl(p.image_url)}
+                    alt={p.caption || ""}
+                    className="w-full h-32 md:h-36 object-cover transition-transform duration-500 group-hover:scale-110"
+                  />
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
+                    <ZoomIn className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </div>
+                </motion.button>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -446,116 +448,123 @@ export default function EnrollPage() {
 
       {/* Teachers */}
       {teachers.length > 0 && (
-        <div className="max-w-5xl mx-auto px-6 pt-14">
-          <SectionHeading eyebrow="تعرف على الفريق" title="تعلم مع الأفضل" accent={accent} />
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-            {teachers.map((tch, i) => (
-              <motion.div
-                key={tch.id}
-                initial={{ opacity: 0, y: 16 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.4, delay: i * 0.06 }}
-                className="text-center"
-              >
-                {tch.photo_url ? (
-                  <img
-                    src={resolveFileUrl(tch.photo_url)}
-                    alt=""
-                    className="w-24 h-24 rounded-full object-cover mx-auto mb-3 ring-4 transition-transform hover:scale-105"
-                    style={{ "--tw-ring-color": `${accent}33` }}
-                  />
-                ) : (
-                  <div
-                    className="w-24 h-24 rounded-full bg-muted grid place-items-center mx-auto mb-3 font-bold text-lg text-muted-foreground ring-4 transition-transform hover:scale-105"
-                    style={{ "--tw-ring-color": `${accent}33` }}
-                  >
-                    {tch.first_name?.[0]}{tch.last_name?.[0]}
-                  </div>
-                )}
-                <div className="text-sm font-semibold">{tch.first_name} {tch.last_name}</div>
-                {tch.subjects?.length > 0 && (
-                  <div className="text-xs text-muted-foreground">{tch.subjects.join(", ")}</div>
-                )}
-              </motion.div>
-            ))}
+        <div className="border-t border-border/60">
+          <div className="max-w-5xl mx-auto px-6 py-16 md:py-20">
+            <SectionHeading eyebrow="تعرف على الفريق" title="تعلم مع الأفضل" accent={accent} />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+              {teachers.map((tch, i) => (
+                <motion.div
+                  key={tch.id}
+                  initial={{ opacity: 0, y: 16 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ duration: 0.4, delay: i * 0.06 }}
+                  className="text-center"
+                >
+                  {tch.photo_url ? (
+                    <img
+                      src={resolveFileUrl(tch.photo_url)}
+                      alt=""
+                      className="w-24 h-24 rounded-full object-cover mx-auto mb-3 ring-4 transition-transform hover:scale-105"
+                      style={{ "--tw-ring-color": `${accent}33` }}
+                    />
+                  ) : (
+                    <div
+                      className="w-24 h-24 rounded-full bg-muted grid place-items-center mx-auto mb-3 font-bold text-lg text-muted-foreground ring-4 transition-transform hover:scale-105"
+                      style={{ "--tw-ring-color": `${accent}33` }}
+                    >
+                      {tch.first_name?.[0]}{tch.last_name?.[0]}
+                    </div>
+                  )}
+                  <div className="text-sm font-semibold">{tch.first_name} {tch.last_name}</div>
+                  {tch.subjects?.length > 0 && (
+                    <div className="text-xs text-muted-foreground">{tch.subjects.join(", ")}</div>
+                  )}
+                </motion.div>
+              ))}
+            </div>
           </div>
         </div>
       )}
 
       {/* Location, contact, social — with a real embedded map */}
       {hasLocation && (
-        <div className="max-w-5xl mx-auto px-6 pt-14">
-          <SectionHeading eyebrow="موقعنا" title="زورونا أو تواصلوا معنا" accent={accent} />
-          <motion.div {...fadeUp} className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-            <div className="space-y-4">
-              {school.address && (
-                <div className="flex items-start gap-3">
-                  <span className="w-9 h-9 rounded-lg grid place-items-center flex-shrink-0" style={{ backgroundColor: `${accent}1a`, color: accent }}>
-                    <MapPin className="w-4 h-4" />
-                  </span>
-                  <div>
-                    <div className="text-sm font-medium">{school.address}</div>
-                    {safeExternalUrl(school.map_url) && (
-                      <a href={safeExternalUrl(school.map_url)} target="_blank" rel="noreferrer" className="text-xs hover:underline" style={{ color: accent }}>
-                        احصل على الاتجاهات
-                      </a>
-                    )}
+        <div className="border-t border-border/60">
+          <div className="max-w-5xl mx-auto px-6 py-16 md:py-20">
+            <SectionHeading eyebrow="موقعنا" title="زورونا أو تواصلوا معنا" accent={accent} />
+            <motion.div {...fadeUp} className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+              <div className="space-y-4">
+                {school.address && (
+                  <div className="flex items-start gap-3">
+                    <span className="w-9 h-9 rounded-lg grid place-items-center flex-shrink-0" style={{ backgroundColor: `${accent}1a`, color: accent }}>
+                      <MapPin className="w-4 h-4" />
+                    </span>
+                    <div>
+                      <div className="text-sm font-medium">{school.address}</div>
+                      {safeExternalUrl(school.map_url) && (
+                        <a href={safeExternalUrl(school.map_url)} target="_blank" rel="noreferrer" className="text-xs hover:underline" style={{ color: accent }}>
+                          احصل على الاتجاهات
+                        </a>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
-              {school.phone && (
-                <div className="flex items-center gap-3">
-                  <span className="w-9 h-9 rounded-lg grid place-items-center flex-shrink-0" style={{ backgroundColor: `${accent}1a`, color: accent }}>
-                    <Phone className="w-4 h-4" />
-                  </span>
-                  <span className="text-sm font-medium">{school.phone}</span>
-                </div>
-              )}
-              {socialEntries.length > 0 && (
-                <div className="flex items-center gap-2 pt-2">
-                  {socialEntries.map(([platform, url]) => {
-                    const Icon = SOCIAL_ICONS[platform];
-                    return (
-                      <a
-                        key={platform} href={safeExternalUrl(url)} target="_blank" rel="noreferrer" aria-label={platform}
-                        className="w-9 h-9 rounded-full grid place-items-center transition-transform hover:scale-110"
-                        style={{ backgroundColor: `${accent}1a`, color: accent }}
-                      >
-                        {Icon ? <Icon className="w-4 h-4" /> : <span className="text-xs font-bold uppercase">{platform[0]}</span>}
-                      </a>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {mapEmbedSrc && (
-              <div className="rounded-xl overflow-hidden border border-border h-64">
-                <iframe
-                  title="موقع المدرسة"
-                  src={mapEmbedSrc}
-                  className="w-full h-full border-0"
-                  loading="lazy"
-                  referrerPolicy="no-referrer-when-downgrade"
-                />
+                )}
+                {school.phone && (
+                  <div className="flex items-center gap-3">
+                    <span className="w-9 h-9 rounded-lg grid place-items-center flex-shrink-0" style={{ backgroundColor: `${accent}1a`, color: accent }}>
+                      <Phone className="w-4 h-4" />
+                    </span>
+                    <span className="text-sm font-medium">{school.phone}</span>
+                  </div>
+                )}
+                {socialEntries.length > 0 && (
+                  <div className="flex items-center gap-2 pt-2">
+                    {socialEntries.map(([platform, url]) => {
+                      const Icon = SOCIAL_ICONS[platform];
+                      return (
+                        <a
+                          key={platform} href={safeExternalUrl(url)} target="_blank" rel="noreferrer" aria-label={platform}
+                          className="w-9 h-9 rounded-full grid place-items-center transition-transform hover:scale-110"
+                          style={{ backgroundColor: `${accent}1a`, color: accent }}
+                        >
+                          {Icon ? <Icon className="w-4 h-4" /> : <span className="text-xs font-bold uppercase">{platform[0]}</span>}
+                        </a>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
-          </motion.div>
+
+              {mapEmbedSrc && (
+                <div className="rounded-xl overflow-hidden border border-border h-64">
+                  <iframe
+                    title="موقع المدرسة"
+                    src={mapEmbedSrc}
+                    className="w-full h-full border-0"
+                    loading="lazy"
+                    referrerPolicy="no-referrer-when-downgrade"
+                  />
+                </div>
+              )}
+            </motion.div>
+          </div>
         </div>
       )}
 
       {/* Course catalog — filterable grid instead of one long stacked list,
           so a school with 20-30 open courses stays a short, scannable page. */}
       {courses.length > 0 && (
-        <div id="courses" className="pt-14 pb-16" style={{ backgroundColor: `${accent}06` }}>
-          <div className="max-w-5xl mx-auto px-6">
+        <div id="courses" className="border-t border-border/60" style={{ backgroundColor: `${accent}0d` }}>
+          <div className="max-w-5xl mx-auto px-6 py-16 md:py-20">
             <SectionHeading eyebrow="التسجيل" title="اختر الدورة المناسبة" accent={accent} center />
 
             {(hasFilterableCourses || courses.length > PAGE_SIZE) && (
               <motion.div {...fadeUp} className="surface-card p-4 mb-8 flex flex-col gap-3">
-                <div className="flex items-center gap-2 text-xs font-bold text-muted-foreground">
-                  <Filter className="w-3.5 h-3.5" /> تصفية النتائج
+                <div className="flex items-center gap-2">
+                  <span className="w-7 h-7 rounded-md grid place-items-center flex-shrink-0" style={{ backgroundColor: `${accent}1a`, color: accent }}>
+                    <Filter className="w-3.5 h-3.5" />
+                  </span>
+                  <p className="font-arabic text-sm font-bold">تصفية النتائج</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {courses.length > PAGE_SIZE && (
@@ -643,7 +652,7 @@ export default function EnrollPage() {
           {selectedCourse && (
             <>
               <DialogHeader>
-                <DialogTitle className="font-display text-xl">{selectedCourse.title}</DialogTitle>
+                <DialogTitle className="font-arabic text-xl font-bold">{selectedCourse.title}</DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground">
                   {courseLevelLabel(selectedCourse) ? `${courseLevelLabel(selectedCourse)} — ` : ""}
                   املأ البيانات أدناه لتسجيل طفلك في هذه الدورة.
@@ -697,7 +706,7 @@ export default function EnrollPage() {
                   ستكون هذه بيانات دخولك إلى بوابة الأولياء، حيث يمكنك متابعة الحضور والنتائج والمدفوعات. الدفع يتم لاحقًا في مكتب المدرسة.
                 </p>
 
-                <Button type="submit" className="w-full h-11" disabled={enrollMut.isPending} style={{ backgroundColor: accent }}>
+                <Button type="submit" className="font-arabic font-bold w-full h-11" disabled={enrollMut.isPending} style={{ backgroundColor: accent }}>
                   {enrollMut.isPending ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : (
