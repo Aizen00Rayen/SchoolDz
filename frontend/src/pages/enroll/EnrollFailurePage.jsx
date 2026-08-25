@@ -1,8 +1,10 @@
 import { Link } from "react-router-dom";
 import { XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useSEO } from "@/lib/useSEO";
 
 export default function EnrollFailurePage() {
+  useSEO({ title: "Scolaris", noindex: true });
   return (
     <div dir="rtl" className="min-h-screen flex items-center justify-center bg-background px-6">
       <div className="max-w-sm text-center">

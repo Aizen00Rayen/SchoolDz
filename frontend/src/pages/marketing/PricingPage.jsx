@@ -1,9 +1,17 @@
 import MarketingNav from "./MarketingNav";
 import PlanCards from "@/components/PlanCards";
 import { useI18n } from "@/lib/i18n";
+import { useSEO } from "@/lib/useSEO";
 
 export default function PricingPage() {
   const { t } = useI18n();
+
+  useSEO({
+    title: `${t("pricing.title")} — Scolaris`,
+    description: t("pricing.subtitle"),
+    path: "/pricing",
+  });
+
   return (
     <div className="min-h-screen bg-background">
       <MarketingNav />

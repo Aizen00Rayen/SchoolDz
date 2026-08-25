@@ -6,6 +6,7 @@ import {
 import MarketingNav from "./MarketingNav";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n";
+import { useSEO } from "@/lib/useSEO";
 
 const FEATURES = [
   { key: "students", icon: GraduationCap },
@@ -24,6 +25,13 @@ const FEATURES = [
 
 export default function AboutPage() {
   const { t } = useI18n();
+
+  useSEO({
+    title: `${t("about.title")} — Scolaris`,
+    description: t("about.subtitle"),
+    path: "/about",
+  });
+
   return (
     <div className="min-h-screen bg-background">
       <MarketingNav />

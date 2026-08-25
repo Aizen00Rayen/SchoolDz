@@ -12,12 +12,17 @@ import { API_BASE, extractError } from "@/lib/api";
 import { useServerConfig } from "@/lib/config";
 import { Loader2 } from "lucide-react";
 import GoogleAuthButton from "./GoogleAuthButton";
+import { useSEO } from "@/lib/useSEO";
 
 export default function LoginPage() {
   const { login, user } = useAuth();
   const { t } = useI18n();
   const nav = useNavigate();
   const loc = useLocation();
+
+  // A sign-in form has no content value for search — keep it out of the
+  // index so it doesn't compete with pages that actually explain the product.
+  useSEO({ title: `${t("nav.login")} — Scolaris`, path: "/login", noindex: true });
   const { data: serverConfig } = useServerConfig();
   const googleEnabled = !!serverConfig?.google_oauth_enabled;
   const [email, setEmail] = useState("");

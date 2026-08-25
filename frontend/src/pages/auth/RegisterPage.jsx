@@ -15,6 +15,7 @@ import { API_BASE, extractError } from "@/lib/api";
 import { useServerConfig } from "@/lib/config";
 import { Loader2 } from "lucide-react";
 import GoogleAuthButton from "./GoogleAuthButton";
+import { useSEO } from "@/lib/useSEO";
 
 const CENTER_TYPES = [
   { value: "tutoring", label: "Tutoring center" },
@@ -43,6 +44,14 @@ export default function RegisterPage() {
   const { t } = useI18n();
   const nav = useNavigate();
   const [params] = useSearchParams();
+
+  // Unlike Login, this is the actual signup funnel entry point — worth
+  // keeping indexable for "scolaris sign up" / "create workspace" searches.
+  useSEO({
+    title: `${t("auth.submit.register")} — Scolaris`,
+    description: t("hero.subtitle"),
+    path: "/register",
+  });
   const [name, setName] = useState("");
   const [email, setEmail] = useState(params.get("email") || "");
   const [password, setPassword] = useState("");

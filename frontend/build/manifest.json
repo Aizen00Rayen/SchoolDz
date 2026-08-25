@@ -1,6 +1,7 @@
 {
   "short_name": "Scolaris",
   "name": "Scolaris — Cloud ERP for Modern Education Centers",
+  "description": "Scolaris is the cloud ERP for private tutoring centers, language schools, and training academies — students, courses, payments, attendance, and reports in one workspace.",
   "icons": [
     { "src": "icon-192.png", "type": "image/png", "sizes": "192x192" },
     { "src": "icon-512.png", "type": "image/png", "sizes": "512x512" }

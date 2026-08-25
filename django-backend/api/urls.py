@@ -60,6 +60,11 @@ urlpatterns = [
     path('public/quiz-attempts/<str:token>', views.public_quiz_attempt, name='public_quiz_attempt_noslash'),
     *_both('public/quiz-attempts/<str:token>/submit', views.public_quiz_attempt_submit, 'public_quiz_attempt_submit'),
 
+    # SEO: dynamic sitemap of per-tenant enrollment pages — referenced from
+    # the static frontend/public/robots.txt as a second Sitemap: line, since
+    # the set of tenants isn't known at frontend build time.
+    path('sitemap-schools.xml', views.sitemap_schools_xml, name='sitemap_schools_xml'),
+
     # Public self-enrollment page (per-school, unauthenticated)
     path('public/schools/<str:slug>/enroll/', views.public_school_enroll, name='public_school_enroll'),
     path('public/schools/<str:slug>/enroll', views.public_school_enroll, name='public_school_enroll_noslash'),

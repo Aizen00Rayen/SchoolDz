@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Disallow: /app/
+Disallow: /portal/
+Disallow: /billing/
+Disallow: /admin
+
+Sitemap: https://scolaris.cloud/sitemap.xml
+Sitemap: https://scolaris.cloud/api/v1/sitemap-schools.xml

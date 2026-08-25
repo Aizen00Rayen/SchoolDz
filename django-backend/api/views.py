@@ -857,6 +857,47 @@ def public_school_info(request, slug):
     })
 
 
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def sitemap_schools_xml(request):
+    """The marketing site's static sitemap.xml (frontend/public/) only lists
+    the handful of evergreen pages known at build time — every tenant's own
+    public enrollment page (/enroll/<slug>) is a legitimate, separately
+    indexable page too (a parent searching the school's own name should find
+    it), but the set of tenants changes constantly, so it can't live in a
+    static file. Served from here instead and referenced as a second
+    `Sitemap:` line in robots.txt — a sitemap index isn't needed since a
+    plain robots.txt can list multiple sitemap files directly. Only tenants
+    with at least one course actually open for enrollment are included, so
+    Google isn't sent to a page that's just an empty catalog."""
+    from xml.sax.saxutils import escape as xml_escape
+
+    tenants = (
+        Tenant.objects
+        .filter(status='active', courses__show_on_enrollment=True, courses__status='active')
+        .distinct()
+        .values('slug', 'updated_at')
+    )
+    entries = []
+    for t in tenants:
+        slug = (t['slug'] or '').strip()
+        if not slug:
+            continue
+        lastmod = t['updated_at'].strftime('%Y-%m-%d') if t['updated_at'] else ''
+        entries.append(
+            f"  <url><loc>https://scolaris.cloud/enroll/{xml_escape(slug)}</loc>"
+            f"<lastmod>{lastmod}</lastmod><changefreq>weekly</changefreq></url>"
+        )
+
+    xml = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        + '\n'.join(entries) + ('\n' if entries else '') +
+        '</urlset>'
+    )
+    return HttpResponse(xml, content_type='application/xml')
+
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @throttle_classes([EnrollmentRateThrottle])

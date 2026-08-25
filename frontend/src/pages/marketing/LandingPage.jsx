@@ -12,6 +12,7 @@ import {
 
 import MarketingNav from "./MarketingNav";
 import { useI18n } from "@/lib/i18n";
+import { useSEO } from "@/lib/useSEO";
 import { MARKETING } from "@/constants/testIds";
 import { Button } from "@/components/ui/button";
 import { StickyFeatureCards } from "@/components/ui/sticky-scroll-cards-section";
@@ -612,6 +613,30 @@ export default function LandingPage() {
   const { t, lang } = useI18n();
   const location = useLocation();
   const heroFont = lang === "ar" ? "font-arabic" : "font-display";
+
+  useSEO({
+    title: `Scolaris — ${t("hero.title.1")} ${t("hero.title.2")} ${t("hero.title.3")}`,
+    description: t("hero.subtitle"),
+    path: "/",
+    jsonLd: [
+      {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        name: "Scolaris",
+        url: "https://scolaris.cloud",
+        logo: "https://scolaris.cloud/icon-512.png",
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        name: "Scolaris",
+        applicationCategory: "BusinessApplication",
+        operatingSystem: "Web",
+        description: t("hero.subtitle"),
+        url: "https://scolaris.cloud",
+      },
+    ],
+  });
   const centerTypes = [
     t("type.tutoring"), t("type.language"), t("type.coding"), t("type.robotics"),
     t("type.music"), t("type.art"), t("type.camp"), t("type.pro"),

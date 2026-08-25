@@ -10,6 +10,7 @@ import {
 
 import { api, extractError, resolveFileUrl, safeExternalUrl } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { useSEO } from "@/lib/useSEO";
 import { SCHOOL_LEVELS } from "@/lib/schoolLevels";
 import { Field } from "@/pages/app/_shared";
 import { Button } from "@/components/ui/button";
@@ -300,6 +301,28 @@ export default function EnrollPage() {
   const primary = school?.primary_color || "#0A0A0B";
   const currency = school?.currency || "";
   const mapEmbedSrc = mapEmbedSrcFor(school?.map_url, school?.address);
+
+  // Each school gets its own indexable page — a parent searching the
+  // school's own name should be able to find its enrollment page directly,
+  // and EducationalOrganization structured data gives Google enough to
+  // show a proper rich result (name, address, phone) instead of a bare link.
+  useSEO({
+    title: school ? `التسجيل في ${school.name} | Scolaris` : undefined,
+    description: school
+      ? (school.enrollment_description || `سجّل الآن في ${school.name} عبر منصة Scolaris.`)
+      : undefined,
+    path: `/enroll/${slug}`,
+    image: school?.hero_image_url ? resolveFileUrl(school.hero_image_url) : (school?.logo_url ? resolveFileUrl(school.logo_url) : undefined),
+    jsonLd: school ? {
+      "@context": "https://schema.org",
+      "@type": "EducationalOrganization",
+      name: school.name,
+      url: `https://scolaris.cloud/enroll/${slug}`,
+      ...(school.address ? { address: { "@type": "PostalAddress", streetAddress: school.address } } : {}),
+      ...(school.phone ? { telephone: school.phone } : {}),
+      ...(school.logo_url ? { logo: resolveFileUrl(school.logo_url) } : {}),
+    } : undefined,
+  });
 
   // Filter options are derived from the school's actual course catalog
   // (not the full theoretical school-system taxonomy), so a dropdown never

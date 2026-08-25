@@ -3,11 +3,15 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Loader2, CheckCircle2, AlertTriangle } from "lucide-react";
 import { api, extractError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import { useSEO } from "@/lib/useSEO";
 
 const POLL_INTERVAL_MS = 2000;
 const MAX_ATTEMPTS = 15; // ~30s, matches BillingSuccessPage's reasoning
 
 export default function EnrollSuccessPage() {
+  // A post-payment status page has no search value and would just show up
+  // as confusing, checkout-id-specific "content" if indexed.
+  useSEO({ title: "Scolaris", noindex: true });
   const [params] = useSearchParams();
   const nav = useNavigate();
   const [status, setStatus] = useState("checking"); // checking | paid | pending | error
