@@ -5,7 +5,7 @@ import {
   ArrowDown, ArrowUp, Copy, ExternalLink, Globe, ImagePlus, Loader2, Plus, Trash2,
 } from "lucide-react";
 
-import { PageHeader, EmptyState, Field } from "./_shared";
+import { PageHeader, EmptyState, Field, courseOptionLabel } from "./_shared";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { api, extractError, resolveFileUrl } from "@/lib/api";
@@ -326,7 +326,7 @@ export default function WebsitePage() {
                 label={t("website.upload_photo")}
               />
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium truncate">{c.title}</div>
+                <div className="text-sm font-medium truncate">{courseOptionLabel(c, t)}</div>
               </div>
               <Switch
                 checked={!!c.show_on_enrollment}
