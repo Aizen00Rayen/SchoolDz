@@ -877,7 +877,11 @@ def public_school_enroll(request, slug):
     student_first = (data.get('student_first_name') or '').strip()
     student_last = (data.get('student_last_name') or '').strip()
     group_id = data.get('group_id')
-    payment_method = data.get('payment_method')  # 'online' | 'office'
+    # The public enrollment page no longer offers an online-payment choice —
+    # parents just fill the form and pay at the school office — but keep
+    # accepting 'online' here too, since nothing about the Chargily checkout
+    # path below actually depends on the frontend exposing that choice.
+    payment_method = data.get('payment_method') or 'office'
 
     if not all([guardian_name, guardian_email, guardian_phone, password, student_first, student_last, group_id]):
         return Response({'error': 'All fields are required'}, status=status.HTTP_400_BAD_REQUEST)

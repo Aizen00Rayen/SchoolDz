@@ -4,24 +4,28 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Check, ChevronLeft, ChevronRight, Facebook, Instagram, Linkedin, Loader2, MapPin, Music2,
-  Phone, Sparkles, Twitter, Users, X, ZoomIn, Youtube,
+  Check, ChevronLeft, ChevronRight, Facebook, Filter, Instagram, Linkedin, Loader2, MapPin, Music2,
+  Phone, Search, Sparkles, Twitter, X, ZoomIn, Youtube,
 } from "lucide-react";
 
 import { api, extractError, resolveFileUrl, safeExternalUrl } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { SCHOOL_LEVELS } from "@/lib/schoolLevels";
 import { Field } from "@/pages/app/_shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 
 const DEFAULT_FORM = {
   guardian_name: "", guardian_email: "", guardian_phone: "", password: "",
-  student_first_name: "", student_last_name: "", group_id: "", payment_method: "office",
+  student_first_name: "", student_last_name: "", group_id: "",
 };
+
+const DEFAULT_FILTERS = { level: "all", year: "all", specialty: "all", q: "" };
+const PAGE_SIZE = 9;
 
 const SOCIAL_ICONS = {
   facebook: Facebook, instagram: Instagram, twitter: Twitter,
@@ -45,7 +49,7 @@ const YEAR_ORDINALS_AR = ["الأولى", "الثانية", "الثالثة", "�
  * set up for, shown on its public enrollment card so parents can tell which
  * class it targets before picking it. */
 function courseLevelLabel(c) {
-  if (!c.school_level) return null;
+  if (!c?.school_level) return null;
   const parts = [SCHOOL_LEVEL_AR[c.school_level] || c.school_level];
   if (c.school_year) parts.push(YEAR_ORDINALS_AR[c.school_year - 1] || `السنة ${c.school_year}`);
   if (c.specialty) parts.push(SPECIALTY_AR[c.specialty] || c.specialty);
@@ -62,9 +66,9 @@ const fadeUp = {
 /** Eyebrow + big font-display heading, in the tenant's own accent color —
  * matches the marketing landing page's section-header convention, just
  * driven by per-school branding instead of the platform theme. */
-function SectionHeading({ eyebrow, title, accent }) {
+function SectionHeading({ eyebrow, title, accent, center }) {
   return (
-    <motion.div {...fadeUp} className="mb-6">
+    <motion.div {...fadeUp} className={`mb-6 ${center ? "text-center" : ""}`}>
       <p className="text-xs font-bold uppercase tracking-[0.2em] mb-2" style={{ color: accent }}>
         {eyebrow}
       </p>
@@ -131,13 +135,105 @@ function GalleryLightbox({ photos, index, onClose, onNav }) {
   );
 }
 
+/** One course tile in the catalog grid — deliberately compact (a school
+ * with 20-30 open courses used to render as one endless stacked list) and
+ * fully clickable, opening the enrollment dialog rather than expanding an
+ * inline form that would push everything below it down the page. */
+function CourseCard({ course: c, accent, currency, onSelect, index }) {
+  const totalSeats = c.groups.reduce((s, g) => s + g.seats_left, 0);
+  const scarce = c.groups.some((g) => g.seats_left_is_low);
+  const allFull = totalSeats === 0;
+  const levelLabel = courseLevelLabel(c);
+
+  return (
+    <motion.button
+      type="button"
+      onClick={() => onSelect(c)}
+      initial={{ opacity: 0, y: 18 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: "-40px" }}
+      transition={{ duration: 0.4, delay: Math.min(index, 6) * 0.05 }}
+      className="group text-start rounded-2xl border border-border bg-card overflow-hidden flex flex-col transition-all hover:shadow-xl hover:-translate-y-1"
+    >
+      <div className="relative h-32 overflow-hidden">
+        {c.image_url ? (
+          <img
+            src={resolveFileUrl(c.image_url)}
+            alt=""
+            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+          />
+        ) : (
+          <div
+            className="w-full h-full transition-transform duration-500 group-hover:scale-105"
+            style={{ background: `linear-gradient(135deg, ${c.color || accent}, ${accent})` }}
+          />
+        )}
+        {(scarce || allFull) && (
+          <span
+            className={`absolute top-2 start-2 text-[10px] font-bold px-2 py-1 rounded-full ${
+              allFull ? "bg-black/70 text-white" : "text-white"
+            }`}
+            style={allFull ? undefined : { backgroundColor: accent }}
+          >
+            {allFull ? "مكتمل" : `تبقى ${totalSeats}!`}
+          </span>
+        )}
+      </div>
+      <div className="p-4 flex flex-col flex-1">
+        {levelLabel && (
+          <p className="text-[11px] font-bold mb-1 truncate" style={{ color: accent }}>{levelLabel}</p>
+        )}
+        <h3 className="font-semibold mb-1 line-clamp-1">{c.title}</h3>
+        {c.description && <p className="text-xs text-muted-foreground line-clamp-2 mb-3 flex-1">{c.description}</p>}
+        <div className="flex items-center justify-between mt-auto pt-3 border-t border-border/60">
+          <span className="text-[11px] text-muted-foreground">
+            {c.pricing_type === "per_session" ? "لكل حصة" : c.pricing_type === "per_month" ? "شهرياً" : `${c.sessions_count || ""} حصة`}
+          </span>
+          <span className="font-mono font-bold text-sm">
+            {Number(c.price).toLocaleString()} {currency}
+          </span>
+        </div>
+      </div>
+    </motion.button>
+  );
+}
+
 export default function EnrollPage() {
   const { slug } = useParams();
   const nav = useNavigate();
   const { loginWithToken } = useAuth();
   const [form, setForm] = useState(DEFAULT_FORM);
   const [selectedCourseId, setSelectedCourseId] = useState(null);
+  const [enrollOpen, setEnrollOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(null);
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
+  // The public enrollment page is shown to parents who have never touched
+  // the app, so it must never inherit whatever dark/light preference the
+  // school's own staff happen to have left in this browser's localStorage
+  // (that's what made this page render with a black background for some
+  // schools). Removing the .dark class isn't enough on its own — ThemeProvider
+  // wraps the whole app and re-applies that class from an effect of its own,
+  // which (being the ancestor) fires *after* a child page's effect on mount
+  // and would silently put it right back. Setting the light values as inline
+  // custom properties instead — the same technique useTenantBranding uses for
+  // per-school colors — always wins over the class-based rule regardless of
+  // effect order, and also reaches Radix's Dialog/Select content, which
+  // portals to document.body outside this page's own DOM subtree.
+  useEffect(() => {
+    const root = document.documentElement;
+    const lightTokens = {
+      "--background": "0 0% 98%", "--foreground": "240 5% 4%",
+      "--card": "0 0% 100%", "--card-foreground": "240 5% 4%",
+      "--popover": "0 0% 100%", "--popover-foreground": "240 5% 4%",
+      "--secondary": "240 5% 96%", "--secondary-foreground": "240 5% 4%",
+      "--muted": "240 5% 96%", "--muted-foreground": "240 4% 46%",
+      "--border": "240 6% 90%", "--input": "240 6% 90%",
+    };
+    for (const [k, v] of Object.entries(lightTokens)) root.style.setProperty(k, v);
+    return () => { for (const k of Object.keys(lightTokens)) root.style.removeProperty(k); };
+  }, []);
 
   const { data: school, isLoading, isError } = useQuery({
     queryKey: ["public-school", slug],
@@ -150,10 +246,47 @@ export default function EnrollPage() {
   const gallery = school?.gallery || [];
   const socialEntries = Object.entries(school?.social_links || {}).filter(([, url]) => safeExternalUrl(url));
   const hasLocation = school?.address || school?.phone || school?.map_url || socialEntries.length > 0;
-  const selectedCourse = courses.find((c) => c.id === selectedCourseId) || courses[0];
+  const selectedCourse = courses.find((c) => c.id === selectedCourseId);
   const accent = school?.accent_color || "#E53935";
   const primary = school?.primary_color || "#0A0A0B";
+  const currency = school?.currency || "";
   const mapEmbedSrc = school?.address ? `https://www.google.com/maps?q=${encodeURIComponent(school.address)}&output=embed` : null;
+
+  // Filter options are derived from the school's actual course catalog
+  // (not the full theoretical school-system taxonomy), so a dropdown never
+  // offers a level/specialty that would just filter down to zero results.
+  const levelsAvailable = SCHOOL_LEVELS.filter((lvl) => courses.some((c) => c.school_level === lvl));
+  const yearsAvailable = filters.level === "all" ? [] : [...new Set(
+    courses.filter((c) => c.school_level === filters.level && c.school_year).map((c) => c.school_year)
+  )].sort((a, b) => a - b);
+  const specialtiesAvailable = filters.level === "high" ? [...new Set(
+    courses
+      .filter((c) => c.school_level === "high" && (filters.year === "all" || String(c.school_year) === filters.year) && c.specialty)
+      .map((c) => c.specialty)
+  )] : [];
+  const hasFilterableCourses = levelsAvailable.length > 0;
+
+  const filteredCourses = courses.filter((c) => {
+    if (filters.level !== "all" && c.school_level !== filters.level) return false;
+    if (filters.year !== "all" && String(c.school_year) !== filters.year) return false;
+    if (filters.specialty !== "all" && c.specialty !== filters.specialty) return false;
+    if (filters.q.trim() && !c.title.toLowerCase().includes(filters.q.trim().toLowerCase())) return false;
+    return true;
+  });
+  const visibleCourses = filteredCourses.slice(0, visibleCount);
+  const hasMore = filteredCourses.length > visibleCourses.length;
+  const filtersActive = filters.level !== "all" || filters.year !== "all" || filters.specialty !== "all" || filters.q.trim();
+
+  const updateFilters = (patch) => {
+    setFilters((f) => ({ ...f, ...patch }));
+    setVisibleCount(PAGE_SIZE);
+  };
+
+  const openEnroll = (course) => {
+    setSelectedCourseId(course.id);
+    setForm((f) => ({ ...f, group_id: "" }));
+    setEnrollOpen(true);
+  };
 
   // Derived rather than synced into state via an effect: a course with only
   // one open group shouldn't need an extra click on a dropdown that already
@@ -164,14 +297,9 @@ export default function EnrollPage() {
   const enrollMut = useMutation({
     mutationFn: (payload) => api.post(`/public/schools/${slug}/enroll`, payload).then((r) => r.data),
     onSuccess: async (data) => {
-      if (data.payment_error) toast.warning(data.payment_error);
-      // Log in first in both cases — the success/failure pages after a
-      // Chargily redirect require an authenticated parent portal session.
+      setEnrollOpen(false);
+      // Log in first — the parent portal landing page needs an authenticated session.
       await loginWithToken(data.access_token, data.user);
-      if (data.checkout_url) {
-        window.location.href = data.checkout_url;
-        return;
-      }
       toast.success(`تم تسجيل ${data.student.first_name} بنجاح!`);
       nav("/portal", { replace: true });
     },
@@ -206,7 +334,7 @@ export default function EnrollPage() {
     );
   }
 
-  const scrollToEnroll = () => document.getElementById("enroll")?.scrollIntoView({ behavior: "smooth" });
+  const scrollToCourses = () => document.getElementById("courses")?.scrollIntoView({ behavior: "smooth" });
   const navLightbox = (delta) => setLightboxIndex((i) => (i == null ? i : (i + delta + gallery.length) % gallery.length));
 
   return (
@@ -235,7 +363,7 @@ export default function EnrollPage() {
           </div>
         </div>
       ) : (
-        <div className="relative overflow-hidden border-b border-border">
+        <div className="relative overflow-hidden border-b border-border" style={{ backgroundColor: `${accent}08` }}>
           <div
             className="enroll-blob absolute -top-24 -start-24 w-80 h-80 rounded-full blur-3xl opacity-25 pointer-events-none"
             style={{ backgroundColor: accent }}
@@ -263,6 +391,15 @@ export default function EnrollPage() {
                 <Sparkles className="w-3 h-3" /> التسجيل مفتوح
               </span>
               <h1 className="font-display text-4xl md:text-6xl font-bold tracking-tight">{school.name}</h1>
+              {courses.length > 0 && (
+                <Button
+                  onClick={scrollToCourses}
+                  className="mt-6 text-white shadow-lg hover:shadow-xl transition-shadow"
+                  style={{ backgroundColor: accent }}
+                >
+                  تصفح الدورات المتاحة
+                </Button>
+              )}
             </motion.div>
           </div>
         </div>
@@ -408,158 +545,176 @@ export default function EnrollPage() {
         </div>
       )}
 
-      {/* Enroll now CTA */}
+      {/* Course catalog — filterable grid instead of one long stacked list,
+          so a school with 20-30 open courses stays a short, scannable page. */}
       {courses.length > 0 && (
-        <div className="max-w-5xl mx-auto px-6 pt-14 flex justify-center">
-          <motion.div {...fadeUp}>
-            <Button
-              onClick={scrollToEnroll}
-              className="text-white shadow-lg hover:shadow-xl transition-shadow"
-              style={{ backgroundColor: accent }}
-            >
-              سجل الآن
-            </Button>
-          </motion.div>
+        <div id="courses" className="pt-14 pb-16" style={{ backgroundColor: `${accent}06` }}>
+          <div className="max-w-5xl mx-auto px-6">
+            <SectionHeading eyebrow="التسجيل" title="اختر الدورة المناسبة" accent={accent} center />
+
+            {(hasFilterableCourses || courses.length > PAGE_SIZE) && (
+              <motion.div {...fadeUp} className="surface-card p-4 mb-8 flex flex-col gap-3">
+                <div className="flex items-center gap-2 text-xs font-bold text-muted-foreground">
+                  <Filter className="w-3.5 h-3.5" /> تصفية النتائج
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {courses.length > PAGE_SIZE && (
+                    <div className="relative flex-1 min-w-[160px]">
+                      <Search className="absolute end-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+                      <Input
+                        value={filters.q}
+                        onChange={(e) => updateFilters({ q: e.target.value })}
+                        placeholder="ابحث عن دورة…"
+                        className="bg-background pe-9 h-9"
+                      />
+                    </div>
+                  )}
+                  {hasFilterableCourses && (
+                    <Select value={filters.level} onValueChange={(v) => updateFilters({ level: v, year: "all", specialty: "all" })}>
+                      <SelectTrigger className="bg-background h-9 w-auto min-w-[110px]"><SelectValue placeholder="المرحلة" /></SelectTrigger>
+                      <SelectContent className="bg-popover">
+                        <SelectItem value="all">كل المراحل</SelectItem>
+                        {levelsAvailable.map((lvl) => (
+                          <SelectItem key={lvl} value={lvl}>{SCHOOL_LEVEL_AR[lvl]}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  {yearsAvailable.length > 0 && (
+                    <Select value={filters.year} onValueChange={(v) => updateFilters({ year: v, specialty: "all" })}>
+                      <SelectTrigger className="bg-background h-9 w-auto min-w-[110px]"><SelectValue placeholder="السنة" /></SelectTrigger>
+                      <SelectContent className="bg-popover">
+                        <SelectItem value="all">كل السنوات</SelectItem>
+                        {yearsAvailable.map((y) => (
+                          <SelectItem key={y} value={String(y)}>السنة {YEAR_ORDINALS_AR[y - 1] || y}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  {specialtiesAvailable.length > 0 && (
+                    <Select value={filters.specialty} onValueChange={(v) => updateFilters({ specialty: v })}>
+                      <SelectTrigger className="bg-background h-9 w-auto min-w-[140px]"><SelectValue placeholder="الشعبة" /></SelectTrigger>
+                      <SelectContent className="bg-popover">
+                        <SelectItem value="all">كل الشعب</SelectItem>
+                        {specialtiesAvailable.map((sp) => (
+                          <SelectItem key={sp} value={sp}>{SPECIALTY_AR[sp] || sp}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  {filtersActive && (
+                    <Button type="button" variant="ghost" size="sm" onClick={() => updateFilters(DEFAULT_FILTERS)} className="h-9 text-xs">
+                      <X className="w-3.5 h-3.5 me-1" /> إلغاء التصفية
+                    </Button>
+                  )}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {filteredCourses.length} من أصل {courses.length} دورة
+                </p>
+              </motion.div>
+            )}
+
+            {filteredCourses.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-10">لا توجد دورات مطابقة لهذا البحث.</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {visibleCourses.map((c, i) => (
+                    <CourseCard key={c.id} course={c} accent={accent} currency={currency} onSelect={openEnroll} index={i} />
+                  ))}
+                </div>
+                {hasMore && (
+                  <div className="flex justify-center mt-6">
+                    <Button type="button" variant="outline" onClick={() => setVisibleCount((v) => v + PAGE_SIZE)}>
+                      عرض المزيد ({filteredCourses.length - visibleCourses.length} أخرى)
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
       )}
 
-      <div id="enroll" className="max-w-5xl mx-auto px-6 py-14 grid grid-cols-1 lg:grid-cols-5 gap-10">
-        {/* Course picker */}
-        <motion.div {...fadeUp} className="lg:col-span-2">
-          <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground mb-4">
-            اختر الدورة
-          </h2>
-          {courses.length === 0 ? (
-            <p className="text-sm text-muted-foreground">لا توجد دورات مفتوحة للتسجيل حالياً — يرجى التواصل مع المدرسة مباشرة.</p>
-          ) : (
-            <div className="space-y-3">
-              {courses.map((c) => {
-                const totalSeats = c.groups.reduce((s, g) => s + g.seats_left, 0);
-                // Availability is only worth saying out loud when it's scarce
-                // or gone — a comfortable "23 seats left" just tells people
-                // there's no reason to decide today.
-                const scarce = c.groups.some((g) => g.seats_left_is_low);
-                const allFull = totalSeats === 0;
-                return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => { setSelectedCourseId(c.id); setForm((f) => ({ ...f, group_id: "" })); }}
-                    className={`w-full text-start rounded-xl border p-4 transition-all overflow-hidden hover:shadow-md ${
-                      selectedCourse?.id === c.id ? "border-foreground bg-muted/40" : "border-border hover:bg-muted/20"
-                    }`}
-                  >
-                    {c.image_url && (
-                      <img src={resolveFileUrl(c.image_url)} alt="" className="w-full h-28 object-cover rounded-lg mb-3 -mt-1" />
-                    )}
-                    <div className="flex items-center gap-2.5 mb-1">
-                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: c.color }} />
-                      <span className="font-semibold">{c.title}</span>
-                    </div>
-                    {courseLevelLabel(c) && (
-                      <p className="text-[11px] font-medium mb-1.5" style={{ color: accent }}>{courseLevelLabel(c)}</p>
-                    )}
-                    {c.description && <p className="text-xs text-muted-foreground mb-2">{c.description}</p>}
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>
-                        {c.pricing_type === "per_session" ? "لكل حصة"
-                          : c.pricing_type === "per_month" ? "شهرياً"
-                          : `${c.sessions_count || ""} حصة`}
-                      </span>
-                      <span className="font-mono font-semibold text-foreground">
-                        {Number(c.price).toLocaleString()} {school.currency}
-                      </span>
-                    </div>
-                    {(scarce || allFull) && (
-                      <div className={`flex items-center gap-1.5 text-xs mt-1.5 font-medium ${allFull ? "text-muted-foreground" : "text-destructive"}`}>
-                        <Users className="w-3 h-3" />
-                        {allFull ? "مكتمل" : `تبقى ${totalSeats} مقعد فقط!`}
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </motion.div>
-
-        {/* Enrollment form */}
-        <motion.div {...fadeUp} className="lg:col-span-3">
+      {/* Enrollment dialog — opened from a course card, so the catalog above
+          stays a compact grid instead of an inline form pushing it around. */}
+      <Dialog open={enrollOpen} onOpenChange={setEnrollOpen}>
+        <DialogContent className="max-w-lg bg-card max-h-[88vh] overflow-y-auto" dir="rtl">
           {selectedCourse && (
-            <form onSubmit={onSubmit} className="space-y-5 surface-card p-6">
-              <Field label="المجموعة" required>
-                <Select value={effectiveGroupId} onValueChange={(v) => setForm((f) => ({ ...f, group_id: v }))}>
-                  <SelectTrigger className="bg-background"><SelectValue placeholder="اختر مجموعة" /></SelectTrigger>
-                  <SelectContent className="bg-popover">
-                    {selectedCourse.groups.map((g) => (
-                      <SelectItem key={g.id} value={g.id} disabled={g.seats_left === 0}>
-                        {g.name}{g.schedule ? ` · ${g.schedule}` : ""}
-                        {g.seats_left === 0 ? " — مكتمل" : g.seats_left_is_low ? ` — تبقى ${g.seats_left} فقط!` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Field label="الاسم الأول للطالب" required>
-                  <Input value={form.student_first_name} onChange={(e) => setForm((f) => ({ ...f, student_first_name: e.target.value }))} required />
+            <>
+              <DialogHeader>
+                <DialogTitle className="font-display text-xl">{selectedCourse.title}</DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground">
+                  {courseLevelLabel(selectedCourse) ? `${courseLevelLabel(selectedCourse)} — ` : ""}
+                  املأ البيانات أدناه لتسجيل طفلك في هذه الدورة.
+                </DialogDescription>
+              </DialogHeader>
+              <form onSubmit={onSubmit} className="space-y-4">
+                <Field label="المجموعة" required>
+                  <Select value={effectiveGroupId} onValueChange={(v) => setForm((f) => ({ ...f, group_id: v }))}>
+                    <SelectTrigger className="bg-background"><SelectValue placeholder="اختر مجموعة" /></SelectTrigger>
+                    <SelectContent className="bg-popover">
+                      {selectedCourse.groups.map((g) => (
+                        <SelectItem key={g.id} value={g.id} disabled={g.seats_left === 0}>
+                          {g.name}{g.schedule ? ` · ${g.schedule}` : ""}
+                          {g.seats_left === 0 ? " — مكتمل" : g.seats_left_is_low ? ` — تبقى ${g.seats_left} فقط!` : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </Field>
-                <Field label="لقب الطالب" required>
-                  <Input value={form.student_last_name} onChange={(e) => setForm((f) => ({ ...f, student_last_name: e.target.value }))} required />
-                </Field>
-              </div>
 
-              <Field label="اسمك (ولي الأمر)" required>
-                <Input value={form.guardian_name} onChange={(e) => setForm((f) => ({ ...f, guardian_name: e.target.value }))} required />
-              </Field>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Field label="البريد الإلكتروني" required>
-                  <Input type="email" value={form.guardian_email} onChange={(e) => setForm((f) => ({ ...f, guardian_email: e.target.value }))} required dir="ltr" />
-                </Field>
-                <Field label="الهاتف" required>
-                  <Input value={form.guardian_phone} onChange={(e) => setForm((f) => ({ ...f, guardian_phone: e.target.value }))} required dir="ltr" />
-                </Field>
-              </div>
-
-              <Field label="اختر كلمة مرور" required>
-                <Input
-                  type="password" minLength={8} value={form.password}
-                  onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
-                  required placeholder="8 أحرف على الأقل" dir="ltr"
-                />
-              </Field>
-              <p className="text-xs text-muted-foreground -mt-3">
-                ستكون هذه بيانات دخولك إلى بوابة الأولياء، حيث يمكنك متابعة الحضور والنتائج والمدفوعات.
-              </p>
-
-              <Field label="كيف تودّ الدفع؟" required>
-                <div className="grid grid-cols-2 gap-3">
-                  <label className={`flex items-center gap-2 rounded-lg border p-3 cursor-pointer text-sm ${form.payment_method === "online" ? "border-foreground" : "border-border"}`}>
-                    <input type="radio" name="payment_method" checked={form.payment_method === "online"} onChange={() => setForm((f) => ({ ...f, payment_method: "online" }))} />
-                    الدفع الآن عبر الإنترنت
-                  </label>
-                  <label className={`flex items-center gap-2 rounded-lg border p-3 cursor-pointer text-sm ${form.payment_method === "office" ? "border-foreground" : "border-border"}`}>
-                    <input type="radio" name="payment_method" checked={form.payment_method === "office"} onChange={() => setForm((f) => ({ ...f, payment_method: "office" }))} />
-                    الدفع في المكتب
-                  </label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Field label="الاسم الأول للطالب" required>
+                    <Input value={form.student_first_name} onChange={(e) => setForm((f) => ({ ...f, student_first_name: e.target.value }))} required />
+                  </Field>
+                  <Field label="لقب الطالب" required>
+                    <Input value={form.student_last_name} onChange={(e) => setForm((f) => ({ ...f, student_last_name: e.target.value }))} required />
+                  </Field>
                 </div>
-              </Field>
 
-              <Button type="submit" className="w-full h-11" disabled={enrollMut.isPending} style={{ backgroundColor: accent }}>
-                {enrollMut.isPending ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : form.payment_method === "online" ? (
-                  <>المتابعة إلى الدفع</>
-                ) : (
-                  <><Check className="w-4 h-4 me-2" /> تسجيل</>
-                )}
-              </Button>
-            </form>
+                <Field label="اسمك (ولي الأمر)" required>
+                  <Input value={form.guardian_name} onChange={(e) => setForm((f) => ({ ...f, guardian_name: e.target.value }))} required />
+                </Field>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Field label="البريد الإلكتروني" required>
+                    <Input type="email" value={form.guardian_email} onChange={(e) => setForm((f) => ({ ...f, guardian_email: e.target.value }))} required dir="ltr" />
+                  </Field>
+                  <Field label="الهاتف" required>
+                    <Input value={form.guardian_phone} onChange={(e) => setForm((f) => ({ ...f, guardian_phone: e.target.value }))} required dir="ltr" />
+                  </Field>
+                </div>
+
+                <Field label="اختر كلمة مرور" required>
+                  <Input
+                    type="password" minLength={8} value={form.password}
+                    onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+                    required placeholder="8 أحرف على الأقل" dir="ltr"
+                  />
+                </Field>
+                <p className="text-xs text-muted-foreground -mt-2">
+                  ستكون هذه بيانات دخولك إلى بوابة الأولياء، حيث يمكنك متابعة الحضور والنتائج والمدفوعات. الدفع يتم لاحقًا في مكتب المدرسة.
+                </p>
+
+                <Button type="submit" className="w-full h-11" disabled={enrollMut.isPending} style={{ backgroundColor: accent }}>
+                  {enrollMut.isPending ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <><Check className="w-4 h-4 me-2" /> تسجيل</>
+                  )}
+                </Button>
+              </form>
+            </>
           )}
-        </motion.div>
-      </div>
+        </DialogContent>
+      </Dialog>
+
+      {courses.length === 0 && (
+        <div className="max-w-5xl mx-auto px-6 py-14 text-center">
+          <p className="text-sm text-muted-foreground">لا توجد دورات مفتوحة للتسجيل حالياً — يرجى التواصل مع المدرسة مباشرة.</p>
+        </div>
+      )}
     </div>
   );
 }
