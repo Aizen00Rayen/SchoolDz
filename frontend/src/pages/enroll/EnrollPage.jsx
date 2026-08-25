@@ -56,22 +56,37 @@ function courseLevelLabel(c) {
   return parts.join(" · ");
 }
 
-/** The map iframe must use the exact link a school pasted into Settings
+/** The map iframe must use the exact place a school pasted into Settings
  * (map_url) rather than re-geocoding the free-text address field — Google's
  * "q=" search can match a business name in that address to a same-named
  * place in a totally different city, which is exactly the wrong-location
- * bug this fixes. Almost any full google.com/maps URL (place, search, or
- * directions) embeds correctly once `output=embed` is set on it, so this
- * reuses whatever place/coordinates the school's own link already points
- * at instead of building a new query from scratch. Falls back to the old
- * address-based query only when no map_url was ever provided. */
+ * bug this fixed. But a regular google.com/maps/place/... page (what "Copy
+ * link" actually gives you) refuses to load in an iframe at all — Google
+ * only allows the specific no-API-key embed shape, `maps?q=<query>&output=
+ * embed`, which is what the address-based version always used. So this
+ * pulls the place out of the school's link (coordinates from the "@lat,lng"
+ * in the path if present — the most reliable signal on nearly every full
+ * Maps URL regardless of place/search/directions — else an existing q=
+ * param, else the place name segment) and rebuilds it in that one shape
+ * that's actually embeddable, rather than trying to embed their link
+ * as-is. A link already in the official /maps/embed?pb=... form (from
+ * Google's own "Embed a map" share option) is used untouched. Falls back
+ * to the address-based query only when no usable map_url was provided. */
 function mapEmbedSrcFor(mapUrl, address) {
   const safe = safeExternalUrl(mapUrl);
   if (safe) {
     try {
       const url = new URL(safe);
-      url.searchParams.set("output", "embed");
-      return url.toString();
+      if (url.pathname.startsWith("/maps/embed")) return url.toString();
+
+      const coords = url.pathname.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+      if (coords) return `https://www.google.com/maps?q=${coords[1]},${coords[2]}&output=embed`;
+
+      const q = url.searchParams.get("q") || url.searchParams.get("query");
+      if (q) return `https://www.google.com/maps?q=${encodeURIComponent(q)}&output=embed`;
+
+      const place = url.pathname.match(/\/maps\/place\/([^/]+)/);
+      if (place) return `https://www.google.com/maps?q=${encodeURIComponent(decodeURIComponent(place[1]).replace(/\+/g, " "))}&output=embed`;
     } catch {
       // Not a real URL — fall through to the address-based query below.
     }
