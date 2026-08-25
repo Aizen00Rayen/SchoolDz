@@ -56,6 +56,29 @@ function courseLevelLabel(c) {
   return parts.join(" · ");
 }
 
+/** The map iframe must use the exact link a school pasted into Settings
+ * (map_url) rather than re-geocoding the free-text address field — Google's
+ * "q=" search can match a business name in that address to a same-named
+ * place in a totally different city, which is exactly the wrong-location
+ * bug this fixes. Almost any full google.com/maps URL (place, search, or
+ * directions) embeds correctly once `output=embed` is set on it, so this
+ * reuses whatever place/coordinates the school's own link already points
+ * at instead of building a new query from scratch. Falls back to the old
+ * address-based query only when no map_url was ever provided. */
+function mapEmbedSrcFor(mapUrl, address) {
+  const safe = safeExternalUrl(mapUrl);
+  if (safe) {
+    try {
+      const url = new URL(safe);
+      url.searchParams.set("output", "embed");
+      return url.toString();
+    } catch {
+      // Not a real URL — fall through to the address-based query below.
+    }
+  }
+  return address ? `https://www.google.com/maps?q=${encodeURIComponent(address)}&output=embed` : null;
+}
+
 const fadeUp = {
   initial: { opacity: 0, y: 28 },
   whileInView: { opacity: 1, y: 0 },
@@ -261,7 +284,7 @@ export default function EnrollPage() {
   const accent = school?.accent_color || "#E53935";
   const primary = school?.primary_color || "#0A0A0B";
   const currency = school?.currency || "";
-  const mapEmbedSrc = school?.address ? `https://www.google.com/maps?q=${encodeURIComponent(school.address)}&output=embed` : null;
+  const mapEmbedSrc = mapEmbedSrcFor(school?.map_url, school?.address);
 
   // Filter options are derived from the school's actual course catalog
   // (not the full theoretical school-system taxonomy), so a dropdown never
