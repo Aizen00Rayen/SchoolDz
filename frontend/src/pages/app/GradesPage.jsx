@@ -17,7 +17,7 @@ const DEFAULT_FORM = {
 
 export default function GradesPage() {
   const { t } = useI18n();
-  const { canEdit } = usePermission("grades");
+  const { canAdd, canModify, canDelete } = usePermission("grades");
   const { data: students } = useQuery({
     queryKey: ["students-list"],
     queryFn: async () => (await api.get("/students")).data,
@@ -37,8 +37,9 @@ export default function GradesPage() {
       subtitle={t("subtitle.grades")}
       emptyIcon={Award}
       defaultForm={DEFAULT_FORM}
-      canEdit={canEdit}
-      canCreate={canEdit}
+      canEdit={canModify}
+      canDelete={canDelete}
+      canCreate={canAdd}
       columns={[
         {
           key: "student", label: t("field.student"),

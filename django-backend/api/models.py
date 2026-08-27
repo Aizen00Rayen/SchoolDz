@@ -21,24 +21,35 @@ PERMISSION_MODULES = [
     'grades', 'attendance', 'messages', 'quizzes', 'website', 'reports',
     'logs', 'users', 'settings', 'trips',
 ]
+# Each module's stored permission is now a flag object rather than a single
+# level string, so "can edit" can be granted as any independent combination
+# of add/modify/delete instead of one all-or-nothing tier — e.g. a data-entry
+# clerk can get {"view": True, "add": True} without also being able to modify
+# or delete existing records. `view` gates the whole module (add/modify/
+# delete are meaningless — and ignored — without it); a module with no entry,
+# or an entry with view missing/false, is hidden.
+PERMISSION_FLAGS = ['view', 'add', 'modify', 'delete']
+# Kept only as the historical set of values PERMISSION_MODULES entries used
+# to hold pre-migration-0022 (see that migration's LEVEL_MAP) — nothing at
+# runtime reads this anymore.
 PERMISSION_LEVELS = ['hidden', 'view', 'edit']
 
 # What a module resolves to for a limited role (secretary/accountant/teacher)
 # that has no explicit entry for it. Modules that were never permission-gated
-# before default to 'view' so extending PERMISSION_MODULES doesn't silently
-# take pages away from existing staff accounts; genuinely sensitive ones
-# (money, audit trail, user management) stay hidden until granted.
+# before default to view-only so extending PERMISSION_MODULES doesn't
+# silently take pages away from existing staff accounts; genuinely sensitive
+# ones (money, audit trail, user management) stay hidden until granted.
 DEFAULT_MODULE_PERMISSIONS = {
-    'dashboard': 'view',
-    'calendar': 'view',
-    'timetable': 'view',
-    # 'view' by default so existing staff can still populate the room
+    'dashboard': {'view': True},
+    'calendar': {'view': True},
+    'timetable': {'view': True},
+    # view-only by default so existing staff can still populate the room
     # dropdown when creating a group/session — only full room management
-    # (the Rooms page's create/edit/delete) needs an explicit 'edit' grant.
-    'rooms': 'view',
-    'reports': 'view',
-    'settings': 'view',
-    'website': 'view',
+    # (the Rooms page's create/edit/delete) needs an explicit grant.
+    'rooms': {'view': True},
+    'reports': {'view': True},
+    'settings': {'view': True},
+    'website': {'view': True},
 }
 
 class Tenant(models.Model):
@@ -137,9 +148,11 @@ class User(AbstractBaseUser):
     role = models.CharField(max_length=50, choices=ROLE_CHOICES)
     # Per-module tab access for secretary/accountant/teacher, set by the
     # owner/director when creating or editing a staff user — e.g.
-    # {"students": "edit", "payments": "view"}. Missing key = hidden.
-    # Ignored for owner/director/super_admin, who always have full access
-    # (see get_permission below and PERMISSION_MODULES for the valid keys).
+    # {"students": {"view": True, "add": True}, "payments": {"view": True}}.
+    # Missing key, or an entry with "view" missing/false, = hidden. Ignored
+    # for owner/director/super_admin, who always have full access (see
+    # can_view/can_add/can_modify/can_delete below and PERMISSION_MODULES
+    # for the valid module keys).
     permissions = models.JSONField(null=True, blank=True, default=dict)
     phone = models.CharField(max_length=255, null=True, blank=True)
     avatar_url = models.CharField(max_length=255, null=True, blank=True)
@@ -164,15 +177,31 @@ class User(AbstractBaseUser):
     def is_super_admin(self):
         return self.role == 'super_admin'
 
-    def get_permission(self, module_key):
-        """Effective access level for a tab/module: 'edit', 'view', or 'hidden'.
-        Owner/director/super_admin always get 'edit' — only secretary/
+    def _module_flags(self, module_key):
+        """Raw {view, add, modify, delete} flag dict for a module. Owner/
+        director/super_admin always get every flag — only secretary/
         accountant/teacher are limited by the stored `permissions` map."""
         if self.is_super_admin() or self.role in ('owner', 'director'):
-            return 'edit'
-        return (self.permissions or {}).get(
-            module_key, DEFAULT_MODULE_PERMISSIONS.get(module_key, 'hidden')
-        )
+            return {flag: True for flag in PERMISSION_FLAGS}
+        entry = (self.permissions or {}).get(module_key)
+        if entry is None:
+            entry = DEFAULT_MODULE_PERMISSIONS.get(module_key, {})
+        return entry if isinstance(entry, dict) else {}
+
+    def can_view(self, module_key):
+        return bool(self._module_flags(module_key).get('view'))
+
+    def can_add(self, module_key):
+        flags = self._module_flags(module_key)
+        return bool(flags.get('view') and flags.get('add'))
+
+    def can_modify(self, module_key):
+        flags = self._module_flags(module_key)
+        return bool(flags.get('view') and flags.get('modify'))
+
+    def can_delete(self, module_key):
+        flags = self._module_flags(module_key)
+        return bool(flags.get('view') and flags.get('delete'))
 
     @property
     def is_staff(self):

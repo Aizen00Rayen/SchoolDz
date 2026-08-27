@@ -114,7 +114,7 @@ function GradeDialog({ quizId, attempt, maxScore, onClose }) {
 export default function QuizBuilderPage() {
   const { id } = useParams();
   const { t } = useI18n();
-  const { canEdit } = usePermission("quizzes");
+  const { canModify: canEdit } = usePermission("quizzes");
   const qc = useQueryClient();
   const fileRef = useRef(null);
   const [publishResult, setPublishResult] = useState(null);

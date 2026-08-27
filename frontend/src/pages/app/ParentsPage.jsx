@@ -174,7 +174,7 @@ export default function ParentsPage() {
   const { t } = useI18n();
   const { tenant } = useAuth();
   const canInvite = tenant?.plan && tenant.plan !== "basic";
-  const { canEdit } = usePermission("parents");
+  const { canAdd, canModify, canDelete } = usePermission("parents");
   const qc = useQueryClient();
 
   const approveMut = useMutation({
@@ -201,14 +201,15 @@ export default function ParentsPage() {
     <CrudPanel
       moduleKey="parents"
       endpoint="/parents"
-      canEdit={canEdit}
-      canCreate={canEdit}
+      canEdit={canModify}
+      canDelete={canDelete}
+      canCreate={canAdd}
       title={t("menu.parents")}
       subtitle={t("subtitle.parents")}
       emptyIcon={UserRound}
       defaultForm={DEFAULT_FORM}
       rowClassName={approvalRowClass}
-      renderRowActions={(row) => row.approval_status === "pending" && canEdit ? (
+      renderRowActions={(row) => row.approval_status === "pending" && canModify ? (
         <>
           <Button
             size="icon" variant="ghost"

@@ -113,7 +113,7 @@ function DocumentField({ label, url, uploadPath, teacherId, onUploaded }) {
 
 export default function TeachersPage() {
   const { t } = useI18n();
-  const { canEdit } = usePermission("teachers");
+  const { canAdd, canModify, canDelete } = usePermission("teachers");
   const qc = useQueryClient();
   return (
     <CrudPanel
@@ -123,8 +123,9 @@ export default function TeachersPage() {
       subtitle={t("subtitle.teachers")}
       emptyIcon={Users}
       defaultForm={DEFAULT_FORM}
-      canEdit={canEdit}
-      canCreate={canEdit}
+      canEdit={canModify}
+      canDelete={canDelete}
+      canCreate={canAdd}
       extraActions={<ExportMenu resource="teachers" />}
       columns={[
         {

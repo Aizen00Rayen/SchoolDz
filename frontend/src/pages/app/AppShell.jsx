@@ -12,7 +12,7 @@ import { useI18n } from "@/lib/i18n";
 import { useTheme, useTenantBranding } from "@/lib/theme";
 import { APPUI, AUTH } from "@/constants/testIds";
 import { api, resolveFileUrl } from "@/lib/api";
-import { getModulePermission } from "@/lib/permissions";
+import { canViewModule } from "@/lib/permissions";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -336,7 +336,7 @@ export default function AppShell() {
               (!n.adminOnly || isAdmin) &&
               (!n.premiumOnly || isPremium) &&
               (!n.standardPlusOnly || isStandardPlus) &&
-              (!n.module || getModulePermission(user, n.module) !== "hidden")
+              (!n.module || canViewModule(user, n.module))
             );
             if (items.length === 0) return null;
             // A section marked collapsed still shows itself expanded while

@@ -79,7 +79,7 @@ function AvailabilityChecker() {
 
 export default function RoomsPage() {
   const { t } = useI18n();
-  const { canEdit } = usePermission("rooms");
+  const { canAdd, canModify, canDelete } = usePermission("rooms");
 
   return (
     <div>
@@ -94,8 +94,9 @@ export default function RoomsPage() {
         subtitle=""
         emptyIcon={DoorOpen}
         defaultForm={DEFAULT_FORM}
-        canEdit={canEdit}
-        canCreate={canEdit}
+        canEdit={canModify}
+        canDelete={canDelete}
+        canCreate={canAdd}
         columns={[
           { key: "name", label: t("field.room_name"), render: (r) => <span className="font-medium">{r.name}</span> },
           { key: "capacity", label: t("field.capacity"), render: (r) => r.capacity ?? <span className="text-muted-foreground">—</span> },

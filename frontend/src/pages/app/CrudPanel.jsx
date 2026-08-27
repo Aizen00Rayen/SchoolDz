@@ -36,7 +36,7 @@ function cleanPayload(obj) {
  */
 export default function CrudPanel({
   moduleKey, endpoint, title, subtitle, columns, defaultForm, renderForm,
-  emptyIcon: EmptyIcon, canEdit = true, canCreate = true, extraActions,
+  emptyIcon: EmptyIcon, canEdit = true, canDelete = true, canCreate = true, extraActions,
   rowClassName, renderRowActions, extraParams, filterBar,
 }) {
   const { t } = useI18n();
@@ -112,28 +112,32 @@ export default function CrudPanel({
   const rowActions = (row) => (
     <div className="flex items-center justify-end gap-1 flex-shrink-0">
       {renderRowActions?.(row)}
-      <Button
-        size="icon" variant="ghost"
-        onClick={() => openEdit(row)}
-        data-testid={APPUI.rowAction(moduleKey, row.id, "edit")}
-        className="h-10 w-10 md:h-8 md:w-8"
-        aria-label={t("actions.edit")}
-      >
-        <Pencil className="w-3.5 h-3.5" />
-      </Button>
-      <Button
-        size="icon" variant="ghost"
-        onClick={async () => {
-          if (await confirm({ title: t("confirm.delete_record"), destructive: true })) {
-            deleteMut.mutate(row.id);
-          }
-        }}
-        data-testid={APPUI.rowAction(moduleKey, row.id, "delete")}
-        className="h-10 w-10 md:h-8 md:w-8 text-destructive hover:bg-destructive/10"
-        aria-label={t("actions.delete")}
-      >
-        <Trash2 className="w-3.5 h-3.5" />
-      </Button>
+      {canEdit && (
+        <Button
+          size="icon" variant="ghost"
+          onClick={() => openEdit(row)}
+          data-testid={APPUI.rowAction(moduleKey, row.id, "edit")}
+          className="h-10 w-10 md:h-8 md:w-8"
+          aria-label={t("actions.edit")}
+        >
+          <Pencil className="w-3.5 h-3.5" />
+        </Button>
+      )}
+      {canDelete && (
+        <Button
+          size="icon" variant="ghost"
+          onClick={async () => {
+            if (await confirm({ title: t("confirm.delete_record"), destructive: true })) {
+              deleteMut.mutate(row.id);
+            }
+          }}
+          data-testid={APPUI.rowAction(moduleKey, row.id, "delete")}
+          className="h-10 w-10 md:h-8 md:w-8 text-destructive hover:bg-destructive/10"
+          aria-label={t("actions.delete")}
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+        </Button>
+      )}
     </div>
   );
 
@@ -205,7 +209,7 @@ export default function CrudPanel({
                   <div className="min-w-0 flex-1 font-medium text-sm">
                     {columns[0].render ? columns[0].render(row) : row[columns[0].key] ?? "—"}
                   </div>
-                  {canEdit && rowActions(row)}
+                  {(canEdit || canDelete || renderRowActions) && rowActions(row)}
                 </div>
                 {columns.length > 1 && (
                   <dl className="mt-3 grid grid-cols-[minmax(0,6.5rem)_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
@@ -234,7 +238,7 @@ export default function CrudPanel({
                       {c.label}
                     </th>
                   ))}
-                  {canEdit && <th className="w-24"></th>}
+                  {(canEdit || canDelete || renderRowActions) && <th className="w-24"></th>}
                 </tr>
               </thead>
               <tbody>
@@ -249,7 +253,7 @@ export default function CrudPanel({
                         {c.render ? c.render(row) : row[c.key] ?? "—"}
                       </td>
                     ))}
-                    {canEdit && (
+                    {(canEdit || canDelete || renderRowActions) && (
                       <td className="px-4 py-2 text-end">
                         {rowActions(row)}
                       </td>

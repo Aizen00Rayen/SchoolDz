@@ -132,7 +132,7 @@ function approvalRowClass(row) {
 
 export default function StudentsPage() {
   const { t } = useI18n();
-  const { canEdit } = usePermission("students");
+  const { canAdd, canModify, canDelete } = usePermission("students");
   const qc = useQueryClient();
 
   const approveMut = useMutation({
@@ -161,10 +161,11 @@ export default function StudentsPage() {
       subtitle={t("subtitle.students")}
       emptyIcon={GraduationCap}
       defaultForm={DEFAULT_FORM}
-      canEdit={canEdit}
-      canCreate={canEdit}
+      canEdit={canModify}
+      canDelete={canDelete}
+      canCreate={canAdd}
       rowClassName={approvalRowClass}
-      renderRowActions={(row) => row.approval_status === "pending" && canEdit ? (
+      renderRowActions={(row) => row.approval_status === "pending" && canModify ? (
         <>
           <Button
             size="icon" variant="ghost"
@@ -188,7 +189,7 @@ export default function StudentsPage() {
       ) : null}
       extraActions={(
         <>
-          {canEdit && <ImportCsvDialog />}
+          {canAdd && <ImportCsvDialog />}
           <ExportMenu resource="students" />
         </>
       )}

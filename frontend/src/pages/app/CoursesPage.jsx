@@ -27,13 +27,14 @@ function pricingLabel(r, t) {
 export default function CoursesPage() {
   const { t } = useI18n();
   const { tenant } = useAuth();
-  const { canEdit } = usePermission("courses");
+  const { canAdd, canModify, canDelete } = usePermission("courses");
   return (
     <CrudPanel
       moduleKey="courses"
       endpoint="/courses"
-      canEdit={canEdit}
-      canCreate={canEdit}
+      canEdit={canModify}
+      canDelete={canDelete}
+      canCreate={canAdd}
       title={t("menu.courses")}
       subtitle={t("subtitle.courses")}
       emptyIcon={BookOpen}

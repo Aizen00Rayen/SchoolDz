@@ -34,7 +34,7 @@ function toHHMM(mins) {
  * variable-length blocks in a time grid (and it just works in RTL too). */
 export default function TimetablePage() {
   const { t } = useI18n();
-  const { canEdit } = usePermission("timetable");
+  const { canAdd, canModify, canDelete } = usePermission("timetable");
   const qc = useQueryClient();
   const [dialogState, setDialogState] = useState(null);
 
@@ -94,7 +94,7 @@ export default function TimetablePage() {
   });
 
   const openCreate = (day, start) => {
-    if (!canEdit) return;
+    if (!canAdd) return;
     setDialogState({ mode: "create", day, start, title: "", duration_minutes: 60, color: DEFAULT_COLOR });
   };
   const openEdit = (entry) => {
@@ -103,6 +103,7 @@ export default function TimetablePage() {
       title: entry.title, duration_minutes: entry.duration_minutes, color: entry.color,
     });
   };
+  const dialogCanSave = dialogState?.mode === "edit" ? canModify : canAdd;
 
   const overlaps = (day, start, duration, excludeId) => {
     for (const it of items) {
@@ -181,7 +182,7 @@ export default function TimetablePage() {
                       <td
                         key={day}
                         onClick={() => openCreate(day, slotStart)}
-                        className={`border-s border-border ${canEdit ? "cursor-pointer hover:bg-muted/60" : ""}`}
+                        className={`border-s border-border ${canAdd ? "cursor-pointer hover:bg-muted/60" : ""}`}
                         data-testid={`timetable-cell-${day}-${slotStart}`}
                       />
                     );
@@ -210,7 +211,7 @@ export default function TimetablePage() {
                   <Input
                     value={dialogState.title}
                     onChange={(e) => setDialogState({ ...dialogState, title: e.target.value })}
-                    disabled={!canEdit}
+                    disabled={!dialogCanSave}
                     autoFocus
                     data-testid="timetable-title-input"
                   />
@@ -221,7 +222,7 @@ export default function TimetablePage() {
                       <button
                         key={d}
                         type="button"
-                        disabled={!canEdit}
+                        disabled={!dialogCanSave}
                         onClick={() => setDialogState({ ...dialogState, duration_minutes: d })}
                         data-testid={`timetable-duration-${d}`}
                         className={`h-10 rounded-lg border text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
@@ -239,12 +240,12 @@ export default function TimetablePage() {
                   <Input
                     type="color" value={dialogState.color}
                     onChange={(e) => setDialogState({ ...dialogState, color: e.target.value })}
-                    disabled={!canEdit}
+                    disabled={!dialogCanSave}
                     className="h-10"
                   />
                 </Field>
                 <div className="flex justify-between items-center pt-2">
-                  {dialogState.mode === "edit" && canEdit ? (
+                  {dialogState.mode === "edit" && canDelete ? (
                     <Button
                       type="button" variant="ghost" className="text-destructive hover:bg-destructive/10"
                       onClick={() => deleteMut.mutate(dialogState.id)} disabled={deleteMut.isPending}
@@ -257,7 +258,7 @@ export default function TimetablePage() {
                     <Button type="button" variant="outline" onClick={() => setDialogState(null)}>
                       {t("actions.cancel")}
                     </Button>
-                    {canEdit && (
+                    {dialogCanSave && (
                       <Button
                         type="button" onClick={onSubmitDialog} disabled={saveMut.isPending}
                         className="bg-accent hover:bg-accent/90 text-accent-foreground"

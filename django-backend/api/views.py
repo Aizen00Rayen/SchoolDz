@@ -27,7 +27,7 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, PermissionDenied, NotFound, APIException, NotAuthenticated
 from rest_framework.authtoken.models import Token
 
-from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Trip, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_LEVELS, STAFF_ROLES
+from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Trip, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_FLAGS, STAFF_ROLES
 from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, RoomSerializer, AttendanceSerializer, PaymentSerializer, TripSerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer, TimetableEntrySerializer
 from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle, EnrollmentRateThrottle, StudentLookupRateThrottle, log_activity
 
@@ -118,13 +118,13 @@ def require_staff_tenant(user):
 
     TenantScopedViewSet.get_queryset() already refuses role='parent' outright,
     which is why every CRUD route is safe. The function-based views don't
-    inherit that, and relying on get_permission() instead is not equivalent:
-    that helper falls through to DEFAULT_MODULE_PERMISSIONS, which describes
-    *staff* defaults, so a parent silently inherited 'view' on any module
-    whose default isn't 'hidden' — enough to read the school's P&L, its
-    global search index and every student's balance. Roles outside the staff
-    set have no business on these endpoints at all, so gate on the role
-    itself rather than on a per-module default.
+    inherit that, and relying on can_view()/can_add() etc. instead is not
+    equivalent: those helpers fall through to DEFAULT_MODULE_PERMISSIONS,
+    which describes *staff* defaults, so a parent silently inherited view
+    access on any module whose default isn't hidden — enough to read the
+    school's P&L, its global search index and every student's balance. Roles
+    outside the staff set have no business on these endpoints at all, so gate
+    on the role itself rather than on a per-module default.
     """
     tenant_id = getattr(user, 'tenant_id', None)
     if not tenant_id:
@@ -421,14 +421,26 @@ class TenantScopedViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if getattr(self, 'action', None) in self.module_view_exempt_actions:
             return
-        if self.module_key and not user.is_super_admin() and user.get_permission(self.module_key) == 'hidden':
+        if self.module_key and not user.is_super_admin() and not user.can_view(self.module_key):
             raise PermissionDenied('Forbidden')
 
-    def check_module_edit(self):
-        """Raise unless the current user has edit rights on this module."""
+    def check_module_add(self):
+        """Raise unless the current user can create new records in this module."""
         user = self.request.user
-        if self.module_key and not user.is_super_admin() and user.get_permission(self.module_key) != 'edit':
+        if self.module_key and not user.is_super_admin() and not user.can_add(self.module_key):
+            raise PermissionDenied('You do not have permission to add records here.')
+
+    def check_module_modify(self):
+        """Raise unless the current user can modify existing records in this module."""
+        user = self.request.user
+        if self.module_key and not user.is_super_admin() and not user.can_modify(self.module_key):
             raise PermissionDenied('You do not have permission to modify this.')
+
+    def check_module_delete(self):
+        """Raise unless the current user can delete records in this module."""
+        user = self.request.user
+        if self.module_key and not user.is_super_admin() and not user.can_delete(self.module_key):
+            raise PermissionDenied('You do not have permission to delete this.')
 
     def get_queryset(self):
         user = self.request.user
@@ -508,22 +520,22 @@ class TenantScopedViewSet(viewsets.ModelViewSet):
         instance.delete()
 
     def create(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_add()
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def update(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_modify()
         return super().update(request, *args, **kwargs)
 
     def partial_update(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_modify()
         return super().partial_update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_delete()
         instance = self.get_object()
         self.perform_destroy(instance)
         return Response({'message': 'Deleted successfully'}, status=status.HTTP_200_OK)
@@ -2129,7 +2141,7 @@ def attendance_for_session(request, session_id):
     tid = user.tenant_id
     if not tid:
         raise PermissionDenied('User has no tenant')
-    if not user.is_super_admin() and user.get_permission('attendance') == 'hidden':
+    if not user.is_super_admin() and not user.can_view('attendance'):
         raise PermissionDenied('Forbidden')
 
     if request.method == 'GET':
@@ -2137,8 +2149,8 @@ def attendance_for_session(request, session_id):
         return Response({'items': AttendanceSerializer(items, many=True).data, 'total': items.count()})
 
     elif request.method == 'POST':
-        # Bulk Mark
-        if not user.is_super_admin() and user.get_permission('attendance') != 'edit':
+        # Bulk Mark — an upsert on existing session/student attendance rows.
+        if not user.is_super_admin() and not user.can_modify('attendance'):
             raise PermissionDenied('Forbidden')
 
         marks = request.data.get('marks')
@@ -2195,7 +2207,7 @@ def attendance_upload_excuse(request, attendance_id):
     tid = user.tenant_id
     if not tid:
         raise PermissionDenied('User has no tenant')
-    if not user.is_super_admin() and user.get_permission('attendance') != 'edit':
+    if not user.is_super_admin() and not user.can_modify('attendance'):
         raise PermissionDenied('Forbidden')
 
     attendance = Attendance.objects.filter(id=attendance_id, tenant_id=tid).first()
@@ -2246,7 +2258,7 @@ def attendance_session_print(request, session_id):
         raise PermissionDenied('User has no tenant')
     if user.role == 'parent':
         raise PermissionDenied('Forbidden')
-    if not user.is_super_admin() and user.get_permission('attendance') == 'hidden':
+    if not user.is_super_admin() and not user.can_view('attendance'):
         raise PermissionDenied('Forbidden')
 
     session = ClassSession.objects.filter(id=session_id, tenant_id=tid).select_related(
@@ -2365,7 +2377,7 @@ def attendance_set_recovery(request, attendance_id):
     tid = user.tenant_id
     if not tid:
         raise PermissionDenied('User has no tenant')
-    if not user.is_super_admin() and user.get_permission('attendance') != 'edit':
+    if not user.is_super_admin() and not user.can_modify('attendance'):
         raise PermissionDenied('Forbidden')
 
     recovery_status = request.data.get('recovery_status')
@@ -2775,19 +2787,28 @@ class TenantViewSet(viewsets.ModelViewSet):
 
 
 def _clean_permissions(raw):
-    """Validate a {module: level} payload against the known modules/levels.
-    Returns a cleaned dict (unknown modules dropped) or raises ValidationError."""
+    """Validate a {module: {view, add, modify, delete}} payload against the
+    known modules/flags. Returns a cleaned dict (unknown modules and flag
+    keys dropped, non-true flags omitted) or raises ValidationError."""
     if raw is None:
         return {}
     if not isinstance(raw, dict):
-        raise ValidationError({'permissions': 'Must be an object of module -> level'})
+        raise ValidationError({'permissions': 'Must be an object of module -> {view, add, modify, delete}'})
     cleaned = {}
-    for module_key, level in raw.items():
+    for module_key, flags in raw.items():
         if module_key not in PERMISSION_MODULES:
             continue
-        if level not in PERMISSION_LEVELS:
-            raise ValidationError({'permissions': f"Invalid level '{level}' for '{module_key}'"})
-        cleaned[module_key] = level
+        if not isinstance(flags, dict):
+            raise ValidationError({'permissions': f"Invalid value for '{module_key}' — expected an object"})
+        entry = {}
+        for flag_key, flag_val in flags.items():
+            if flag_key not in PERMISSION_FLAGS:
+                continue
+            if not isinstance(flag_val, bool):
+                raise ValidationError({'permissions': f"Invalid value for '{module_key}.{flag_key}' — expected true/false"})
+            if flag_val:
+                entry[flag_key] = True
+        cleaned[module_key] = entry
     return cleaned
 
 
@@ -2995,7 +3016,7 @@ class GuardianViewSet(TenantScopedViewSet):
         return export_rows(headers, rows, 'parents', request.GET.get('type'))
 
     def create(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_add()
         data = request.data.copy()
         student_ids = data.pop('student_ids', None)
 
@@ -3010,7 +3031,7 @@ class GuardianViewSet(TenantScopedViewSet):
         return Response(self.get_serializer(guardian).data, status=status.HTTP_200_OK)
 
     def update(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_modify()
         instance = self.get_object()
         data = request.data.copy()
         student_ids = data.pop('student_ids', None)
@@ -3033,7 +3054,7 @@ class GuardianViewSet(TenantScopedViewSet):
         either one cascades to the other — they're two halves of one
         application — but only touches counterparts still 'pending', so it
         never overwrites an explicit prior rejection."""
-        self.check_module_edit()
+        self.check_module_modify()
         guardian = self.get_object()
         guardian.approval_status = 'approved'
         guardian.save(update_fields=['approval_status', 'updated_at'])
@@ -3044,7 +3065,7 @@ class GuardianViewSet(TenantScopedViewSet):
 
     @action(detail=True, methods=['post'])
     def reject(self, request, pk=None):
-        self.check_module_edit()
+        self.check_module_modify()
         guardian = self.get_object()
         guardian.approval_status = 'rejected'
         guardian.save(update_fields=['approval_status', 'updated_at'])
@@ -3129,7 +3150,7 @@ class TeacherViewSet(TenantScopedViewSet):
 
     @action(detail=True, methods=['post'], url_path='photo')
     def upload_photo(self, request, pk=None):
-        self.check_module_edit()
+        self.check_module_modify()
         teacher = self.get_object()
         tenant = Tenant.objects.filter(id=teacher.tenant_id).first()
         check_website_builder(request.user, tenant)
@@ -3144,7 +3165,7 @@ class TeacherViewSet(TenantScopedViewSet):
 
     @action(detail=True, methods=['post'], url_path='cv')
     def upload_cv(self, request, pk=None):
-        self.check_module_edit()
+        self.check_module_modify()
         teacher = self.get_object()
         if 'file' not in request.FILES:
             return Response({'error': 'file is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -3157,7 +3178,7 @@ class TeacherViewSet(TenantScopedViewSet):
 
     @action(detail=True, methods=['post'], url_path='diploma')
     def upload_diploma(self, request, pk=None):
-        self.check_module_edit()
+        self.check_module_modify()
         teacher = self.get_object()
         if 'file' not in request.FILES:
             return Response({'error': 'file is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -3169,7 +3190,7 @@ class TeacherViewSet(TenantScopedViewSet):
         return Response(TeacherSerializer(teacher).data)
 
     def create(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_add()
         data = request.data.copy()
         # Auto hire date
         data['hire_date'] = timezone.now().date().isoformat()
@@ -3181,12 +3202,12 @@ class TeacherViewSet(TenantScopedViewSet):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def update(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_modify()
         self._guard_percentage_edit(request, request.data)
         return super().update(request, *args, **kwargs)
 
     def partial_update(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_modify()
         self._guard_percentage_edit(request, request.data)
         return super().partial_update(request, *args, **kwargs)
 
@@ -3302,7 +3323,7 @@ class StudentViewSet(TenantScopedViewSet):
         return export_rows(headers, rows, 'students', request.GET.get('type'))
 
     def create(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_add()
         user = request.user
         tenant = Tenant.objects.filter(id=user.tenant_id).first()
         if not tenant:
@@ -3325,7 +3346,7 @@ class StudentViewSet(TenantScopedViewSet):
 
     @action(detail=False, methods=['post'], url_path='import')
     def import_csv(self, request):
-        self.check_module_edit()
+        self.check_module_add()
         user = request.user
         tenant = Tenant.objects.filter(id=user.tenant_id).first()
         if not tenant:
@@ -3461,7 +3482,7 @@ class StudentViewSet(TenantScopedViewSet):
         the parent guardian created in the same enrollment (only if it's
         still pending — never overwrites an explicit prior decision on the
         guardian), since they're two halves of one application."""
-        self.check_module_edit()
+        self.check_module_modify()
         student = self.get_object()
         student.approval_status = 'approved'
         student.save(update_fields=['approval_status', 'updated_at'])
@@ -3474,7 +3495,7 @@ class StudentViewSet(TenantScopedViewSet):
 
     @action(detail=True, methods=['post'])
     def reject(self, request, pk=None):
-        self.check_module_edit()
+        self.check_module_modify()
         student = self.get_object()
         student.approval_status = 'rejected'
         student.save(update_fields=['approval_status', 'updated_at'])
@@ -3503,7 +3524,7 @@ class CourseViewSet(TenantScopedViewSet):
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
     def create(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_add()
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
@@ -3511,7 +3532,7 @@ class CourseViewSet(TenantScopedViewSet):
 
     @action(detail=True, methods=['post'], url_path='photo')
     def upload_photo(self, request, pk=None):
-        self.check_module_edit()
+        self.check_module_modify()
         course = self.get_object()
         tenant = Tenant.objects.filter(id=course.tenant_id).first()
         check_website_builder(request.user, tenant)
@@ -3604,15 +3625,15 @@ class TimetableEntryViewSet(TenantScopedViewSet):
         })
 
     def create(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_add()
         return super().create(request, *args, **kwargs)
 
     def update(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_modify()
         return super().update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_delete()
         return super().destroy(request, *args, **kwargs)
 
 
@@ -3637,7 +3658,7 @@ class GroupViewSet(TenantScopedViewSet):
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
     def create(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_add()
         data = request.data.copy()
         student_ids = data.pop('student_ids', None)
 
@@ -3653,7 +3674,7 @@ class GroupViewSet(TenantScopedViewSet):
         return Response(self.get_serializer(group).data, status=status.HTTP_200_OK)
 
     def update(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_modify()
         instance = self.get_object()
         data = request.data.copy()
         student_ids = data.pop('student_ids', None)
@@ -3671,7 +3692,7 @@ class GroupViewSet(TenantScopedViewSet):
 
     @action(detail=True, methods=['post'])
     def enroll(self, request, pk=None):
-        self.check_module_edit()
+        self.check_module_modify()
         student_id = request.data.get('student_id')
         if not student_id:
             return Response({'error': 'student_id is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -3686,7 +3707,7 @@ class GroupViewSet(TenantScopedViewSet):
 
     @action(detail=True, methods=['post'])
     def unenroll(self, request, pk=None):
-        self.check_module_edit()
+        self.check_module_modify()
         student_id = request.data.get('student_id')
         if not student_id:
             return Response({'error': 'student_id is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -3715,7 +3736,7 @@ class TripViewSet(TenantScopedViewSet):
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
     def create(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_add()
         data = request.data.copy()
         student_ids = data.pop('student_ids', None)
 
@@ -3731,7 +3752,7 @@ class TripViewSet(TenantScopedViewSet):
         return Response(self.get_serializer(trip).data, status=status.HTTP_200_OK)
 
     def update(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_modify()
         instance = self.get_object()
         data = request.data.copy()
         student_ids = data.pop('student_ids', None)
@@ -3780,7 +3801,7 @@ class ClassSessionViewSet(TenantScopedViewSet):
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
     def create(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_add()
         user = request.user
         group_id = request.data.get('group_id')
         if not group_id:
@@ -3800,7 +3821,7 @@ class ClassSessionViewSet(TenantScopedViewSet):
 
     @action(detail=False, methods=['post'], url_path='generate-recurring')
     def generate_recurring(self, request):
-        self.check_module_edit()
+        self.check_module_add()
         user = request.user
         tenant = Tenant.objects.filter(id=user.tenant_id).first()
         if not tenant:
@@ -3884,7 +3905,7 @@ class PaymentViewSet(TenantScopedViewSet):
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
     def create(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_add()
         user = request.user
         tenant = Tenant.objects.filter(id=user.tenant_id).first()
         if not tenant:
@@ -4012,7 +4033,7 @@ def payments_balances(request):
     # Shared by the Payments page (balance coloring/filter) and the standalone
     # Debts page — a user only granted one of those two modules must still be
     # able to load it, so this only blocks someone with neither.
-    if user.get_permission('payments') == 'hidden' and user.get_permission('debts') == 'hidden':
+    if not user.can_view('payments') and not user.can_view('debts'):
         raise PermissionDenied('Forbidden')
 
     balances = compute_student_balances(tid)
@@ -4050,7 +4071,7 @@ class GradeViewSet(TenantScopedViewSet):
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
     def create(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_add()
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
@@ -4073,7 +4094,7 @@ class QuizViewSet(TenantScopedViewSet):
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
     def create(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_add()
         user = request.user
         tenant = Tenant.objects.filter(id=user.tenant_id).first()
         if not tenant:
@@ -4088,7 +4109,7 @@ class QuizViewSet(TenantScopedViewSet):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def update(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_modify()
         quiz = self.get_object()
         self._check_quiz_builder(quiz.tenant)
         return super().update(request, *args, **kwargs)
@@ -4096,7 +4117,7 @@ class QuizViewSet(TenantScopedViewSet):
     @action(detail=True, methods=['post'], url_path='exercise')
     def exercise(self, request, pk=None):
         """Upload the exercise sheet students will answer — a photo or a PDF."""
-        self.check_module_edit()
+        self.check_module_modify()
         quiz = self.get_object()
         self._check_quiz_builder(quiz.tenant)
 
@@ -4116,7 +4137,7 @@ class QuizViewSet(TenantScopedViewSet):
     def grade(self, request, pk=None):
         """Score one submission by hand and mirror it into Grades. Re-grading
         updates the existing Grade row rather than stacking duplicates."""
-        self.check_module_edit()
+        self.check_module_modify()
         quiz = self.get_object()
         self._check_quiz_builder(quiz.tenant)
 
@@ -4155,7 +4176,7 @@ class QuizViewSet(TenantScopedViewSet):
 
     @action(detail=True, methods=['post'])
     def publish(self, request, pk=None):
-        self.check_module_edit()
+        self.check_module_modify()
         quiz = self.get_object()
         self._check_quiz_builder(quiz.tenant)
         if not quiz.group_id:
@@ -4201,7 +4222,7 @@ class ConversationViewSet(TenantScopedViewSet):
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
     def create(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_add()
         user = request.user
         guardian = Guardian.objects.filter(id=request.data.get('guardian_id'), tenant_id=user.tenant_id).first()
         if not guardian:
@@ -4215,7 +4236,7 @@ class ConversationViewSet(TenantScopedViewSet):
         convo = self.get_object()
 
         if request.method == 'POST':
-            self.check_module_edit()
+            self.check_module_add()
             body = (request.data.get('body') or '').strip()
             if not body:
                 return Response({'error': 'Message body is required'}, status=status.HTTP_400_BAD_REQUEST)
@@ -4591,7 +4612,7 @@ class ExpenseCategoryViewSet(TenantScopedViewSet):
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
     def create(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_add()
         name = (request.data.get('name') or '').strip()
         if not name:
             raise ValidationError('name is required')
@@ -4601,7 +4622,7 @@ class ExpenseCategoryViewSet(TenantScopedViewSet):
         return Response(ExpenseCategorySerializer(category).data)
 
     def destroy(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_delete()
         category = self.get_object()
         log_activity(request, request.user.tenant_id, 'delete', entity_type='expense_category',
                      entity_id=category.id, description=f'Deleted expense category "{category.key or category.name}"')
@@ -4628,7 +4649,7 @@ class ExpenseViewSet(TenantScopedViewSet):
         return Response({'items': serializer.data, 'total': len(serializer.data), 'total_amount': total})
 
     def create(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_add()
         response = super().create(request, *args, **kwargs)
         log_activity(request, request.user.tenant_id, 'create', entity_type='expense',
                      entity_id=response.data.get('id'),
@@ -4789,7 +4810,7 @@ def teacher_payments_summary(request):
     user = request.user
     if not user.tenant_id:
         raise PermissionDenied('User has no tenant')
-    if user.get_permission('teacher_payments') == 'hidden':
+    if not user.can_view('teacher_payments'):
         raise PermissionDenied('Forbidden')
 
     rows = compute_teacher_earnings(user.tenant_id, request)
@@ -4827,7 +4848,7 @@ class TeacherPayoutViewSet(TenantScopedViewSet):
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
     def create(self, request, *args, **kwargs):
-        self.check_module_edit()
+        self.check_module_add()
         response = super().create(request, *args, **kwargs)
         log_activity(request, request.user.tenant_id, 'create', entity_type='teacher_payout',
                      entity_id=response.data.get('id'),
@@ -4843,7 +4864,7 @@ def activity_logs(request):
     user = request.user
     if not user.tenant_id:
         raise PermissionDenied('User has no tenant')
-    if user.get_permission('logs') == 'hidden':
+    if not user.can_view('logs'):
         raise PermissionDenied('Forbidden')
 
     logs = ActivityLog.objects.filter(tenant_id=user.tenant_id)
@@ -4885,7 +4906,7 @@ def finance_report(request):
     group or teacher. Backs the Reports page and its Excel export."""
     user = request.user
     tid = require_staff_tenant(user)
-    if user.get_permission('reports') == 'hidden':
+    if not user.can_view('reports'):
         raise PermissionDenied('Forbidden')
 
     payments = Payment.objects.filter(tenant_id=tid).select_related('student', 'group', 'course')

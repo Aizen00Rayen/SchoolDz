@@ -27,7 +27,7 @@ export default function TeacherPaymentsPage() {
   const { t } = useI18n();
   const { tenant, user } = useAuth();
   const qc = useQueryClient();
-  const { canEdit } = usePermission("teacher_payments");
+  const { canAdd } = usePermission("teacher_payments");
   // Percentages decide real payouts, so — unlike the rest of this page —
   // only the workspace owner/director may change them, never a secretary or
   // accountant even if they've been granted "edit" on Teacher payments.
@@ -129,7 +129,7 @@ export default function TeacherPaymentsPage() {
             <Button variant="outline" onClick={() => downloadFrom(`/teacher-payments/summary?${query}`, "xlsx", "teacher-payments")}>
               <Download className="w-4 h-4 me-2" /> {t("export.excel")}
             </Button>
-            {canEdit && (
+            {canAdd && (
               <Button
                 onClick={() => { setForm(EMPTY_PAYOUT); setOpen(true); }}
                 className="bg-accent hover:bg-accent/90 text-accent-foreground"

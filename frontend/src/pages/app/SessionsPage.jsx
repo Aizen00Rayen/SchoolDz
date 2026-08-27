@@ -62,7 +62,7 @@ function SessionRangePicker({ form, setForm }) {
 export default function SessionsPage() {
   const { t } = useI18n();
   const { tenant } = useAuth();
-  const { canEdit } = usePermission("sessions");
+  const { canAdd, canModify, canDelete } = usePermission("sessions");
   const { data: groups } = useQuery({
     queryKey: ["groups-list"],
     queryFn: async () => (await api.get("/groups")).data,
@@ -87,9 +87,10 @@ export default function SessionsPage() {
       subtitle={t("subtitle.sessions")}
       emptyIcon={CalendarClock}
       defaultForm={DEFAULT_FORM}
-      canEdit={canEdit}
-      canCreate={canEdit}
-      extraActions={canEdit && tenant?.plan === "premium" ? <RecurringDialog groups={groups} /> : null}
+      canEdit={canModify}
+      canDelete={canDelete}
+      canCreate={canAdd}
+      extraActions={canAdd && tenant?.plan === "premium" ? <RecurringDialog groups={groups} /> : null}
       columns={[
         {
           key: "series", label: "",

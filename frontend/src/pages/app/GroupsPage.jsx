@@ -20,7 +20,7 @@ const DEFAULT_FORM = {
 
 export default function GroupsPage() {
   const { t } = useI18n();
-  const { canEdit } = usePermission("groups");
+  const { canAdd, canModify, canDelete } = usePermission("groups");
   const { data: courses } = useQuery({
     queryKey: ["courses-list"],
     queryFn: async () => (await api.get("/courses")).data,
@@ -41,8 +41,9 @@ export default function GroupsPage() {
       subtitle={t("subtitle.groups")}
       emptyIcon={Layers}
       defaultForm={DEFAULT_FORM}
-      canEdit={canEdit}
-      canCreate={canEdit}
+      canEdit={canModify}
+      canDelete={canDelete}
+      canCreate={canAdd}
       columns={[
         {
           key: "name", label: t("field.group"),

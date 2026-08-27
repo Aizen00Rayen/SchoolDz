@@ -50,7 +50,7 @@ export default function ExpensesPage() {
   const { tenant } = useAuth();
   const qc = useQueryClient();
   const confirm = useConfirm();
-  const { canEdit } = usePermission("expenses");
+  const { canAdd, canModify, canDelete } = usePermission("expenses");
 
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -151,12 +151,12 @@ export default function ExpensesPage() {
         actions={
           <>
             <ExportMenu resource="expenses" />
-            {canEdit && (
+            {(canAdd || canDelete) && (
               <Button variant="outline" onClick={() => setCatOpen(true)}>
                 {t("expenses.add_category")}
               </Button>
             )}
-            {canEdit && (
+            {canAdd && (
               <Button onClick={openCreate} className="bg-accent hover:bg-accent/90 text-accent-foreground" data-testid="expenses-new">
                 <Plus className="w-4 h-4 me-2" /> {t("actions.new")}
               </Button>
@@ -204,7 +204,7 @@ export default function ExpensesPage() {
             icon={Receipt}
             title={t("crud.no_items_yet", { module: t("menu.expenses") })}
             description={t("crud.create_first")}
-            action={canEdit && (
+            action={canAdd && (
               <Button onClick={openCreate} className="bg-accent hover:bg-accent/90 text-accent-foreground">
                 <Plus className="w-4 h-4 me-2" /> {t("actions.new")}
               </Button>
@@ -220,7 +220,7 @@ export default function ExpensesPage() {
                       {t(k)}
                     </th>
                   ))}
-                  {canEdit && <th className="w-24" />}
+                  {(canModify || canDelete) && <th className="w-24" />}
                 </tr>
               </thead>
               <tbody>
@@ -236,19 +236,23 @@ export default function ExpensesPage() {
                     </td>
                     <td className="px-4 py-3 font-mono">{Number(row.amount).toLocaleString()} {currency}</td>
                     <td className="px-4 py-3 text-xs">{t(`method.${row.method}`)}</td>
-                    {canEdit && (
+                    {(canModify || canDelete) && (
                       <td className="px-4 py-3 text-end whitespace-nowrap">
-                        <Button variant="ghost" size="sm" onClick={() => openEdit(row)}>{t("actions.edit")}</Button>
-                        <Button
-                          variant="ghost" size="sm" className="text-destructive"
-                          onClick={async () => {
-                            if (await confirm({ title: t("confirm.delete_record"), destructive: true })) {
-                              deleteMut.mutate(row.id);
-                            }
-                          }}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
+                        {canModify && (
+                          <Button variant="ghost" size="sm" onClick={() => openEdit(row)}>{t("actions.edit")}</Button>
+                        )}
+                        {canDelete && (
+                          <Button
+                            variant="ghost" size="sm" className="text-destructive"
+                            onClick={async () => {
+                              if (await confirm({ title: t("confirm.delete_record"), destructive: true })) {
+                                deleteMut.mutate(row.id);
+                              }
+                            }}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
                       </td>
                     )}
                   </tr>
@@ -325,6 +329,7 @@ export default function ExpensesPage() {
           <DialogHeader>
             <DialogTitle className="font-display text-xl">{t("expenses.new_category")}</DialogTitle>
           </DialogHeader>
+          {canAdd && (
           <form
             onSubmit={(e) => { e.preventDefault(); if (catName.trim()) addCatMut.mutate(catName.trim()); }}
             className="space-y-4"
@@ -339,21 +344,24 @@ export default function ExpensesPage() {
               </Button>
             </div>
           </form>
+          )}
 
           <div className="border-t border-border pt-3 space-y-1 max-h-56 overflow-y-auto">
             {categories.map((c) => (
               <div key={c.id} className="flex items-center justify-between text-sm px-1 py-1">
                 <span>{categoryLabel(c, t)}</span>
-                <Button
-                  variant="ghost" size="sm" className="text-destructive h-7"
-                  onClick={async () => {
-                    if (await confirm({ title: t("confirm.delete_record"), destructive: true })) {
-                      deleteCatMut.mutate(c.id);
-                    }
-                  }}
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </Button>
+                {canDelete && (
+                  <Button
+                    variant="ghost" size="sm" className="text-destructive h-7"
+                    onClick={async () => {
+                      if (await confirm({ title: t("confirm.delete_record"), destructive: true })) {
+                        deleteCatMut.mutate(c.id);
+                      }
+                    }}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                )}
               </div>
             ))}
           </div>

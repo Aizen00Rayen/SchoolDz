@@ -93,7 +93,7 @@ function ExcuseCell({ record, canEdit, onChanged }) {
 
 export default function AttendancePage() {
   const { t } = useI18n();
-  const { canEdit } = usePermission("attendance");
+  const { canModify: canEdit } = usePermission("attendance");
   const qc = useQueryClient();
   const [sessionId, setSessionId] = useState("");
   const [marks, setMarks] = useState({}); // student_id -> status

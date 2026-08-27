@@ -6,7 +6,7 @@ import { Plus, Users, Trash2, Pencil, Search } from "lucide-react";
 import { api, extractError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useConfirm } from "@/lib/confirm";
-import { PERMISSION_MODULES, isFullAccessRole } from "@/lib/permissions";
+import { PERMISSION_MODULES, PERMISSION_FLAGS, isFullAccessRole } from "@/lib/permissions";
 import { PageHeader, EmptyState } from "./_shared";
 import { Field } from "./StudentsPage";
 import { Button } from "@/components/ui/button";
@@ -17,44 +17,74 @@ import {
 } from "@/components/ui/select";
 
 const ROLE_VALUES = ["owner", "director", "secretary", "accountant", "teacher", "parent"];
-const LEVELS = ["hidden", "view", "edit"];
+// "view" gets its own Hidden/View toggle; these three are independent
+// checkboxes that only take effect once a module is set to View.
+const ACTION_FLAGS = PERMISSION_FLAGS.filter((f) => f !== "view");
 
 // A new limited-role (secretary/accountant/teacher) user starts with full
-// edit access to every page — the owner can then dial any individual page
-// down (or back up) before saving, or later from this same form. Owner/
-// director always have full access regardless (see isFullAccessRole).
-const FULL_PERMISSIONS = Object.fromEntries(PERMISSION_MODULES.map((m) => [m, "edit"]));
-const EMPTY_PERMISSIONS = Object.fromEntries(PERMISSION_MODULES.map((m) => [m, "hidden"]));
+// access to every page — the owner can then dial any individual page (or
+// individual action within it) down before saving, or later from this same
+// form. Owner/director always have full access regardless (see isFullAccessRole).
+const FULL_PERMISSIONS = Object.fromEntries(
+  PERMISSION_MODULES.map((m) => [m, { view: true, add: true, modify: true, delete: true }])
+);
+const EMPTY_PERMISSIONS = Object.fromEntries(PERMISSION_MODULES.map((m) => [m, {}]));
 
 const DEFAULT_FORM = { name: "", email: "", password: "", role: "secretary", phone: "", permissions: FULL_PERMISSIONS };
 
 function PermissionMatrix({ permissions, onChange }) {
   const { t } = useI18n();
+  const setModule = (moduleKey, next) => onChange((prev) => ({ ...prev, [moduleKey]: next }));
   return (
     <div className="border border-border rounded-lg divide-y divide-border overflow-hidden">
-      {PERMISSION_MODULES.map((moduleKey) => (
-        <div key={moduleKey} className="flex items-center justify-between gap-3 px-3 py-2">
-          <span className="text-sm font-medium">{t(`menu.${moduleKey}`)}</span>
-          <div className="inline-flex rounded-md border border-border overflow-hidden flex-shrink-0">
-            {LEVELS.map((level) => {
-              const active = (permissions[moduleKey] || "hidden") === level;
-              return (
-                <button
-                  key={level}
-                  type="button"
-                  onClick={() => onChange((prev) => ({ ...prev, [moduleKey]: level }))}
-                  className={`px-2.5 py-1 text-xs font-medium transition-colors ${
-                    active ? "bg-accent text-accent-foreground" : "bg-background hover:bg-muted text-muted-foreground"
-                  }`}
-                  data-testid={`users-permission-${moduleKey}-${level}`}
-                >
-                  {t(`permissions.${level}`)}
-                </button>
-              );
-            })}
+      {PERMISSION_MODULES.map((moduleKey) => {
+        const flags = permissions[moduleKey] || {};
+        const view = !!flags.view;
+        return (
+          <div key={moduleKey} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+            <span className="text-sm font-medium">{t(`menu.${moduleKey}`)}</span>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="inline-flex rounded-md border border-border overflow-hidden">
+                {["hidden", "view"].map((level) => {
+                  const active = level === "view" ? view : !view;
+                  return (
+                    <button
+                      key={level}
+                      type="button"
+                      onClick={() => setModule(moduleKey, level === "view" ? { view: true } : {})}
+                      className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+                        active ? "bg-accent text-accent-foreground" : "bg-background hover:bg-muted text-muted-foreground"
+                      }`}
+                      data-testid={`users-permission-${moduleKey}-${level}`}
+                    >
+                      {t(`permissions.${level}`)}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="inline-flex rounded-md border border-border overflow-hidden">
+                {ACTION_FLAGS.map((flag) => {
+                  const active = view && !!flags[flag];
+                  return (
+                    <button
+                      key={flag}
+                      type="button"
+                      disabled={!view}
+                      onClick={() => setModule(moduleKey, { ...flags, [flag]: !flags[flag] })}
+                      className={`px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                        active ? "bg-accent text-accent-foreground" : "bg-background hover:bg-muted text-muted-foreground"
+                      }`}
+                      data-testid={`users-permission-${moduleKey}-${flag}`}
+                    >
+                      {t(`permissions.${flag}`)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

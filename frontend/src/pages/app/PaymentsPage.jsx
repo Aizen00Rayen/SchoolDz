@@ -32,7 +32,7 @@ const DEFAULT_FORM = {
 export default function PaymentsPage() {
   const { t } = useI18n();
   const { tenant } = useAuth();
-  const { canEdit } = usePermission("payments");
+  const { canAdd, canModify, canDelete } = usePermission("payments");
   const { data: students } = useQuery({
     queryKey: ["students-list"],
     queryFn: async () => (await api.get("/students")).data,
@@ -83,8 +83,9 @@ export default function PaymentsPage() {
       subtitle={t("subtitle.payments")}
       emptyIcon={Wallet}
       defaultForm={DEFAULT_FORM}
-      canEdit={canEdit}
-      canCreate={canEdit}
+      canEdit={canModify}
+      canDelete={canDelete}
+      canCreate={canAdd}
       extraParams={balanceFilter !== "all" ? { balance_status: balanceFilter } : undefined}
       filterBar={(
         <div className="flex items-center gap-1.5">

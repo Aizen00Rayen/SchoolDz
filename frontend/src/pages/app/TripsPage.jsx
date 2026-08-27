@@ -16,7 +16,7 @@ const DEFAULT_FORM = {
 export default function TripsPage() {
   const { t } = useI18n();
   const { tenant } = useAuth();
-  const { canEdit } = usePermission("trips");
+  const { canAdd, canModify, canDelete } = usePermission("trips");
 
   return (
     <CrudPanel
@@ -26,8 +26,9 @@ export default function TripsPage() {
       subtitle={t("subtitle.trips")}
       emptyIcon={Plane}
       defaultForm={DEFAULT_FORM}
-      canEdit={canEdit}
-      canCreate={canEdit}
+      canEdit={canModify}
+      canDelete={canDelete}
+      canCreate={canAdd}
       columns={[
         {
           key: "title", label: t("field.trip"),

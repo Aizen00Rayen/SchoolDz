@@ -17,7 +17,7 @@ const DEFAULT_FORM = { title: "", description: "", course_id: "", group_id: "", 
 
 export default function QuizzesPage() {
   const { t } = useI18n();
-  const { canEdit } = usePermission("quizzes");
+  const { canAdd, canModify, canDelete } = usePermission("quizzes");
   const { data: courses } = useQuery({
     queryKey: ["courses-list"],
     queryFn: async () => (await api.get("/courses")).data,
@@ -35,8 +35,9 @@ export default function QuizzesPage() {
       subtitle={t("subtitle.quizzes")}
       emptyIcon={FileQuestion}
       defaultForm={DEFAULT_FORM}
-      canEdit={canEdit}
-      canCreate={canEdit}
+      canEdit={canModify}
+      canDelete={canDelete}
+      canCreate={canAdd}
       columns={[
         { key: "title", label: t("field.quiz_title"), render: (r) => <span className="font-medium">{r.title}</span> },
         { key: "group", label: t("field.group"), render: (r) => r.group_name || <span className="text-muted-foreground">—</span> },
