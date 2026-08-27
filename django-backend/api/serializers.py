@@ -423,7 +423,11 @@ class RoomSerializer(serializers.ModelSerializer):
 
 class TimetableEntrySerializer(serializers.ModelSerializer):
     tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)
+    room_id = TenantScopedPKField(
+        Room, source='room', allow_null=True, required=False
+    )
+    room_name = serializers.CharField(source='room.name', read_only=True, default=None)
 
     class Meta:
         model = TimetableEntry
-        exclude = ['tenant']
+        exclude = ['tenant', 'room']

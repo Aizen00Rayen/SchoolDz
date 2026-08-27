@@ -67,6 +67,8 @@
   .pill.late { background: #fbf1dc; color: #b5790a; }
   .pill.excused { background: #e8eef9; color: #2b5fa8; }
   .pill.absent { background: #fbeaea; color: #b23a2e; }
+  .pill.paid-yes { background: #e4f3ea; color: #1f7a4d; }
+  .pill.paid-no { background: #fbeaea; color: #b23a2e; }
 
   .doc-note { font-size: 7.2pt; color: #8a8478; margin-top: 1pt; }
 
@@ -136,6 +138,7 @@
       <tr>
         <th>التلميذ</th>
         <th class="center">الحالة</th>
+        <th class="center">الدفع</th>
         <th class="center">وقت التسجيل</th>
       </tr>
     </thead>
@@ -149,6 +152,15 @@
         <td class="center">
           <span class="pill {{ row.status }}">{{ row.status_label }}</span>
           {% if row.has_document %}<div class="doc-note">مرفق مبرر — انظر الصفحات المرفقة</div>{% endif %}
+        </td>
+        <td class="center">
+          {% if row.paid is not None %}
+            <span class="pill {% if row.paid %}paid-yes{% else %}paid-no{% endif %}">
+              {% if row.paid %}مدفوع{% else %}غير مدفوع{% endif %}
+            </span>
+          {% else %}
+            —
+          {% endif %}
         </td>
         <td class="time">{{ row.marked_at }}</td>
       </tr>

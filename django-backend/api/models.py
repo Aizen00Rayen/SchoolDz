@@ -1028,6 +1028,10 @@ class TimetableEntry(models.Model):
     small fixed set so blocks always align to the grid's rows."""
     id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='timetable_entries')
+    # Nullable so pre-existing entries (from before per-room timetables) don't
+    # get silently dropped — they just show up under the "General" tab
+    # instead of a specific room's.
+    room = models.ForeignKey(Room, on_delete=models.SET_NULL, null=True, blank=True, db_column='room_id', related_name='timetable_entries')
     DAY_CHOICES = [
         ('mon', 'mon'), ('tue', 'tue'), ('wed', 'wed'), ('thu', 'thu'),
         ('fri', 'fri'), ('sat', 'sat'), ('sun', 'sun'),

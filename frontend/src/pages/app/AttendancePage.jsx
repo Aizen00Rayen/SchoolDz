@@ -176,6 +176,11 @@ export default function AttendancePage() {
     () => Object.fromEntries((existing?.items || []).map((a) => [a.student_id, a])),
     [existing],
   );
+  // Whether each student has paid enough for this session's course to
+  // cover what they've attended so far (see compute_course_payment_status
+  // on the backend) — missing means no present/excused attendance in this
+  // course yet, so there's nothing to show.
+  const paidStatus = existing?.paid_status || {};
 
   // Print becomes available once this session actually has saved attendance
   // to print — before that there's nothing on record to put on the roster.
@@ -304,7 +309,21 @@ export default function AttendancePage() {
             <tbody>
               {visibleEnrolled.map((s) => (
                 <tr key={s.id} className="border-b border-border last:border-0 hover:bg-muted/40">
-                  <td className="px-4 py-3 font-medium">{s.first_name} {s.last_name}</td>
+                  <td className="px-4 py-3 font-medium">
+                    <div className="flex items-center gap-2">
+                      <span>{s.first_name} {s.last_name}</span>
+                      {paidStatus[s.id] !== undefined && (
+                        <span
+                          className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium whitespace-nowrap ${
+                            paidStatus[s.id] ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"
+                          }`}
+                          data-testid={`attendance-paid-${s.id}`}
+                        >
+                          {paidStatus[s.id] ? t("attendance.paid") : t("attendance.unpaid")}
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{s.student_code}</td>
                   <td className="px-4 py-2">
                     <div className="inline-flex rounded-lg border border-border overflow-hidden">

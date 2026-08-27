@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Trash2 } from "lucide-react";
+import { Link } from "react-router-dom";
 import { PageHeader, Field } from "./_shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,13 +38,33 @@ export default function TimetablePage() {
   const { canAdd, canModify, canDelete } = usePermission("timetable");
   const qc = useQueryClient();
   const [dialogState, setDialogState] = useState(null);
+  // undefined = still bootstrapping (haven't learned the room list yet);
+  // "none" = the "General" tab for entries with no room.
+  const [selectedRoomId, setSelectedRoomId] = useState(undefined);
 
-  const { data } = useQuery({
-    queryKey: ["timetable"],
-    queryFn: async () => (await api.get("/timetable")).data,
+  const { data, isLoading } = useQuery({
+    queryKey: ["timetable", selectedRoomId],
+    queryFn: async () => (await api.get("/timetable", {
+      params: selectedRoomId ? { room_id: selectedRoomId } : {},
+    })).data,
   });
 
-  const items = useMemo(() => data?.items || [], [data]);
+  const rooms = useMemo(() => data?.rooms || [], [data]);
+
+  // Bootstrap fetch (no room_id) returns every entry across every room —
+  // don't render those until a specific room is chosen and its own
+  // properly-filtered fetch lands, or a room switch would flash blocks
+  // from other rooms for one frame.
+  useEffect(() => {
+    if (selectedRoomId === undefined && data?.rooms) {
+      setSelectedRoomId(data.rooms.length > 0 ? data.rooms[0].id : "none");
+    }
+  }, [data, selectedRoomId]);
+
+  const items = useMemo(
+    () => (selectedRoomId === undefined ? [] : data?.items || []),
+    [data, selectedRoomId]
+  );
   const gridStartMin = toMinutes(data?.grid_start || "08:00");
   const gridEndMin = toMinutes(data?.grid_end || "22:00");
 
@@ -129,12 +150,53 @@ export default function TimetablePage() {
       duration_minutes: dialogState.duration_minutes,
       title: dialogState.title,
       color: dialogState.color,
+      room_id: selectedRoomId === "none" ? null : selectedRoomId,
     });
   };
 
   return (
     <div>
       <PageHeader title={t("menu.timetable")} subtitle={t("subtitle.timetable")} />
+
+      {rooms.length === 0 && (
+        <div className="surface-card p-4 mb-4 text-sm text-muted-foreground">
+          {t("timetable.no_rooms_hint")}{" "}
+          <Link to="/app/rooms" className="text-accent hover:underline font-medium">
+            {t("menu.rooms")}
+          </Link>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-2 mb-4" data-testid="timetable-room-tabs">
+        {rooms.map((r) => (
+          <button
+            key={r.id}
+            type="button"
+            onClick={() => setSelectedRoomId(r.id)}
+            data-testid={`timetable-room-tab-${r.id}`}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+              selectedRoomId === r.id
+                ? "border-accent bg-accent text-accent-foreground"
+                : "border-border bg-background hover:bg-muted"
+            }`}
+          >
+            {r.name}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => setSelectedRoomId("none")}
+          data-testid="timetable-room-tab-none"
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+            selectedRoomId === "none"
+              ? "border-accent bg-accent text-accent-foreground"
+              : "border-border bg-background hover:bg-muted"
+          }`}
+        >
+          {t("timetable.general")}
+        </button>
+      </div>
+
       <div className="surface-card overflow-hidden">
         <div className="overflow-x-auto">
           {/* Seven day columns can't shrink below readability — scroll the

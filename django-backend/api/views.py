@@ -2295,9 +2295,27 @@ def attendance_for_session(request, session_id):
     if not user.is_super_admin() and not user.can_view('attendance'):
         raise PermissionDenied('Forbidden')
 
+    def session_paid_status(session):
+        """Which of this session's course's students have paid enough to
+        cover what they've attended so far — see
+        compute_course_payment_status's docstring for exactly what "paid"
+        means here (course-specific, not the student's overall balance)."""
+        if not session:
+            return {}
+        course_id = session.course_id or (session.group.course_id if session.group_id else None)
+        if not course_id:
+            return {}
+        student_ids = list(session.group.students.values_list('id', flat=True)) if session.group_id else None
+        return compute_course_payment_status(tid, course_id, student_ids=student_ids)
+
     if request.method == 'GET':
         items = Attendance.objects.filter(tenant_id=tid, session_id=session_id)
-        return Response({'items': AttendanceSerializer(items, many=True).data, 'total': items.count()})
+        session = ClassSession.objects.filter(id=session_id, tenant_id=tid).select_related('group').first()
+        return Response({
+            'items': AttendanceSerializer(items, many=True).data,
+            'total': items.count(),
+            'paid_status': session_paid_status(session),
+        })
 
     elif request.method == 'POST':
         # Bulk Mark — an upsert on existing session/student attendance rows.
@@ -2307,11 +2325,11 @@ def attendance_for_session(request, session_id):
         marks = request.data.get('marks')
         if not isinstance(marks, list):
             return Response({'error': 'marks must be an array'}, status=status.HTTP_400_BAD_REQUEST)
-            
-        session = ClassSession.objects.filter(id=session_id, tenant_id=tid).first()
+
+        session = ClassSession.objects.filter(id=session_id, tenant_id=tid).select_related('group').first()
         if not session:
             raise NotFound('Session not found')
-            
+
         with transaction.atomic():
             for mark in marks:
                 student_id = mark.get('student_id')
@@ -2356,7 +2374,11 @@ def attendance_for_session(request, session_id):
                 )
                 
         items = Attendance.objects.filter(tenant_id=tid, session_id=session_id)
-        return Response({'items': AttendanceSerializer(items, many=True).data, 'total': items.count()})
+        return Response({
+            'items': AttendanceSerializer(items, many=True).data,
+            'total': items.count(),
+            'paid_status': session_paid_status(session),
+        })
 
 
 @api_view(['POST'])
@@ -2444,6 +2466,8 @@ def attendance_session_print(request, session_id):
         filename = tenant.logo_url.rsplit('/', 1)[-1]
         logo_data_uri = _file_data_uri(os.path.join(settings.MEDIA_ROOT, 'logos', filename))
 
+    paid_status = compute_course_payment_status(tid, course.id) if course else {}
+
     counts = {'present': 0, 'late': 0, 'excused': 0, 'absent': 0}
     rows = []
     image_docs = []
@@ -2464,6 +2488,7 @@ def attendance_session_print(request, session_id):
                     image_docs.append({'student_name': student_label, 'data_uri': data_uri})
                 else:
                     has_document = False
+        paid = paid_status.get(a.student_id)
         rows.append({
             'student_name': f'{a.student.first_name} {a.student.last_name}',
             'student_code': a.student.student_code,
@@ -2471,6 +2496,10 @@ def attendance_session_print(request, session_id):
             'status_label': ATTENDANCE_STATUS_AR.get(a.status, a.status),
             'marked_at': timezone.localtime(a.marked_at).strftime('%H:%M'),
             'has_document': has_document,
+            # None when the student has no present/excused attendance in
+            # this course yet (nothing to have paid for) — the template
+            # shows nothing rather than a misleading "unpaid".
+            'paid': paid,
         })
 
     if group and course:
@@ -3811,22 +3840,34 @@ class RoomViewSet(TenantScopedViewSet):
 
 class TimetableEntryViewSet(TenantScopedViewSet):
     """The weekly timetable (استعمال الزمن) — a fixed grid that repeats all
-    year, unlike ClassSession's dated occurrences. list() also returns the
-    tenant's grid bounds (fixed 08:00 start, tenant-configurable end) so the
-    frontend doesn't need a second request to know how many rows to draw."""
+    year, unlike ClassSession's dated occurrences. Each entry now belongs to
+    a room, and the grid is viewed one room at a time (?room_id=<id>, or
+    ?room_id=none for legacy entries with no room). list() also returns the
+    tenant's grid bounds and its room list so the frontend doesn't need a
+    second request to build the room switcher."""
     queryset = TimetableEntry.objects.all()
     serializer_class = TimetableEntrySerializer
     module_key = 'timetable'
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset()).order_by('day_of_week', 'start_time')
+        room_id = request.GET.get('room_id')
+        if room_id == 'none':
+            queryset = queryset.filter(room__isnull=True)
+        elif room_id:
+            queryset = queryset.filter(room_id=room_id)
         data = self.get_serializer(queryset, many=True).data
         tenant = Tenant.objects.filter(id=request.user.tenant_id).first()
+        rooms = list(
+            Room.objects.filter(tenant_id=request.user.tenant_id, status='active')
+            .order_by('name').values('id', 'name')
+        )
         return Response({
             'items': data,
             'total': len(data),
             'grid_start': '08:00',
             'grid_end': tenant.timetable_end_time.strftime('%H:%M') if tenant else '22:00',
+            'rooms': rooms,
         })
 
     def create(self, request, *args, **kwargs):
@@ -4375,6 +4416,55 @@ def compute_student_balances(tenant_id):
             balance_status = 'settled'
         balances[student_id] = {'paid': paid_amount, 'cost': cost_amount, 'balance': balance, 'status': balance_status}
     return balances
+
+
+def compute_course_payment_status(tenant_id, course_id, student_ids=None):
+    """Whether each student has paid enough for `course_id` to cover the
+    present/excused sessions they've actually attended in it — same
+    session-based cost model as compute_student_balances, but scoped to one
+    course and counting only payments explicitly tied to that course
+    (Payment.course_id), so a payment made for a different course, a trip,
+    or a book doesn't count toward it. This is what backs the "did they pay
+    for this yet" indicator next to each student on the attendance roster —
+    a course-specific answer, not the student's overall balance across
+    everything. Returns {student_id: bool}, present only for students with
+    at least one present/excused attendance in this course."""
+    course = Course.objects.filter(id=course_id, tenant_id=tenant_id).values(
+        'price', 'pricing_type', 'sessions_count'
+    ).first()
+    if not course:
+        return {}
+    per_session_price = course_per_session_price(course['price'], course['pricing_type'], course['sessions_count'])
+
+    sessions = ClassSession.objects.filter(tenant_id=tenant_id).values('id', 'course_id', 'group__course_id')
+    session_ids_for_course = {
+        s['id'] for s in sessions if (s['course_id'] or s['group__course_id']) == course_id
+    }
+
+    attendance_qs = Attendance.objects.filter(
+        tenant_id=tenant_id, status__in=['present', 'excused'], session_id__in=session_ids_for_course,
+    )
+    if student_ids is not None:
+        attendance_qs = attendance_qs.filter(student_id__in=student_ids)
+
+    cost = {}
+    for row in attendance_qs.values('student_id').annotate(n=Count('id')):
+        amount = per_session_price * row['n']
+        if course['pricing_type'] == 'fixed_sessions':
+            amount = min(amount, float(course['price'] or 0))
+        cost[row['student_id']] = amount
+
+    paid = {}
+    payments_qs = Payment.objects.filter(tenant_id=tenant_id, status='paid', course_id=course_id)
+    if student_ids is not None:
+        payments_qs = payments_qs.filter(student_id__in=student_ids)
+    for p in payments_qs.values('student_id', 'amount', 'discount'):
+        paid[p['student_id']] = paid.get(p['student_id'], 0.0) + float(p['amount']) - float(p['discount'])
+
+    return {
+        student_id: paid.get(student_id, 0.0) + BALANCE_THRESHOLD >= cost_amount
+        for student_id, cost_amount in cost.items()
+    }
 
 
 @api_view(['GET'])
