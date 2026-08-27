@@ -242,6 +242,13 @@ REST_FRAMEWORK = {
         # Sequential student codes + a public school slug make this endpoint a
         # child directory if it's left unmetered — see StudentLookupRateThrottle.
         'student_lookup': '10/min',
+        # Creates a real Tenant + User per call — same abuse shape as
+        # enrollment (resource exhaustion, email-existence enumeration via
+        # its 409 responses), so it gets the same treatment.
+        'register': '5/min',
+        # Each call can persist up to 15 files (15MB each) with no login —
+        # bounds storage-exhaustion abuse of the shared-link quiz flow.
+        'quiz_submit': '10/min',
     },
 }
 

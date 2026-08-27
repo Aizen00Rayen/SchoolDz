@@ -216,8 +216,8 @@ export default function BooksPage() {
         )}
       />
 
-      <RestockDialog book={restocking} onClose={() => setRestocking(null)} />
-      <CopiesDialog book={viewingCopies} onClose={() => setViewingCopies(null)} />
+      <RestockDialog key={restocking?.id || "restock-none"} book={restocking} onClose={() => setRestocking(null)} />
+      <CopiesDialog key={viewingCopies?.id || "copies-none"} book={viewingCopies} onClose={() => setViewingCopies(null)} />
     </>
   );
 }

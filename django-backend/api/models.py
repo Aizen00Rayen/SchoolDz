@@ -559,6 +559,12 @@ class Attendance(models.Model):
     class Meta:
         db_table = 'attendance'
         unique_together = ('tenant', 'session', 'student')
+        indexes = [
+            # Backs dashboard_summary's today-attendance count and every
+            # compute_teacher_earnings/compute_student_balances status='present'
+            # filter — both hit on every dashboard/reports load.
+            models.Index(fields=['tenant', 'status'], name='attendance_tenant_status_idx'),
+        ]
 
 
 class Payment(models.Model):
@@ -615,6 +621,12 @@ class Payment(models.Model):
 
     class Meta:
         db_table = 'payments'
+        indexes = [
+            # Backs dashboard_summary/finance_report/owner_master_dashboard's
+            # status='paid' + paid_at-range revenue aggregates — the single
+            # hottest query shape in the app.
+            models.Index(fields=['tenant', 'status', 'paid_at'], name='pay_tenant_status_paid_idx'),
+        ]
 
 
 class Trip(models.Model):
@@ -679,6 +691,12 @@ class BookCopy(models.Model):
     class Meta:
         db_table = 'book_copies'
         ordering = ['copy_code']
+        indexes = [
+            # Backs PaymentViewSet.create's select_for_update() stock-
+            # assignment lock — the exact filter/order_by it runs under
+            # contention on every book sale.
+            models.Index(fields=['tenant', 'book', 'status', 'copy_code'], name='book_copies_stock_lookup_idx'),
+        ]
 
 
 class Grade(models.Model):

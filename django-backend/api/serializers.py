@@ -9,6 +9,31 @@ from rest_framework import serializers
 # perform_create()'s save(tenant_id=...) kwarg, which bypasses this field.
 from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Trip, Book, BookCopy, Grade, ChargilyCheckout, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry
 
+
+class TenantScopedPKField(serializers.PrimaryKeyRelatedField):
+    """A PrimaryKeyRelatedField restricted to the requesting user's own
+    tenant. Plain PrimaryKeyRelatedField(queryset=Model.objects.all())
+    resolves against every tenant's rows, so a payload like
+    {"student_id": "<uuid belonging to another school>"} would silently
+    attach a cross-tenant record — the same bug class the read_only note
+    on `tenant_id` above already documents, just on the other end of the
+    relation. Requires the serializer to be built with request context
+    (true for every DRF ViewSet call); with no request/tenant, resolves
+    to an empty queryset so the write is rejected rather than unscoped.
+    """
+    def __init__(self, model, **kwargs):
+        self._related_model = model
+        kwargs.setdefault('queryset', model.objects.none())
+        super().__init__(**kwargs)
+
+    def get_queryset(self):
+        request = self.context.get('request')
+        tenant_id = getattr(getattr(request, 'user', None), 'tenant_id', None)
+        if not tenant_id:
+            return self._related_model.objects.none()
+        return self._related_model.objects.filter(tenant_id=tenant_id)
+
+
 class TenantSerializer(serializers.ModelSerializer):
     class Meta:
         model = Tenant
@@ -29,8 +54,8 @@ class UserSerializer(serializers.ModelSerializer):
 
 class GuardianSerializer(serializers.ModelSerializer):
     tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)
-    user_id = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.all(), source='user', allow_null=True, required=False
+    user_id = TenantScopedPKField(
+        User, source='user', allow_null=True, required=False
     )
     student_ids = serializers.SerializerMethodField()
 
@@ -47,8 +72,8 @@ class GuardianSerializer(serializers.ModelSerializer):
 
 class TeacherSerializer(serializers.ModelSerializer):
     tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)
-    user_id = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.all(), source='user', allow_null=True, required=False
+    user_id = TenantScopedPKField(
+        User, source='user', allow_null=True, required=False
     )
 
     class Meta:
@@ -58,8 +83,8 @@ class TeacherSerializer(serializers.ModelSerializer):
 
 class StudentSerializer(serializers.ModelSerializer):
     tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)
-    parent_id = serializers.PrimaryKeyRelatedField(
-        queryset=Guardian.objects.all(), source='parent', allow_null=True, required=False
+    parent_id = TenantScopedPKField(
+        Guardian, source='parent', allow_null=True, required=False
     )
 
     class Meta:
@@ -77,14 +102,14 @@ class CourseSerializer(serializers.ModelSerializer):
 
 class GroupSerializer(serializers.ModelSerializer):
     tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)
-    course_id = serializers.PrimaryKeyRelatedField(
-        queryset=Course.objects.all(), source='course'
+    course_id = TenantScopedPKField(
+        Course, source='course'
     )
-    teacher_id = serializers.PrimaryKeyRelatedField(
-        queryset=Teacher.objects.all(), source='teacher', allow_null=True, required=False
+    teacher_id = TenantScopedPKField(
+        Teacher, source='teacher', allow_null=True, required=False
     )
-    room_id = serializers.PrimaryKeyRelatedField(
-        queryset=Room.objects.all(), source='room_ref', allow_null=True, required=False
+    room_id = TenantScopedPKField(
+        Room, source='room_ref', allow_null=True, required=False
     )
     room_name = serializers.CharField(source='room_ref.name', read_only=True, default=None)
     student_ids = serializers.SerializerMethodField()
@@ -101,17 +126,17 @@ class GroupSerializer(serializers.ModelSerializer):
 
 class ClassSessionSerializer(serializers.ModelSerializer):
     tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)
-    group_id = serializers.PrimaryKeyRelatedField(
-        queryset=Group.objects.all(), source='group', required=False, allow_null=True
+    group_id = TenantScopedPKField(
+        Group, source='group', required=False, allow_null=True
     )
-    teacher_id = serializers.PrimaryKeyRelatedField(
-        queryset=Teacher.objects.all(), source='teacher', allow_null=True, required=False
+    teacher_id = TenantScopedPKField(
+        Teacher, source='teacher', allow_null=True, required=False
     )
-    course_id = serializers.PrimaryKeyRelatedField(
-        queryset=Course.objects.all(), source='course', allow_null=True, required=False
+    course_id = TenantScopedPKField(
+        Course, source='course', allow_null=True, required=False
     )
-    room_id = serializers.PrimaryKeyRelatedField(
-        queryset=Room.objects.all(), source='room_ref', allow_null=True, required=False
+    room_id = TenantScopedPKField(
+        Room, source='room_ref', allow_null=True, required=False
     )
     room_name = serializers.CharField(source='room_ref.name', read_only=True, default=None)
     # Read-only labels so the planner can show who/what/where without a
@@ -130,14 +155,14 @@ class ClassSessionSerializer(serializers.ModelSerializer):
 
 class AttendanceSerializer(serializers.ModelSerializer):
     tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)
-    session_id = serializers.PrimaryKeyRelatedField(
-        queryset=ClassSession.objects.all(), source='session', required=False, allow_null=True
+    session_id = TenantScopedPKField(
+        ClassSession, source='session', required=False, allow_null=True
     )
-    student_id = serializers.PrimaryKeyRelatedField(
-        queryset=Student.objects.all(), source='student', required=False, allow_null=True
+    student_id = TenantScopedPKField(
+        Student, source='student', required=False, allow_null=True
     )
-    marked_by = serializers.PrimaryKeyRelatedField(
-        queryset=User.objects.all(), allow_null=True, required=False
+    marked_by = TenantScopedPKField(
+        User, allow_null=True, required=False
     )
 
     class Meta:
@@ -147,20 +172,20 @@ class AttendanceSerializer(serializers.ModelSerializer):
 
 class PaymentSerializer(serializers.ModelSerializer):
     tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)
-    student_id = serializers.PrimaryKeyRelatedField(
-        queryset=Student.objects.all(), source='student', required=False, allow_null=True
+    student_id = TenantScopedPKField(
+        Student, source='student', required=False, allow_null=True
     )
-    course_id = serializers.PrimaryKeyRelatedField(
-        queryset=Course.objects.all(), source='course', allow_null=True, required=False
+    course_id = TenantScopedPKField(
+        Course, source='course', allow_null=True, required=False
     )
-    group_id = serializers.PrimaryKeyRelatedField(
-        queryset=Group.objects.all(), source='group', allow_null=True, required=False
+    group_id = TenantScopedPKField(
+        Group, source='group', allow_null=True, required=False
     )
-    trip_id = serializers.PrimaryKeyRelatedField(
-        queryset=Trip.objects.all(), source='trip', allow_null=True, required=False
+    trip_id = TenantScopedPKField(
+        Trip, source='trip', allow_null=True, required=False
     )
-    book_id = serializers.PrimaryKeyRelatedField(
-        queryset=Book.objects.all(), source='book', allow_null=True, required=False
+    book_id = TenantScopedPKField(
+        Book, source='book', allow_null=True, required=False
     )
     # The specific copy sold is picked server-side (see PaymentViewSet.create),
     # never chosen by the caller — read-only here, just for display.
@@ -215,22 +240,30 @@ class BookCopySerializer(serializers.ModelSerializer):
         model = BookCopy
         exclude = ['tenant', 'book', 'sold_by']
 
+    def _latest_sale(self, obj):
+        # obj.sale_payment is prefetched (ordered newest-first, with
+        # 'student' select_related) by the view — .all() hits that cache;
+        # calling .select_related()/.first() here instead would silently
+        # discard the prefetch and re-query per row.
+        payments = list(obj.sale_payment.all())
+        return payments[0] if payments else None
+
     def get_buyer_name(self, obj):
-        payment = obj.sale_payment.select_related('student').first()
+        payment = self._latest_sale(obj)
         return f'{payment.student.first_name} {payment.student.last_name}' if payment and payment.student else None
 
     def get_payment_id(self, obj):
-        payment = obj.sale_payment.first()
+        payment = self._latest_sale(obj)
         return payment.id if payment else None
 
 
 class GradeSerializer(serializers.ModelSerializer):
     tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)
-    student_id = serializers.PrimaryKeyRelatedField(
-        queryset=Student.objects.all(), source='student', required=False, allow_null=True
+    student_id = TenantScopedPKField(
+        Student, source='student', required=False, allow_null=True
     )
-    course_id = serializers.PrimaryKeyRelatedField(
-        queryset=Course.objects.all(), source='course', allow_null=True, required=False
+    course_id = TenantScopedPKField(
+        Course, source='course', allow_null=True, required=False
     )
 
     class Meta:
@@ -295,11 +328,11 @@ class CouponSerializer(serializers.ModelSerializer):
 
 class QuizSerializer(serializers.ModelSerializer):
     tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)
-    course_id = serializers.PrimaryKeyRelatedField(
-        queryset=Course.objects.all(), source='course', allow_null=True, required=False
+    course_id = TenantScopedPKField(
+        Course, source='course', allow_null=True, required=False
     )
-    group_id = serializers.PrimaryKeyRelatedField(
-        queryset=Group.objects.all(), source='group', allow_null=True, required=False
+    group_id = TenantScopedPKField(
+        Group, source='group', allow_null=True, required=False
     )
     group_name = serializers.CharField(source='group.name', read_only=True, default=None)
     # Every QuizAttempt row is a completed submission now (the shared-link
@@ -342,8 +375,8 @@ class ExpenseCategorySerializer(serializers.ModelSerializer):
 
 class ExpenseSerializer(serializers.ModelSerializer):
     tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)
-    category_id = serializers.PrimaryKeyRelatedField(
-        queryset=ExpenseCategory.objects.all(), source='category', allow_null=True, required=False
+    category_id = TenantScopedPKField(
+        ExpenseCategory, source='category', allow_null=True, required=False
     )
     category_key = serializers.CharField(source='category.key', read_only=True, default=None)
     category_name = serializers.CharField(source='category.name', read_only=True, default=None)
@@ -355,8 +388,8 @@ class ExpenseSerializer(serializers.ModelSerializer):
 
 class TeacherPayoutSerializer(serializers.ModelSerializer):
     tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)
-    teacher_id = serializers.PrimaryKeyRelatedField(
-        queryset=Teacher.objects.all(), source='teacher'
+    teacher_id = TenantScopedPKField(
+        Teacher, source='teacher'
     )
     teacher_name = serializers.SerializerMethodField()
 

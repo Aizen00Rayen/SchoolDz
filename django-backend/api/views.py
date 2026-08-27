@@ -13,7 +13,7 @@ from PIL import Image, ImageOps
 from datetime import datetime, time, timedelta
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Q, Sum, F, Count
+from django.db.models import Q, Sum, F, Count, Prefetch
 from django.http import FileResponse, Http404, HttpResponse
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -29,7 +29,7 @@ from rest_framework.authtoken.models import Token
 
 from .models import Tenant, User, TenantMembership, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Trip, Book, BookCopy, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_FLAGS, STAFF_ROLES
 from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, RoomSerializer, AttendanceSerializer, PaymentSerializer, TripSerializer, BookSerializer, BookCopySerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer, TimetableEntrySerializer
-from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle, EnrollmentRateThrottle, StudentLookupRateThrottle, log_activity
+from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle, EnrollmentRateThrottle, StudentLookupRateThrottle, RegisterRateThrottle, QuizSubmitRateThrottle, log_activity
 
 # Single source of truth for pricing:
 PLANS_CONFIG = {
@@ -583,6 +583,7 @@ def server_config(request):
 # Auth Views
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([RegisterRateThrottle])
 def auth_register(request):
     # Validation
     required_fields = ['tenant_name', 'tenant_slug', 'name', 'email', 'password']
@@ -746,6 +747,7 @@ def _match_student_by_name(group, typed_name):
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([QuizSubmitRateThrottle])
 def public_quiz_attempt_submit(request, token):
     quiz = Quiz.objects.filter(public_token=token, status='published').select_related('group').first()
     if not quiz:
@@ -1321,8 +1323,11 @@ def owner_master_dashboard(request):
 
     payments_qs = Payment.objects.filter(tenant_id__in=selected_ids, status='paid')
     payments_qs = filter_by_date_range(payments_qs, request, 'paid_at')
+    # Sum(amount - discount), matching dashboard_summary/finance_report —
+    # a plain Sum('amount') would overstate revenue on every discounted
+    # invoice.
     revenue_by_tenant = dict(
-        payments_qs.values('tenant_id').annotate(total=Sum('amount')).values_list('tenant_id', 'total')
+        payments_qs.values('tenant_id').annotate(total=Sum(F('amount') - F('discount'))).values_list('tenant_id', 'total')
     )
 
     schools = []
@@ -1940,12 +1945,12 @@ def dashboard_summary(request):
     today_sessions = ClassSession.objects.filter(
         tenant_id=tid,
         start_at__range=(day_start, day_end)
-    ).order_by('start_at')[:50]
-    
+    ).select_related('teacher', 'course', 'group', 'room_ref').order_by('start_at')[:50]
+
     upcoming_sessions = ClassSession.objects.filter(
         tenant_id=tid,
         start_at__range=(now, now + timedelta(days=7))
-    ).order_by('start_at')[:20]
+    ).select_related('teacher', 'course', 'group', 'room_ref').order_by('start_at')[:20]
     
     # Calculate revenue today
     rev_today_data = Payment.objects.filter(
@@ -1977,12 +1982,18 @@ def dashboard_summary(request):
     exp_month_data = Expense.objects.filter(tenant_id=tid, spent_at__gte=month_start.date()).aggregate(total=Sum('amount'))
     expenses_month = float(exp_month_data['total'] or 0)
 
+    # Built once and threaded through every compute_teacher_earned_total/
+    # compute_teacher_earnings call below (today, month, the 6-month trend,
+    # and the balances breakdown) instead of each one independently
+    # refetching every session/course/teacher row in the tenant.
+    earn_ctx = _teacher_earnings_context(tid)
+
     # Teachers' share of revenue — the piece that never reaches the
     # institution. Reports already nets this out of its own "net" figure;
     # the dashboard's net_profit_month didn't, which overstated what the
     # school actually keeps by the full amount owed to teachers.
-    teacher_earnings_today = compute_teacher_earned_total(tid, date_from=day_start.date(), date_to=day_end.date())
-    teacher_earnings_month = compute_teacher_earned_total(tid, date_from=month_start.date())
+    teacher_earnings_today = compute_teacher_earned_total(tid, date_from=day_start.date(), date_to=day_end.date(), _context=earn_ctx)
+    teacher_earnings_month = compute_teacher_earned_total(tid, date_from=month_start.date(), _context=earn_ctx)
 
     # Money owed to/by the school — receivables from students who've used
     # more than they've paid for, payables from what's earned-but-unpaid to
@@ -1995,7 +2006,7 @@ def dashboard_summary(request):
     students_owing_count = sum(1 for b in student_balances.values() if b['status'] == 'owes')
     students_overpaid_count = sum(1 for b in student_balances.values() if b['status'] == 'overpaid')
 
-    teacher_rows = compute_teacher_earnings(tid, request)
+    teacher_rows = compute_teacher_earnings(tid, request, _context=earn_ctx)
     teacher_payouts_due = round(sum(max(r['balance'], 0) for r in teacher_rows), 2)
     teachers_awaiting_payout_count = sum(1 for r in teacher_rows if r['balance'] > BALANCE_THRESHOLD)
     payables_total = round(teacher_payouts_due + overpaid_students_total, 2)
@@ -2051,7 +2062,7 @@ def dashboard_summary(request):
         # Kept as its own series rather than folded into 'expenses' — that
         # field mirrors the Expenses page's own total, and silently padding
         # it with the teacher share would make the two pages disagree.
-        m_teacher = compute_teacher_earned_total(tid, date_from=m_date.date(), date_to=m_end.date())
+        m_teacher = compute_teacher_earned_total(tid, date_from=m_date.date(), date_to=m_end.date(), _context=earn_ctx)
         trend.append({
             'month': m_date.strftime('%b'),
             'revenue': round(m_total, 2),
@@ -2310,6 +2321,16 @@ def attendance_for_session(request, session_id):
                 if not student_id or status_val not in ['present', 'absent', 'late', 'excused']:
                     continue
 
+                # update_or_create's lookup below only scopes by tenant_id on
+                # the Attendance row itself — student_id is taken from the
+                # request body as-is, so without this check a caller could
+                # attach another tenant's student UUID and have a brand-new
+                # Attendance row silently created for it (there'd be no
+                # existing same-tenant row to match, so it can't clobber an
+                # existing record, just plant a cross-tenant one).
+                if not Student.objects.filter(id=student_id, tenant_id=tid).exists():
+                    continue
+
                 # Recovery only applies to excused absences. Re-saving an
                 # already-excused record (e.g. fixing the note) must not
                 # clobber a recovery_status the tenant already progressed —
@@ -2542,7 +2563,16 @@ def attendance_for_student(request, student_id):
     tid = user.tenant_id
     if not tid:
         raise PermissionDenied('User has no tenant')
-        
+    # Parents have their own scoped route (portal_child_attendance, which
+    # checks _portal_child) — this general staff route must not be usable
+    # to read a family it isn't _portal_child-verified against, and must
+    # respect the same module permission its siblings (attendance_for_session,
+    # attendance_session_print) already enforce.
+    if user.role == 'parent':
+        raise PermissionDenied('Forbidden')
+    if not user.is_super_admin() and not user.can_view('attendance'):
+        raise PermissionDenied('Forbidden')
+
     items = Attendance.objects.filter(tenant_id=tid, student_id=student_id).order_by('-marked_at')[:500]
     return Response({'items': AttendanceSerializer(items, many=True).data, 'total': len(items)})
 
@@ -3997,7 +4027,9 @@ class BookViewSet(TenantScopedViewSet):
         sold it. get_object() already enforces the module view-check via
         get_queryset()."""
         book = self.get_object()
-        queryset = book.copies.select_related('sold_by')
+        queryset = book.copies.select_related('sold_by').prefetch_related(
+            Prefetch('sale_payment', queryset=Payment.objects.select_related('student').order_by('-created_at'))
+        )
         q = request.GET.get('q')
         if q:
             queryset = queryset.filter(copy_code__icontains=q)
@@ -4122,6 +4154,12 @@ class PaymentViewSet(TenantScopedViewSet):
     serializer_class = PaymentSerializer
     module_key = 'payments'
 
+    def get_queryset(self):
+        # book_copy_code (PaymentSerializer) reads book_copy.copy_code —
+        # without this, a 500-row payments list fires a query per row just
+        # for that one field.
+        return super().get_queryset().select_related('book_copy')
+
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
         student_id = request.GET.get('student_id')
@@ -4187,6 +4225,58 @@ class PaymentViewSet(TenantScopedViewSet):
                 payment.save(update_fields=['book_copy'])
 
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def _restore_book_copy(self, payment):
+        """Undoes the stock decrement from create() — called when a book
+        sale is cancelled/refunded/deleted, so the physical copy becomes
+        available to sell again instead of permanently vanishing from
+        inventory counts. Keeps payment.book_copy pointed at the copy (for
+        the invoice's own history) and only flips the copy's own status."""
+        copy = payment.book_copy
+        if copy and copy.status == 'sold':
+            copy.status = 'in_stock'
+            copy.sold_by = None
+            copy.sold_at = None
+            copy.save(update_fields=['status', 'sold_by', 'sold_at'])
+
+    def update(self, request, *args, **kwargs):
+        self.check_module_modify()
+        partial = kwargs.get('partial', False)
+        instance = self.get_object()
+        previous_status = instance.status
+
+        data = request.data.copy()
+        if data.get('status') == 'paid' and not data.get('paid_at'):
+            data['paid_at'] = timezone.now().isoformat()
+
+        serializer = self.get_serializer(instance, data=data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+
+        with transaction.atomic():
+            self.perform_update(serializer)
+            payment = serializer.instance
+            new_status = payment.status
+            if (
+                payment.book_copy_id
+                and previous_status not in ('cancelled', 'refunded')
+                and new_status in ('cancelled', 'refunded')
+            ):
+                self._restore_book_copy(payment)
+
+        return Response(serializer.data)
+
+    def partial_update(self, request, *args, **kwargs):
+        kwargs['partial'] = True
+        return self.update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        self.check_module_delete()
+        instance = self.get_object()
+        with transaction.atomic():
+            if instance.book_copy_id and instance.status not in ('cancelled', 'refunded'):
+                self._restore_book_copy(instance)
+            self.perform_destroy(instance)
+        return Response({'message': 'Deleted successfully'}, status=status.HTTP_200_OK)
 
 
 @api_view(['GET'])
@@ -5015,21 +5105,13 @@ def filter_by_date_range(queryset, request, field):
     return queryset
 
 
-def compute_teacher_earned_total(tenant_id, date_from=None, date_to=None):
-    """Sum of every teacher's earned share (percentage x per-session price,
-    for every present attendance) in an optional date window — the slice of
-    collected revenue that belongs to teachers, not the school. A lighter
-    sibling of compute_teacher_earnings(): no per-teacher breakdown, no
-    already-paid-out figure, just the one number the dashboard and revenue
-    trend need to net revenue down to what the institution actually keeps.
-    Takes explicit dates rather than a request, since the dashboard has no
-    ?from=/?to= of its own to read via filter_by_date_range."""
-    attendance = Attendance.objects.filter(tenant_id=tenant_id, status='present')
-    if date_from:
-        attendance = attendance.filter(session__start_at__date__gte=date_from)
-    if date_to:
-        attendance = attendance.filter(session__start_at__date__lte=date_to)
-
+def _teacher_earnings_context(tenant_id):
+    """The per-tenant session/course/teacher lookup tables that both
+    compute_teacher_earned_total and compute_teacher_earnings independently
+    rebuilt from scratch — a single dashboard_summary request used to call
+    them 9 times combined (today + month + 6 trend months + the balances
+    breakdown), each refetching every session/course/teacher row in the
+    tenant. Build it once per request and pass it in via `_context` instead."""
     sessions = ClassSession.objects.filter(tenant_id=tenant_id).values(
         'id', 'teacher_id', 'group__teacher_id', 'course_id', 'group__course_id',
     )
@@ -5046,6 +5128,27 @@ def compute_teacher_earned_total(tenant_id, date_from=None, date_to=None):
         for c in Course.objects.filter(id__in=course_ids).values('id', 'price', 'pricing_type', 'sessions_count')
     }
     teacher_pct = dict(Teacher.objects.filter(tenant_id=tenant_id).values_list('id', 'payment_percentage'))
+    return session_info, price_per_session, teacher_pct
+
+
+def compute_teacher_earned_total(tenant_id, date_from=None, date_to=None, _context=None):
+    """Sum of every teacher's earned share (percentage x per-session price,
+    for every present attendance) in an optional date window — the slice of
+    collected revenue that belongs to teachers, not the school. A lighter
+    sibling of compute_teacher_earnings(): no per-teacher breakdown, no
+    already-paid-out figure, just the one number the dashboard and revenue
+    trend need to net revenue down to what the institution actually keeps.
+    Takes explicit dates rather than a request, since the dashboard has no
+    ?from=/?to= of its own to read via filter_by_date_range. Pass `_context`
+    (from _teacher_earnings_context) to skip rebuilding the lookup tables
+    when the caller already has one for this tenant/request."""
+    attendance = Attendance.objects.filter(tenant_id=tenant_id, status='present')
+    if date_from:
+        attendance = attendance.filter(session__start_at__date__gte=date_from)
+    if date_to:
+        attendance = attendance.filter(session__start_at__date__lte=date_to)
+
+    session_info, price_per_session, teacher_pct = _context or _teacher_earnings_context(tenant_id)
 
     total = 0.0
     for a in attendance.values('session_id'):
@@ -5057,7 +5160,7 @@ def compute_teacher_earned_total(tenant_id, date_from=None, date_to=None):
     return round(total, 2)
 
 
-def compute_teacher_earnings(tenant_id, request):
+def compute_teacher_earnings(tenant_id, request, _context=None):
     """What each teacher has earned = their percentage of the per-session
     value of every present-student attendance record across their sessions,
     minus what's already been paid out. A course's per-session value comes
@@ -5067,7 +5170,10 @@ def compute_teacher_earnings(tenant_id, request):
     Driven by attendance rather than payments: a teacher is owed for
     students who actually showed up and were taught, regardless of whether
     that student's invoice has been settled yet — collection is the
-    school's problem, not something that should delay a teacher's pay."""
+    school's problem, not something that should delay a teacher's pay.
+    Pass `_context` (from _teacher_earnings_context) to reuse an
+    already-built session/course lookup for this tenant/request instead of
+    rebuilding it — see compute_teacher_earned_total's docstring."""
     teachers = Teacher.objects.filter(tenant_id=tenant_id).order_by('first_name', 'last_name')
     teacher_id = request.GET.get('teacher_id')
     if teacher_id:
@@ -5083,24 +5189,7 @@ def compute_teacher_earnings(tenant_id, request):
     # attendance row. Teacher falls back to the session's own teacher_id when
     # set (a substitute covering someone else's group), else the group's
     # regular teacher; course similarly falls back to the group's course.
-    sessions = ClassSession.objects.filter(tenant_id=tenant_id).values(
-        'id', 'teacher_id', 'group__teacher_id', 'course_id', 'group__course_id',
-    )
-    session_info = {}
-    course_ids = set()
-    for s in sessions:
-        course_id = s['course_id'] or s['group__course_id']
-        session_info[s['id']] = {
-            'teacher_id': s['teacher_id'] or s['group__teacher_id'],
-            'course_id': course_id,
-        }
-        if course_id:
-            course_ids.add(course_id)
-
-    # Per-session price for each course, computed once.
-    price_per_session = {}
-    for c in Course.objects.filter(id__in=course_ids).values('id', 'price', 'pricing_type', 'sessions_count'):
-        price_per_session[c['id']] = course_per_session_price(c['price'], c['pricing_type'], c['sessions_count'])
+    session_info, price_per_session, _ = _context or _teacher_earnings_context(tenant_id)
 
     present_count = {}
     base_value = {}

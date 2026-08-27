@@ -23,9 +23,15 @@ export default function MasterDashboardPage() {
   const { t } = useI18n();
   const { tenant, myTenants } = useAuth();
   const [filters, setFilters] = useState({ from: "", to: "" });
-  const [selectedIds, setSelectedIds] = useState(null); // null = all
+  // Tracked as "which schools got explicitly unchecked" rather than "which
+  // are selected" so a school added later (myTenants growing) stays
+  // included by default, and one removed later just drops out of activeIds
+  // on its own (filtered from the current myTenants list below) instead of
+  // lingering as a stale id nothing can clear.
+  const [deselectedIds, setDeselectedIds] = useState(() => new Set());
 
-  const activeIds = selectedIds ?? myTenants.map((s) => s.id);
+  const activeIds = myTenants.filter((s) => !deselectedIds.has(s.id)).map((s) => s.id);
+  const dateRangeInvalid = Boolean(filters.from && filters.to && filters.from > filters.to);
   const params = new URLSearchParams();
   if (filters.from) params.set("from", filters.from);
   if (filters.to) params.set("to", filters.to);
@@ -34,7 +40,7 @@ export default function MasterDashboardPage() {
   const { data, isLoading } = useQuery({
     queryKey: ["master-dashboard", filters, activeIds],
     queryFn: async () => (await api.get(`/owner/master-dashboard?${params.toString()}`)).data,
-    enabled: myTenants.length > 1,
+    enabled: myTenants.length > 1 && !dateRangeInvalid,
   });
 
   const currency = tenant?.currency || "DZD";
@@ -42,9 +48,10 @@ export default function MasterDashboardPage() {
   const schools = data?.schools || [];
 
   const toggleSchool = (id) => {
-    setSelectedIds((prev) => {
-      const base = prev ?? myTenants.map((s) => s.id);
-      return base.includes(id) ? base.filter((x) => x !== id) : [...base, id];
+    setDeselectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
     });
   };
 
@@ -80,6 +87,9 @@ export default function MasterDashboardPage() {
             <Label className="text-xs font-medium mb-1.5 block">{t("reports.to")}</Label>
             <Input type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
           </div>
+          {dateRangeInvalid && (
+            <div className="col-span-2 text-xs text-destructive">{t("master.invalid_date_range")}</div>
+          )}
         </div>
         <div>
           <Label className="text-xs font-medium mb-1.5 block">{t("master.schools")}</Label>

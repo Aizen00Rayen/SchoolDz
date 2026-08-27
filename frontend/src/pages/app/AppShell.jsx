@@ -1,6 +1,7 @@
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
+import { toast } from "sonner";
 import {
   Award, BarChart3, BookOpen, Building2, CalendarClock, CalendarDays, Check, ChevronDown, ChevronsUpDown, ChevronRight, CircleDollarSign, ClipboardCheck,
   DoorOpen, FileBarChart2, FileQuestion, GaugeCircle, GraduationCap, Globe, HandCoins, Languages, Library, LogOut, Menu, MessageSquare, Moon,
@@ -118,6 +119,7 @@ export default function AppShell() {
       await switchTenant(id);
     } catch (e) {
       setSwitchingId(null);
+      toast.error(extractError(e));
     }
   };
 

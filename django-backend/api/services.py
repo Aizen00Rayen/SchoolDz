@@ -56,6 +56,19 @@ class StudentLookupRateThrottle(AnonRateThrottle):
     scope = 'student_lookup'
 
 
+class RegisterRateThrottle(AnonRateThrottle):
+    """Per-IP guard on /auth/register — like EnrollmentRateThrottle, this
+    creates a real Tenant + User row per call and its 409 responses ("Email
+    already registered") let an unthrottled caller enumerate accounts."""
+    scope = 'register'
+
+
+class QuizSubmitRateThrottle(AnonRateThrottle):
+    """Per-IP guard on the no-login shared-link quiz submission endpoint —
+    each call can persist several uploaded files with no login required."""
+    scope = 'quiz_submit'
+
+
 from chargily_pay import ChargilyClient as SDKChargilyClient
 from chargily_pay.entity import Checkout as SDKCheckout
 

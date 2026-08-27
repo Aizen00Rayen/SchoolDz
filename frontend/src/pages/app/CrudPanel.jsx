@@ -1,7 +1,7 @@
 import { Fragment, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Search, Trash2, Pencil } from "lucide-react";
+import { Plus, Search, Trash2, Pencil, AlertTriangle } from "lucide-react";
 
 import { api, extractError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -33,11 +33,15 @@ function cleanPayload(obj) {
  *  - renderForm: (form, setForm) => JSX
  *  - emptyIcon: Icon
  *  - normalize?: (row) => row (client-side)
+ *  - prepareEditForm?: (row) => row — lets a page derive extra client-only
+ *    form fields from the row before it's spread over defaultForm (e.g. a
+ *    frontend-only "which tab is this" field the API never returns, which
+ *    would otherwise always fall back to defaultForm's value on edit).
  */
 export default function CrudPanel({
   moduleKey, endpoint, title, subtitle, columns, defaultForm, renderForm,
   emptyIcon: EmptyIcon, canEdit = true, canDelete = true, canCreate = true, extraActions,
-  rowClassName, renderRowActions, extraParams, filterBar,
+  rowClassName, renderRowActions, extraParams, filterBar, prepareEditForm,
 }) {
   const { t } = useI18n();
   const confirm = useConfirm();
@@ -47,7 +51,7 @@ export default function CrudPanel({
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(defaultForm || {});
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: [moduleKey, q, extraParams],
     queryFn: async () => (await api.get(endpoint, { params: { ...(q ? { q } : {}), ...(extraParams || {}) } })).data,
   });
@@ -93,7 +97,7 @@ export default function CrudPanel({
 
   const openEdit = (row) => {
     setEditing(row);
-    setForm({ ...defaultForm, ...row });
+    setForm({ ...defaultForm, ...(prepareEditForm ? prepareEditForm(row) : row) });
     setOpen(true);
   };
 
@@ -182,6 +186,17 @@ export default function CrudPanel({
       <div className="surface-card overflow-hidden">
         {isLoading ? (
           <div className="p-4"><LoadingRows /></div>
+        ) : isError ? (
+          <EmptyState
+            icon={AlertTriangle}
+            title={t("crud.load_failed")}
+            description={extractError(error)}
+            action={
+              <Button variant="outline" onClick={() => refetch()}>
+                {t("actions.retry")}
+              </Button>
+            }
+          />
         ) : items.length === 0 ? (
           <EmptyState
             icon={EmptyIcon}

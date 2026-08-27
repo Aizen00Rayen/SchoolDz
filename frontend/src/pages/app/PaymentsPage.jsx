@@ -91,6 +91,14 @@ export default function PaymentsPage() {
       canEdit={canModify}
       canDelete={canDelete}
       canCreate={canAdd}
+      // payment_for is a frontend-only concept (which tab the form shows) —
+      // the API row never has it, so without this defaultForm's "course"
+      // always wins the {...defaultForm, ...row} spread and editing an
+      // existing trip/book payment misleadingly opens on the Course tab.
+      prepareEditForm={(row) => ({
+        ...row,
+        payment_for: row.trip_id ? "trip" : row.book_id ? "book" : "course",
+      })}
       extraParams={balanceFilter !== "all" ? { balance_status: balanceFilter } : undefined}
       filterBar={(
         <div className="flex items-center gap-1.5">
@@ -197,7 +205,14 @@ export default function PaymentsPage() {
             <div className="inline-flex rounded-md border border-border overflow-hidden">
               <button
                 type="button"
-                onClick={() => setForm({ ...form, payment_for: "course", trip_id: "", book_id: "" })}
+                onClick={() => setForm({
+                  ...form, payment_for: "course", trip_id: "", book_id: "",
+                  // Leaving book mode: its auto-filled kind/amount don't
+                  // mean anything for a course payment — without this they
+                  // stick around (kind="book" isn't even a selectable
+                  // option once the field reappears).
+                  ...(form.book_id ? { kind: "monthly", amount: 0 } : {}),
+                })}
                 className={`px-3 py-1.5 text-sm font-medium transition-colors ${
                   forType === "course" ? "bg-accent text-accent-foreground" : "bg-background hover:bg-muted text-muted-foreground"
                 }`}
@@ -207,7 +222,10 @@ export default function PaymentsPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setForm({ ...form, payment_for: "trip", course_id: "", book_id: "" })}
+                onClick={() => setForm({
+                  ...form, payment_for: "trip", course_id: "", book_id: "",
+                  ...(form.book_id ? { kind: "trip", amount: 0 } : {}),
+                })}
                 className={`px-3 py-1.5 text-sm font-medium transition-colors ${
                   forType === "trip" ? "bg-accent text-accent-foreground" : "bg-background hover:bg-muted text-muted-foreground"
                 }`}
