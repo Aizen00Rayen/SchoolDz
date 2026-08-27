@@ -1,6 +1,20 @@
 // craco.config.js
 const path = require("path");
-require("dotenv").config();
+
+// Mirrors react-scripts' own env.js precedence (.env.$(NODE_ENV).local >
+// .env.local > .env.$(NODE_ENV) > .env, first one to set a var wins) instead
+// of the plain `require("dotenv").config()` this used to be — that always
+// loaded bare .env FIRST, so a local dev REACT_APP_BACKEND_URL (auto-written
+// by launch.sh) silently beat .env.production in every `npm run build` and
+// got baked into a real deployed bundle once (2026-08-27), breaking sign-in
+// in production because the built JS pointed at localhost:8002.
+const dotenvFiles = [
+  `.env.${process.env.NODE_ENV}.local`,
+  process.env.NODE_ENV !== "test" && ".env.local",
+  `.env.${process.env.NODE_ENV}`,
+  ".env",
+].filter(Boolean);
+dotenvFiles.forEach((f) => require("dotenv").config({ path: f }));
 
 // Check if we're in development/preview mode (not production build)
 // Craco sets NODE_ENV=development for start, NODE_ENV=production for build

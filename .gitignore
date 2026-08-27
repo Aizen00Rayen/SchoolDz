@@ -87,6 +87,11 @@ frontend/node_modules/.cache/default-development/15.pack
 .env
 .env.*
 *.env
+# Not a secret — just the public API base URL that ends up in the built JS
+# bundle anyway. Committed on purpose so a stray local frontend/.env can
+# never again silently win over it in a production build (see
+# frontend/craco.config.js's env-loading comment for the incident this fixes).
+!frontend/.env.production
 credentials.json
 *.key
 .credentials
