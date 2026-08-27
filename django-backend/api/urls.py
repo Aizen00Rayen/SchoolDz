@@ -52,6 +52,12 @@ urlpatterns = [
     *_both('auth/refresh', views.auth_refresh, 'auth_refresh'),
     *_both('auth/forgot-password', views.auth_forgot_password, 'auth_forgot_password'),
     *_both('auth/reset-password', views.auth_reset_password, 'auth_reset_password'),
+    *_both('auth/switch-tenant', views.auth_switch_tenant, 'auth_switch_tenant'),
+
+    # Multi-school ownership — one login, many schools (see TenantMembership)
+    *_both('owner/schools', views.owner_my_tenants, 'owner_my_tenants'),
+    *_both('owner/schools/new', views.owner_create_school, 'owner_create_school'),
+    *_both('owner/master-dashboard', views.owner_master_dashboard, 'owner_master_dashboard'),
 
     # Public student-badge lookup (student mobile app — no login, see docstring)
     *_both('public/student-lookup', views.public_student_lookup, 'public_student_lookup'),

@@ -214,6 +214,30 @@ class User(AbstractBaseUser):
         return True
 
 
+class TenantMembership(models.Model):
+    """Marks a User as an owner of a Tenant beyond whichever one is
+    currently their `tenant` FK (their "active" workspace — see
+    auth_switch_tenant in views.py). A school owner who buys a second
+    school keeps their single login/User row; switching schools just
+    updates `User.tenant` to point at a Tenant they hold a membership for,
+    which is why every existing `request.user.tenant_id`-scoped check in
+    this codebase keeps working unchanged — there's no new "active tenant"
+    concept layered on top, the existing one just becomes switchable.
+    A regular single-school owner has exactly one row here, created by the
+    one-time backfill migration (or by auth_register going forward)."""
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, db_column='user_id', related_name='tenant_memberships')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='memberships')
+    role = models.CharField(max_length=50, default='owner')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'tenant_memberships'
+        constraints = [
+            models.UniqueConstraint(fields=['user', 'tenant'], name='unique_user_tenant_membership'),
+        ]
+
+
 class Guardian(models.Model):
     id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='guardians')

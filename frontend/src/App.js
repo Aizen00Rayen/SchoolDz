@@ -22,6 +22,7 @@ import AdminLoginPage from "@/pages/admin/AdminLoginPage";
 import AdminDashboardPage from "@/pages/admin/AdminDashboardPage";
 import AppShell from "@/pages/app/AppShell";
 import DashboardPage from "@/pages/app/DashboardPage";
+import MasterDashboardPage from "@/pages/app/MasterDashboardPage";
 import StudentsPage from "@/pages/app/StudentsPage";
 import ParentsPage from "@/pages/app/ParentsPage";
 import TeachersPage from "@/pages/app/TeachersPage";
@@ -164,6 +165,7 @@ function App() {
                   >
                     <Route index element={<Navigate to="dashboard" replace />} />
                     <Route path="dashboard" element={<DashboardPage />} />
+                    <Route path="master-dashboard" element={<MasterDashboardPage />} />
                     <Route path="students" element={<StudentsPage />} />
                     <Route path="parents" element={<ParentsPage />} />
                     <Route path="teachers" element={<TeachersPage />} />

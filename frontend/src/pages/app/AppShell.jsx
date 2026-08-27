@@ -2,9 +2,9 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-do
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
-  Award, BarChart3, BookOpen, Building2, CalendarClock, CalendarDays, ChevronDown, ChevronsUpDown, ChevronRight, CircleDollarSign, ClipboardCheck,
-  DoorOpen, FileBarChart2, FileQuestion, GraduationCap, Globe, HandCoins, Languages, Library, LogOut, Menu, MessageSquare, Moon,
-  PanelLeft, PanelLeftClose, Plane, Receipt, ScrollText, Search, Settings, Sun, Users, UserRound, Wallet, Layers, Table2, X,
+  Award, BarChart3, BookOpen, Building2, CalendarClock, CalendarDays, Check, ChevronDown, ChevronsUpDown, ChevronRight, CircleDollarSign, ClipboardCheck,
+  DoorOpen, FileBarChart2, FileQuestion, GaugeCircle, GraduationCap, Globe, HandCoins, Languages, Library, LogOut, Menu, MessageSquare, Moon,
+  PanelLeft, PanelLeftClose, Plane, Plus, Receipt, ScrollText, Search, Settings, Sun, Users, UserRound, Wallet, Layers, Table2, X,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth";
@@ -13,8 +13,10 @@ import { useTheme, useTenantBranding } from "@/lib/theme";
 import { APPUI, AUTH } from "@/constants/testIds";
 import { api, resolveFileUrl } from "@/lib/api";
 import { canViewModule } from "@/lib/permissions";
+import { Field } from "./_shared";
 
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -22,6 +24,9 @@ import {
 import {
   CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command";
+import {
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 // Grouped under category headers so a 20+ item sidebar stays scannable —
@@ -92,12 +97,41 @@ const NAV_GROUPS = [
 ];
 
 export default function AppShell() {
-  const { user, tenant, logout } = useAuth();
+  const { user, tenant, myTenants, logout, switchTenant, createSchool, extractError } = useAuth();
   const { t, lang, setLang, dir } = useI18n();
   const { theme, toggle } = useTheme();
   useTenantBranding(tenant);
   const nav = useNavigate();
   const location = useLocation();
+
+  const canManageSchools = user?.role === "owner" || user?.role === "director";
+  const [addSchoolOpen, setAddSchoolOpen] = useState(false);
+  const [addSchoolForm, setAddSchoolForm] = useState({ tenant_name: "", tenant_slug: "" });
+  const [addSchoolBusy, setAddSchoolBusy] = useState(false);
+  const [addSchoolError, setAddSchoolError] = useState("");
+  const [switchingId, setSwitchingId] = useState(null);
+
+  const onSwitchTenant = async (id) => {
+    if (id === tenant?.id || switchingId) return;
+    setSwitchingId(id);
+    try {
+      await switchTenant(id);
+    } catch (e) {
+      setSwitchingId(null);
+    }
+  };
+
+  const onCreateSchool = async (e) => {
+    e.preventDefault();
+    setAddSchoolBusy(true);
+    setAddSchoolError("");
+    try {
+      await createSchool(addSchoolForm);
+    } catch (err) {
+      setAddSchoolError(extractError(err));
+      setAddSchoolBusy(false);
+    }
+  };
 
   const [cmdOpen, setCmdOpen] = useState(false);
   const [cmdQuery, setCmdQuery] = useState("");
@@ -287,17 +321,54 @@ export default function AppShell() {
                 )}
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-56 bg-popover" align="start">
-              <DropdownMenuLabel className="text-xs">{t("common.workspace")}</DropdownMenuLabel>
-              <DropdownMenuItem>
-                <Building2 className="w-4 h-4 me-2" />
-                <div className="text-sm">
-                  <div className="font-medium">{tenant?.name}</div>
-                  <div className="text-[10px] text-muted-foreground capitalize">
-                    {tenant?.plan ? t(`plan.${tenant.plan}`) : ""} · {tenant?.status ? t(`status.${tenant.status}`) : ""}
+            <DropdownMenuContent className="w-64 bg-popover" align="start">
+              <DropdownMenuLabel className="text-xs">
+                {myTenants.length > 1 ? t("workspace.my_schools") : t("common.workspace")}
+              </DropdownMenuLabel>
+              {myTenants.length > 1 ? (
+                myTenants.map((ten) => (
+                  <DropdownMenuItem
+                    key={ten.id}
+                    onClick={() => onSwitchTenant(ten.id)}
+                    disabled={!!switchingId}
+                    data-testid={`workspace-switch-${ten.id}`}
+                  >
+                    <div className="w-4 h-4 me-2 flex-shrink-0 grid place-items-center">
+                      {ten.id === tenant?.id && <Check className="w-3.5 h-3.5" />}
+                    </div>
+                    <div className="text-sm min-w-0 flex-1">
+                      <div className="font-medium truncate">{ten.name}</div>
+                      <div className="text-[10px] text-muted-foreground capitalize">
+                        {ten.plan ? t(`plan.${ten.plan}`) : ""} · {ten.status ? t(`status.${ten.status}`) : ""}
+                      </div>
+                    </div>
+                  </DropdownMenuItem>
+                ))
+              ) : (
+                <DropdownMenuItem>
+                  <Building2 className="w-4 h-4 me-2" />
+                  <div className="text-sm">
+                    <div className="font-medium">{tenant?.name}</div>
+                    <div className="text-[10px] text-muted-foreground capitalize">
+                      {tenant?.plan ? t(`plan.${tenant.plan}`) : ""} · {tenant?.status ? t(`status.${tenant.status}`) : ""}
+                    </div>
                   </div>
-                </div>
-              </DropdownMenuItem>
+                </DropdownMenuItem>
+              )}
+              {canManageSchools && (
+                <DropdownMenuItem onClick={() => setAddSchoolOpen(true)} data-testid="workspace-add-school">
+                  <Plus className="w-4 h-4 me-2" />
+                  {t("workspace.add_school")}
+                </DropdownMenuItem>
+              )}
+              {myTenants.length > 1 && (
+                <DropdownMenuItem asChild>
+                  <Link to="/app/master-dashboard" data-testid="workspace-master-dashboard">
+                    <GaugeCircle className="w-4 h-4 me-2" />
+                    {t("workspace.master_dashboard")}
+                  </Link>
+                </DropdownMenuItem>
+              )}
               <DropdownMenuSeparator />
               <DropdownMenuItem asChild>
                 <Link to="/app/settings">
@@ -580,6 +651,46 @@ export default function AppShell() {
           )}
         </CommandList>
       </CommandDialog>
+
+      <Dialog open={addSchoolOpen} onOpenChange={(o) => { setAddSchoolOpen(o); if (!o) setAddSchoolError(""); }}>
+        <DialogContent className="bg-card max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl">{t("workspace.add_school")}</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {t("workspace.add_school_desc")}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={onCreateSchool} className="space-y-4">
+            <Field label={t("auth.workspace_name")} required>
+              <Input
+                value={addSchoolForm.tenant_name}
+                onChange={(e) => setAddSchoolForm({ ...addSchoolForm, tenant_name: e.target.value })}
+                required autoFocus
+              />
+            </Field>
+            <Field label={t("auth.tenant_slug")} required>
+              <div className="flex items-center gap-1.5">
+                <Input
+                  value={addSchoolForm.tenant_slug}
+                  onChange={(e) => setAddSchoolForm({ ...addSchoolForm, tenant_slug: e.target.value.toLowerCase() })}
+                  placeholder="my-school"
+                  required
+                />
+                <span className="text-xs text-muted-foreground font-mono flex-shrink-0">.scolaris.cloud</span>
+              </div>
+            </Field>
+            {addSchoolError && <p className="text-xs text-destructive">{addSchoolError}</p>}
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setAddSchoolOpen(false)}>
+                {t("actions.cancel")}
+              </Button>
+              <Button type="submit" disabled={addSchoolBusy} className="bg-accent hover:bg-accent/90 text-accent-foreground">
+                {t("workspace.continue_to_billing")}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

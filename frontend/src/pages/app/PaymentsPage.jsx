@@ -217,7 +217,7 @@ export default function PaymentsPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setForm({ ...form, payment_for: "book", course_id: "", trip_id: "" })}
+                onClick={() => setForm({ ...form, payment_for: "book", course_id: "", trip_id: "", kind: "book" })}
                 className={`px-3 py-1.5 text-sm font-medium transition-colors ${
                   forType === "book" ? "bg-accent text-accent-foreground" : "bg-background hover:bg-muted text-muted-foreground"
                 }`}
@@ -240,7 +240,13 @@ export default function PaymentsPage() {
             </Field>
           ) : forType === "book" ? (
             <Field label={t("field.book")}>
-              <Select value={form.book_id || ""} onValueChange={(v) => setForm({ ...form, book_id: v })}>
+              <Select
+                value={form.book_id || ""}
+                onValueChange={(v) => {
+                  const book = (books?.items || []).find((b) => b.id === v);
+                  setForm({ ...form, book_id: v, kind: "book", amount: book ? parseFloat(book.price) : form.amount });
+                }}
+              >
                 <SelectTrigger className="bg-background"><SelectValue placeholder="—" /></SelectTrigger>
                 <SelectContent className="bg-popover">
                   {(books?.items || []).map((b) => (
@@ -263,20 +269,21 @@ export default function PaymentsPage() {
               </Select>
             </Field>
           )}
-          <Field label={t("field.kind")}>
-            <Select value={form.kind || "monthly"} onValueChange={(v) => setForm({ ...form, kind: v })}>
-              <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
-              <SelectContent className="bg-popover">
-                <SelectItem value="registration">{t("kind.registration")}</SelectItem>
-                <SelectItem value="monthly">{t("kind.monthly")}</SelectItem>
-                <SelectItem value="course">{t("kind.course")}</SelectItem>
-                <SelectItem value="per_session">{t("kind.per_session")}</SelectItem>
-                <SelectItem value="trip">{t("kind.trip")}</SelectItem>
-                <SelectItem value="book">{t("kind.book")}</SelectItem>
-                <SelectItem value="other">{t("kind.other")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
+          {forType !== "book" && (
+            <Field label={t("field.kind")}>
+              <Select value={form.kind || "monthly"} onValueChange={(v) => setForm({ ...form, kind: v })}>
+                <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+                <SelectContent className="bg-popover">
+                  <SelectItem value="registration">{t("kind.registration")}</SelectItem>
+                  <SelectItem value="monthly">{t("kind.monthly")}</SelectItem>
+                  <SelectItem value="course">{t("kind.course")}</SelectItem>
+                  <SelectItem value="per_session">{t("kind.per_session")}</SelectItem>
+                  <SelectItem value="trip">{t("kind.trip")}</SelectItem>
+                  <SelectItem value="other">{t("kind.other")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
           <Field label={t("field.method")}>
             <Select value={form.method || "cash"} onValueChange={(v) => setForm({ ...form, method: v })}>
               <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
@@ -289,9 +296,11 @@ export default function PaymentsPage() {
               </SelectContent>
             </Select>
           </Field>
-          <Field label={t("field.amount")} required>
-            <Input type="number" value={form.amount || 0} onChange={(e) => setForm({ ...form, amount: parseFloat(e.target.value) || 0 })} required />
-          </Field>
+          {forType !== "book" && (
+            <Field label={t("field.amount")} required>
+              <Input type="number" value={form.amount || 0} onChange={(e) => setForm({ ...form, amount: parseFloat(e.target.value) || 0 })} required />
+            </Field>
+          )}
           <Field label={t("field.discount")}>
             <Input type="number" value={form.discount || 0} onChange={(e) => setForm({ ...form, discount: parseFloat(e.target.value) || 0 })} />
           </Field>

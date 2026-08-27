@@ -27,7 +27,7 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, PermissionDenied, NotFound, APIException, NotAuthenticated
 from rest_framework.authtoken.models import Token
 
-from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Trip, Book, BookCopy, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_FLAGS, STAFF_ROLES
+from .models import Tenant, User, TenantMembership, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Trip, Book, BookCopy, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_FLAGS, STAFF_ROLES
 from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, RoomSerializer, AttendanceSerializer, PaymentSerializer, TripSerializer, BookSerializer, BookCopySerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer, TimetableEntrySerializer
 from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle, EnrollmentRateThrottle, StudentLookupRateThrottle, log_activity
 
@@ -625,6 +625,7 @@ def auth_register(request):
             role='owner',
             email_verified=True
         )
+        TenantMembership.objects.create(user=user, tenant=tenant, role='owner')
 
     token, _ = Token.objects.get_or_create(user=user)
     return Response({
@@ -1204,6 +1205,142 @@ def auth_me(request):
     return Response({
         'user': UserSerializer(user).data,
         'tenant': tenant_data
+    })
+
+
+def _require_owner(user):
+    if not user.is_super_admin() and user.role not in ('owner', 'director'):
+        raise PermissionDenied('Only a workspace owner or director can manage schools.')
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def owner_my_tenants(request):
+    """Every school the caller holds a TenantMembership for — powers the
+    workspace-switcher dropdown. A plain staff user (secretary/accountant/
+    teacher/parent) never has a membership row, so this is naturally empty
+    for them rather than needing a role check."""
+    tenants = Tenant.objects.filter(memberships__user=request.user).order_by('name')
+    return Response({'items': TenantSerializer(tenants, many=True).data})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def auth_switch_tenant(request):
+    """Switches the caller's *active* workspace. This is deliberately just
+    one UPDATE on User.tenant_id rather than a new per-session/per-request
+    concept — every existing request.user.tenant_id-scoped check across the
+    codebase keeps working completely unchanged. Trade-off: "active tenant"
+    is account-wide, not per-browser-tab, so switching in one tab affects
+    any other open tab/session for the same login on next request — an
+    acceptable trade-off matching how most multi-org SaaS products behave
+    (e.g. switching org context), and far simpler than session-scoped state."""
+    user = request.user
+    tenant_id = request.data.get('tenant_id')
+    if not tenant_id:
+        raise ValidationError('tenant_id is required')
+    if not TenantMembership.objects.filter(user=user, tenant_id=tenant_id).exists():
+        raise PermissionDenied('You do not have access to this workspace.')
+    tenant = Tenant.objects.filter(id=tenant_id).first()
+    if not tenant:
+        raise NotFound('Workspace not found')
+    user.tenant = tenant
+    user.save(update_fields=['tenant_id'])
+    log_activity(request, tenant.id, 'login', category='auth', user=user,
+                 description=f'{user.name or user.email} switched to this workspace')
+    return Response({'user': UserSerializer(user).data, 'tenant': TenantSerializer(tenant).data})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def owner_create_school(request):
+    """Adds another school under the caller's existing login — same
+    validation as auth_register's tenant creation, minus creating a new
+    User row (the whole point: one login, many schools). Immediately
+    switches the caller's active tenant to the new one so they land
+    straight in the familiar billing gate to pay for it, reusing that flow
+    unchanged."""
+    user = request.user
+    _require_owner(user)
+
+    tenant_name = (request.data.get('tenant_name') or '').strip()
+    tenant_slug = (request.data.get('tenant_slug') or '').strip().lower()
+    if not tenant_name or not tenant_slug:
+        return Response({'error': 'tenant_name and tenant_slug are required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    import re
+    if not re.match(r'^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$', tenant_slug):
+        return Response({'error': 'Invalid slug (a-z, 0-9, hyphens, 3-32 chars)'}, status=status.HTTP_400_BAD_REQUEST)
+    if Tenant.objects.filter(slug=tenant_slug).exists():
+        return Response({'error': 'This workspace URL is already taken'}, status=status.HTTP_409_CONFLICT)
+
+    basic_tier = PLANS_CONFIG['tiers']['basic']
+    with transaction.atomic():
+        tenant = Tenant.objects.create(
+            name=tenant_name,
+            slug=tenant_slug,
+            center_type=request.data.get('center_type', 'tutoring') or 'tutoring',
+            status='pending_payment',
+            max_students=basic_tier['max_students'],
+            max_users=basic_tier['max_users'],
+        )
+        TenantMembership.objects.create(user=user, tenant=tenant, role='owner')
+        user.tenant = tenant
+        user.save(update_fields=['tenant_id'])
+
+    return Response({'user': UserSerializer(user).data, 'tenant': TenantSerializer(tenant).data})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def owner_master_dashboard(request):
+    """One-page rollup across every school the caller owns — same
+    cross-tenant aggregation shape as admin_platform_summary, just scoped
+    to the caller's TenantMembership set instead of the whole platform.
+    Only meaningful (and only shown in the UI) once someone owns 2+
+    schools, but works for exactly one too."""
+    owned_ids = list(TenantMembership.objects.filter(user=request.user).values_list('tenant_id', flat=True))
+    if not owned_ids:
+        raise PermissionDenied('Forbidden')
+
+    # ?tenant_id=<id> may repeat to narrow the rollup to a subset — anything
+    # not in the caller's own membership set is silently dropped rather than
+    # erroring, so a stale/tampered id can't be used to peek at another
+    # owner's school.
+    requested_ids = request.GET.getlist('tenant_id')
+    selected_ids = [tid for tid in requested_ids if tid in owned_ids] if requested_ids else owned_ids
+
+    tenants = Tenant.objects.filter(id__in=selected_ids).order_by('name')
+
+    students_counts = dict(
+        Student.objects.filter(tenant_id__in=selected_ids).values('tenant_id').annotate(c=Count('id')).values_list('tenant_id', 'c')
+    )
+    teachers_counts = dict(
+        Teacher.objects.filter(tenant_id__in=selected_ids).values('tenant_id').annotate(c=Count('id')).values_list('tenant_id', 'c')
+    )
+
+    payments_qs = Payment.objects.filter(tenant_id__in=selected_ids, status='paid')
+    payments_qs = filter_by_date_range(payments_qs, request, 'paid_at')
+    revenue_by_tenant = dict(
+        payments_qs.values('tenant_id').annotate(total=Sum('amount')).values_list('tenant_id', 'total')
+    )
+
+    schools = []
+    for t in tenants:
+        t_data = TenantSerializer(t).data
+        t_data['students_count'] = students_counts.get(t.id, 0)
+        t_data['teachers_count'] = teachers_counts.get(t.id, 0)
+        t_data['revenue'] = float(revenue_by_tenant.get(t.id) or 0)
+        schools.append(t_data)
+
+    return Response({
+        'kpis': {
+            'schools_total': len(selected_ids),
+            'students_total': sum(students_counts.values()),
+            'teachers_total': sum(teachers_counts.values()),
+            'revenue_total': round(float(sum(revenue_by_tenant.values()) or 0), 2),
+        },
+        'schools': schools,
     })
 
 
