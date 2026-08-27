@@ -173,13 +173,15 @@
       <tr><th>البيان</th><th class="num">المبلغ</th></tr>
     </thead>
     <tbody>
+      {% for line in lines %}
       <tr>
         <td>
-          <div class="item-title">{{ item_title }}</div>
-          {% if item_sub %}<div class="item-sub">{{ item_sub }}</div>{% endif %}
+          <div class="item-title">{{ line.title }}</div>
+          {% if line.sub %}<div class="item-sub">{{ line.sub }}</div>{% endif %}
         </td>
-        <td class="num">{{ subtotal }}</td>
+        <td class="num">{{ line.amount }}</td>
       </tr>
+      {% endfor %}
     </tbody>
   </table>
 

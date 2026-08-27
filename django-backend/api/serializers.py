@@ -7,7 +7,7 @@ from rest_framework import serializers
 # student list out into a tenant they registered themselves. Nothing
 # legitimate needs it writable: creation sets the tenant server-side via
 # perform_create()'s save(tenant_id=...) kwarg, which bypasses this field.
-from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Trip, Book, BookCopy, Grade, ChargilyCheckout, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry
+from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, PaymentItem, Trip, Book, BookCopy, Grade, ChargilyCheckout, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry
 
 
 class TenantScopedPKField(serializers.PrimaryKeyRelatedField):
@@ -170,11 +170,12 @@ class AttendanceSerializer(serializers.ModelSerializer):
         exclude = ['tenant', 'session', 'student']
 
 
-class PaymentSerializer(serializers.ModelSerializer):
-    tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)
-    student_id = TenantScopedPKField(
-        Student, source='student', required=False, allow_null=True
-    )
+class PaymentItemSerializer(serializers.ModelSerializer):
+    """One line on a bill. Written by PaymentViewSet.create directly (not
+    through PaymentSerializer's own write path — see its docstring), but
+    still goes through this serializer's is_valid() per item so the same
+    TenantScopedPKField checks apply to each line's course/group/trip/book
+    as to every other cross-model write in the app."""
     course_id = TenantScopedPKField(
         Course, source='course', allow_null=True, required=False
     )
@@ -191,10 +192,38 @@ class PaymentSerializer(serializers.ModelSerializer):
     # never chosen by the caller — read-only here, just for display.
     book_copy_id = serializers.PrimaryKeyRelatedField(source='book_copy', read_only=True)
     book_copy_code = serializers.CharField(source='book_copy.copy_code', read_only=True, default=None)
+    course_title = serializers.CharField(source='course.title', read_only=True, default=None)
+    trip_title = serializers.CharField(source='trip.title', read_only=True, default=None)
+    book_title = serializers.CharField(source='book.title', read_only=True, default=None)
+    group_name = serializers.CharField(source='group.name', read_only=True, default=None)
+
+    class Meta:
+        model = PaymentItem
+        exclude = ['payment', 'course', 'group', 'trip', 'book', 'book_copy']
+
+
+class PaymentSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)
+    student_id = TenantScopedPKField(
+        Student, source='student', required=False, allow_null=True
+    )
+    # Always server-computed as sum(items.amount) — see
+    # PaymentViewSet.create — never trusted from the client, so a payload
+    # can't claim a bill total that doesn't match what its items actually
+    # add up to.
+    amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    # A bill's line items — set at creation time by PaymentViewSet.create
+    # (see PaymentItemSerializer), immutable afterwards; read-only here
+    # since the write path for these goes through the view, not a nested
+    # writable serializer.
+    items = PaymentItemSerializer(many=True, read_only=True)
 
     class Meta:
         model = Payment
-        exclude = ['tenant', 'student', 'course', 'group', 'trip', 'book', 'book_copy']
+        # course/group/trip/book/book_copy/kind are the old single-item
+        # fields — superseded by `items` (see PaymentItem's docstring) and
+        # excluded here so new code can't accidentally read/write them.
+        exclude = ['tenant', 'student', 'course', 'group', 'trip', 'book', 'book_copy', 'kind']
 
 
 class TripSerializer(serializers.ModelSerializer):

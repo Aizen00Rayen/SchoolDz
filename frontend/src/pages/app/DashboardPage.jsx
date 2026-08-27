@@ -13,7 +13,7 @@ import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { APPUI } from "@/constants/testIds";
-import { PageHeader, StatusPill } from "./_shared";
+import { PageHeader, StatusPill, paymentKindLabel } from "./_shared";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const KPI_CONFIG = [
@@ -293,7 +293,7 @@ export default function DashboardPage() {
               <div key={p.id} className="flex items-center justify-between py-2 border-b border-border last:border-0">
                 <div>
                   <div className="text-sm font-medium">{p.invoice_number}</div>
-                  <div className="text-[11px] font-mono text-muted-foreground capitalize">{t(`kind.${p.kind}`)}</div>
+                  <div className="text-[11px] font-mono text-muted-foreground capitalize">{paymentKindLabel(p, t)}</div>
                 </div>
                 <div className="text-end">
                   <div className="text-sm font-mono font-semibold">

@@ -629,6 +629,47 @@ class Payment(models.Model):
         ]
 
 
+class PaymentItem(models.Model):
+    """One line on a bill — a payment can now cover several of these (a
+    course + a book + a trip in one invoice) instead of exactly one. Payment
+    itself stays the bill: student, discount, method, status, paid_at,
+    invoice_number, and `amount` (kept as a real stored column, server-set
+    to sum(items.amount) at creation — every existing revenue/balance query
+    in the app reads Payment.amount directly, and this way none of them
+    needed to change to support multiple items per bill).
+
+    Payment's own course/group/trip/book/book_copy/kind columns are no
+    longer written to by new payments (superseded by this model) but are
+    deliberately left in place rather than dropped, with historical rows
+    backfilled into one PaymentItem each — dropping columns on a live
+    production Payment table is exactly the kind of one-way risk this
+    migration doesn't need to take just to tidy up."""
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    payment = models.ForeignKey(Payment, on_delete=models.CASCADE, db_column='payment_id', related_name='items')
+    KIND_CHOICES = [
+        ('registration', 'registration'),
+        ('monthly', 'monthly'),
+        ('course', 'course'),
+        ('per_session', 'per_session'),
+        ('trip', 'trip'),
+        ('book', 'book'),
+        ('other', 'other'),
+    ]
+    kind = models.CharField(max_length=50, choices=KIND_CHOICES, default='monthly')
+    course = models.ForeignKey(Course, on_delete=models.SET_NULL, null=True, blank=True, db_column='course_id', related_name='payment_items')
+    group = models.ForeignKey(Group, on_delete=models.SET_NULL, null=True, blank=True, db_column='group_id', related_name='payment_items')
+    trip = models.ForeignKey('Trip', on_delete=models.SET_NULL, null=True, blank=True, db_column='trip_id', related_name='payment_items')
+    book = models.ForeignKey('Book', on_delete=models.SET_NULL, null=True, blank=True, db_column='book_id', related_name='payment_items')
+    # Same server-side atomic assignment as Payment.book_copy used to do —
+    # see PaymentViewSet.create.
+    book_copy = models.ForeignKey('BookCopy', on_delete=models.SET_NULL, null=True, blank=True, db_column='book_copy_id', related_name='sale_items')
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'payment_items'
+
+
 class Trip(models.Model):
     """A school outing — a group of students going somewhere for a price,
     separate from the regular Course/Group enrollment model since a trip is

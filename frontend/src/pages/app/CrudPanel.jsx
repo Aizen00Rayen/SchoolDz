@@ -37,11 +37,15 @@ function cleanPayload(obj) {
  *    form fields from the row before it's spread over defaultForm (e.g. a
  *    frontend-only "which tab is this" field the API never returns, which
  *    would otherwise always fall back to defaultForm's value on edit).
+ *  - preparePayload?: (form) => payload — lets a page transform its form
+ *    state into the exact shape the API expects right before submit (e.g.
+ *    dropping unused fields on a per-row basis inside a nested array,
+ *    which cleanPayload's shallow strip doesn't reach).
  */
 export default function CrudPanel({
   moduleKey, endpoint, title, subtitle, columns, defaultForm, renderForm,
   emptyIcon: EmptyIcon, canEdit = true, canDelete = true, canCreate = true, extraActions,
-  rowClassName, renderRowActions, extraParams, filterBar, prepareEditForm,
+  rowClassName, renderRowActions, extraParams, filterBar, prepareEditForm, preparePayload,
 }) {
   const { t } = useI18n();
   const confirm = useConfirm();
@@ -103,7 +107,7 @@ export default function CrudPanel({
 
   const onSubmit = (e) => {
     e.preventDefault();
-    const clean = cleanPayload(form);
+    const clean = cleanPayload(preparePayload ? preparePayload(form) : form);
     if (editing) updateMut.mutate({ id: editing.id, payload: clean });
     else createMut.mutate(clean);
   };

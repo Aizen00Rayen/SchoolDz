@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { Plus, Trash2 } from "lucide-react";
 import CrudPanel, { StatusPill } from "./CrudPanel";
 import { AlertTriangle, Wallet, FileDown, Info } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Field } from "./StudentsPage";
-import { StudentSearchSelect, courseOptionLabel, tripOptionLabel, bookOptionLabel } from "./_shared";
+import { StudentSearchSelect, courseOptionLabel, tripOptionLabel, bookOptionLabel, paymentItemTitle, paymentKindLabel } from "./_shared";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -24,10 +25,25 @@ const BALANCE_CLS = {
   settled: "",
 };
 
+const EMPTY_ITEM = { item_type: "course", kind: "monthly", course_id: "", trip_id: "", book_id: "", amount: 0 };
+
 const DEFAULT_FORM = {
-  student_id: "", payment_for: "course", course_id: "", trip_id: "", book_id: "", kind: "monthly",
-  amount: 0, discount: 0, method: "cash", status: "paid", reference: "", notes: "",
+  student_id: "", items: [{ ...EMPTY_ITEM }],
+  discount: 0, method: "cash", status: "paid", reference: "", notes: "",
 };
+
+/** A bill's line-item titles, joined — "Test Course + Museum Trip". Reads
+ * straight off the API's nested items (course_title/trip_title/book_title
+ * come pre-resolved server-side), no local course/trip/book lookups needed. */
+function billItemsSummary(payment) {
+  const items = payment.items || [];
+  if (items.length === 0) return "—";
+  return items.map(paymentItemTitle).join(" + ");
+}
+
+function itemAmount(item) {
+  return parseFloat(item.amount) || 0;
+}
 
 export default function PaymentsPage() {
   const { t } = useI18n();
@@ -59,10 +75,9 @@ export default function PaymentsPage() {
   });
   const [balanceFilter, setBalanceFilter] = useState("all");
   const stuMap = Object.fromEntries((students?.items || []).map((s) => [s.id, s]));
-  const courseMap = Object.fromEntries((courses?.items || []).map((c) => [c.id, c]));
-  const tripMap = Object.fromEntries((trips?.items || []).map((tr) => [tr.id, tr]));
-  const bookMap = Object.fromEntries((books?.items || []).map((b) => [b.id, b]));
   const balanceMap = Object.fromEntries((balances?.items || []).map((b) => [b.student_id, b]));
+
+  const subtotalOf = (items) => (items || []).reduce((sum, it) => sum + itemAmount(it), 0);
 
   return (
     <div>
@@ -91,14 +106,30 @@ export default function PaymentsPage() {
       canEdit={canModify}
       canDelete={canDelete}
       canCreate={canAdd}
-      // payment_for is a frontend-only concept (which tab the form shows) —
-      // the API row never has it, so without this defaultForm's "course"
-      // always wins the {...defaultForm, ...row} spread and editing an
-      // existing trip/book payment misleadingly opens on the Course tab.
-      prepareEditForm={(row) => ({
-        ...row,
-        payment_for: row.trip_id ? "trip" : row.book_id ? "book" : "course",
-      })}
+      // Items are set once at creation and aren't editable afterward (see
+      // PaymentViewSet.create's docstring) — editing a row just needs its
+      // items available to render read-only, not converted into the
+      // create-form's editing shape.
+      prepareEditForm={(row) => ({ ...row })}
+      // The item rows carry frontend-only bookkeeping (item_type) and, on
+      // create, only the one FK relevant to their type — cleanPayload's
+      // shallow strip doesn't reach inside the items array, so build the
+      // exact wire shape here instead of leaving stray empty-string FKs
+      // (e.g. trip_id: "" on a course item) that would fail validation.
+      preparePayload={(form) => {
+        const { items: rawItems, ...rest } = form;
+        // Editing: items are read-only server-side and immutable in this
+        // UI (see the isEditing branch below) — nothing to send for them.
+        if (form.id) return rest;
+        const items = (rawItems || []).map((it) => {
+          const out = { kind: it.item_type === "book" ? "book" : it.kind, amount: itemAmount(it) };
+          if (it.item_type === "course" && it.course_id) out.course_id = it.course_id;
+          if (it.item_type === "trip" && it.trip_id) out.trip_id = it.trip_id;
+          if (it.item_type === "book" && it.book_id) out.book_id = it.book_id;
+          return out;
+        });
+        return { ...rest, items };
+      }}
       extraParams={balanceFilter !== "all" ? { balance_status: balanceFilter } : undefined}
       filterBar={(
         <div className="flex items-center gap-1.5">
@@ -123,7 +154,7 @@ export default function PaymentsPage() {
             <div className="flex items-center gap-2">
               <div>
                 <div className="font-mono text-xs">{r.invoice_number}</div>
-                <div className="text-[11px] text-muted-foreground capitalize">{t(`kind.${r.kind}`)}</div>
+                <div className="text-[11px] text-muted-foreground capitalize">{paymentKindLabel(r, t)}</div>
               </div>
               <Button
                 type="button" variant="ghost" size="icon" className="h-7 w-7 flex-shrink-0"
@@ -166,21 +197,7 @@ export default function PaymentsPage() {
         },
         {
           key: "course", label: t("field.course"),
-          render: (r) => {
-            if (r.trip_id) {
-              const trip = tripMap[r.trip_id];
-              return trip ? tripOptionLabel(trip) : <span className="text-muted-foreground">—</span>;
-            }
-            if (r.book_id) {
-              const book = bookMap[r.book_id];
-              const label = book ? bookOptionLabel(book) : <span className="text-muted-foreground">—</span>;
-              return r.book_copy_code ? (
-                <span>{label} <span className="font-mono text-[10px] text-muted-foreground">#{r.book_copy_code}</span></span>
-              ) : label;
-            }
-            const c = courseMap[r.course_id];
-            return c ? courseOptionLabel(c, t) : <span className="text-muted-foreground">—</span>;
-          },
+          render: (r) => <span className="text-sm">{billItemsSummary(r)}</span>,
         },
         {
           key: "amount", label: t("field.amount"),
@@ -194,149 +211,225 @@ export default function PaymentsPage() {
         { key: "status", label: t("field.status"), render: (r) => <StatusPill status={r.status} /> },
       ]}
       renderForm={(form, setForm) => {
-        const forType = form.payment_for || (form.trip_id ? "trip" : form.book_id ? "book" : "course");
+        const isEditing = Boolean(form.id);
+        const items = form.items || [];
+        const subtotal = subtotalOf(items);
+        const discount = parseFloat(form.discount) || 0;
+        const total = Math.max(0, subtotal - discount);
+        const currency = tenant?.currency || "DZD";
+
+        const updateItem = (idx, patch) => {
+          setForm({ ...form, items: items.map((it, i) => (i === idx ? { ...it, ...patch } : it)) });
+        };
+        const setItemType = (idx, item_type) => {
+          // Fresh object per type switch — no leftover course_id/trip_id/
+          // book_id from a previous type sticking around unseen.
+          updateItem(idx, { ...EMPTY_ITEM, item_type });
+        };
+        const addItem = () => setForm({ ...form, items: [...items, { ...EMPTY_ITEM }] });
+        const removeItem = (idx) => setForm({ ...form, items: items.filter((_, i) => i !== idx) });
+
         return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Field label={t("field.student")} required>
-            <StudentSearchSelect value={form.student_id} onChange={(id) => setForm({ ...form, student_id: id })} />
-          </Field>
-          <div>
-            <Label className="text-xs font-medium mb-1.5 block">{t("payments.for")}</Label>
-            <div className="inline-flex rounded-md border border-border overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setForm({
-                  ...form, payment_for: "course", trip_id: "", book_id: "",
-                  // Leaving book mode: its auto-filled kind/amount don't
-                  // mean anything for a course payment — without this they
-                  // stick around (kind="book" isn't even a selectable
-                  // option once the field reappears).
-                  ...(form.book_id ? { kind: "monthly", amount: 0 } : {}),
-                })}
-                className={`px-3 py-1.5 text-sm font-medium transition-colors ${
-                  forType === "course" ? "bg-accent text-accent-foreground" : "bg-background hover:bg-muted text-muted-foreground"
-                }`}
-                data-testid="payments-for-course"
-              >
-                {t("payments.for_course")}
-              </button>
-              <button
-                type="button"
-                onClick={() => setForm({
-                  ...form, payment_for: "trip", course_id: "", book_id: "",
-                  ...(form.book_id ? { kind: "trip", amount: 0 } : {}),
-                })}
-                className={`px-3 py-1.5 text-sm font-medium transition-colors ${
-                  forType === "trip" ? "bg-accent text-accent-foreground" : "bg-background hover:bg-muted text-muted-foreground"
-                }`}
-                data-testid="payments-for-trip"
-              >
-                {t("payments.for_trip")}
-              </button>
-              <button
-                type="button"
-                onClick={() => setForm({ ...form, payment_for: "book", course_id: "", trip_id: "", kind: "book" })}
-                className={`px-3 py-1.5 text-sm font-medium transition-colors ${
-                  forType === "book" ? "bg-accent text-accent-foreground" : "bg-background hover:bg-muted text-muted-foreground"
-                }`}
-                data-testid="payments-for-book"
-              >
-                {t("payments.for_book")}
-              </button>
-            </div>
-          </div>
-          {forType === "trip" ? (
-            <Field label={t("field.trip")}>
-              <Select value={form.trip_id || ""} onValueChange={(v) => setForm({ ...form, trip_id: v })}>
-                <SelectTrigger className="bg-background"><SelectValue placeholder="—" /></SelectTrigger>
-                <SelectContent className="bg-popover">
-                  {(trips?.items || []).map((tr) => (
-                    <SelectItem key={tr.id} value={tr.id}>{tripOptionLabel(tr)}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Field label={t("field.student")} required>
+              {isEditing ? (
+                // Who a bill belongs to isn't editable after creation —
+                // its items/balance accounting is tied to this student.
+                <div className="flex items-center h-10 px-3 rounded-lg border border-border bg-muted/40 text-sm font-medium">
+                  {(() => {
+                    const s = stuMap[form.student_id];
+                    return s ? `${s.first_name} ${s.last_name}` : form.student_id;
+                  })()}
+                </div>
+              ) : (
+                <StudentSearchSelect value={form.student_id} onChange={(id) => setForm({ ...form, student_id: id })} />
+              )}
             </Field>
-          ) : forType === "book" ? (
-            <Field label={t("field.book")}>
-              <Select
-                value={form.book_id || ""}
-                onValueChange={(v) => {
-                  const book = (books?.items || []).find((b) => b.id === v);
-                  setForm({ ...form, book_id: v, kind: "book", amount: book ? parseFloat(book.price) : form.amount });
-                }}
-              >
-                <SelectTrigger className="bg-background"><SelectValue placeholder="—" /></SelectTrigger>
-                <SelectContent className="bg-popover">
-                  {(books?.items || []).map((b) => (
-                    <SelectItem key={b.id} value={b.id} disabled={b.in_stock_count === 0}>
-                      {bookOptionLabel(b)} {b.in_stock_count === 0 ? `(${t("books.out_of_stock")})` : `(${b.in_stock_count})`}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          ) : (
-            <Field label={t("field.course")}>
-              <Select value={form.course_id || ""} onValueChange={(v) => setForm({ ...form, course_id: v })}>
-                <SelectTrigger className="bg-background"><SelectValue placeholder="—" /></SelectTrigger>
-                <SelectContent className="bg-popover">
-                  {(courses?.items || []).map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{courseOptionLabel(c, t)}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-          )}
-          {forType !== "book" && (
-            <Field label={t("field.kind")}>
-              <Select value={form.kind || "monthly"} onValueChange={(v) => setForm({ ...form, kind: v })}>
+            <Field label={t("field.method")}>
+              <Select value={form.method || "cash"} onValueChange={(v) => setForm({ ...form, method: v })}>
                 <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
                 <SelectContent className="bg-popover">
-                  <SelectItem value="registration">{t("kind.registration")}</SelectItem>
-                  <SelectItem value="monthly">{t("kind.monthly")}</SelectItem>
-                  <SelectItem value="course">{t("kind.course")}</SelectItem>
-                  <SelectItem value="per_session">{t("kind.per_session")}</SelectItem>
-                  <SelectItem value="trip">{t("kind.trip")}</SelectItem>
-                  <SelectItem value="other">{t("kind.other")}</SelectItem>
+                  <SelectItem value="cash">{t("method.cash")}</SelectItem>
+                  <SelectItem value="card">{t("method.card")}</SelectItem>
+                  <SelectItem value="bank_transfer">{t("method.bank_transfer")}</SelectItem>
+                  <SelectItem value="cheque">{t("method.cheque")}</SelectItem>
+                  <SelectItem value="other">{t("method.other")}</SelectItem>
                 </SelectContent>
               </Select>
             </Field>
-          )}
-          <Field label={t("field.method")}>
-            <Select value={form.method || "cash"} onValueChange={(v) => setForm({ ...form, method: v })}>
-              <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
-              <SelectContent className="bg-popover">
-                <SelectItem value="cash">{t("method.cash")}</SelectItem>
-                <SelectItem value="card">{t("method.card")}</SelectItem>
-                <SelectItem value="bank_transfer">{t("method.bank_transfer")}</SelectItem>
-                <SelectItem value="cheque">{t("method.cheque")}</SelectItem>
-                <SelectItem value="other">{t("method.other")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          {forType !== "book" && (
-            <Field label={t("field.amount")} required>
-              <Input type="number" value={form.amount || 0} onChange={(e) => setForm({ ...form, amount: parseFloat(e.target.value) || 0 })} required />
+          </div>
+
+          <div>
+            <Label className="text-xs font-medium mb-1.5 block">{t("payments.items")}</Label>
+            <div className="space-y-2">
+              {isEditing ? (
+                // Immutable once billed — see preparePayload's comment.
+                // Show what's on the invoice, not an editable cart.
+                <div className="rounded-lg border border-border divide-y divide-border">
+                  {items.map((item, idx) => (
+                    <div key={item.id || idx} className="flex items-center justify-between px-3 py-2 text-sm">
+                      <span>{paymentItemTitle(item)}</span>
+                      <span className="font-mono">{Math.round(itemAmount(item)).toLocaleString()} {currency}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <>
+                  {items.map((item, idx) => (
+                    <div key={idx} className="rounded-lg border border-border p-3 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="inline-flex rounded-md border border-border overflow-hidden">
+                          {["course", "trip", "book"].map((t2) => (
+                            <button
+                              key={t2}
+                              type="button"
+                              onClick={() => setItemType(idx, t2)}
+                              className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                                item.item_type === t2 ? "bg-accent text-accent-foreground" : "bg-background hover:bg-muted text-muted-foreground"
+                              }`}
+                              data-testid={`payments-item-${idx}-type-${t2}`}
+                            >
+                              {t(`payments.for_${t2}`)}
+                            </button>
+                          ))}
+                        </div>
+                        {items.length > 1 && (
+                          <Button
+                            type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive"
+                            onClick={() => removeItem(idx)}
+                            data-testid={`payments-item-${idx}-remove`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {item.item_type === "trip" ? (
+                          <Field label={t("field.trip")}>
+                            <Select
+                              value={item.trip_id || ""}
+                              onValueChange={(v) => {
+                                const trip = (trips?.items || []).find((tr) => tr.id === v);
+                                updateItem(idx, { trip_id: v, amount: trip ? parseFloat(trip.price) : item.amount });
+                              }}
+                            >
+                              <SelectTrigger className="bg-background"><SelectValue placeholder="—" /></SelectTrigger>
+                              <SelectContent className="bg-popover">
+                                {(trips?.items || []).map((tr) => (
+                                  <SelectItem key={tr.id} value={tr.id}>{tripOptionLabel(tr)}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </Field>
+                        ) : item.item_type === "book" ? (
+                          <Field label={t("field.book")}>
+                            <Select
+                              value={item.book_id || ""}
+                              onValueChange={(v) => {
+                                const book = (books?.items || []).find((b) => b.id === v);
+                                updateItem(idx, { book_id: v, amount: book ? parseFloat(book.price) : item.amount });
+                              }}
+                            >
+                              <SelectTrigger className="bg-background"><SelectValue placeholder="—" /></SelectTrigger>
+                              <SelectContent className="bg-popover">
+                                {(books?.items || []).map((b) => (
+                                  <SelectItem key={b.id} value={b.id} disabled={b.in_stock_count === 0}>
+                                    {bookOptionLabel(b)} {b.in_stock_count === 0 ? `(${t("books.out_of_stock")})` : `(${b.in_stock_count})`}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </Field>
+                        ) : (
+                          <Field label={t("field.course")}>
+                            <Select value={item.course_id || ""} onValueChange={(v) => updateItem(idx, { course_id: v })}>
+                              <SelectTrigger className="bg-background"><SelectValue placeholder="—" /></SelectTrigger>
+                              <SelectContent className="bg-popover">
+                                {(courses?.items || []).map((c) => (
+                                  <SelectItem key={c.id} value={c.id}>{courseOptionLabel(c, t)}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </Field>
+                        )}
+
+                        {item.item_type !== "book" && (
+                          <Field label={t("field.kind")}>
+                            <Select value={item.kind || "monthly"} onValueChange={(v) => updateItem(idx, { kind: v })}>
+                              <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+                              <SelectContent className="bg-popover">
+                                <SelectItem value="registration">{t("kind.registration")}</SelectItem>
+                                <SelectItem value="monthly">{t("kind.monthly")}</SelectItem>
+                                <SelectItem value="course">{t("kind.course")}</SelectItem>
+                                <SelectItem value="per_session">{t("kind.per_session")}</SelectItem>
+                                <SelectItem value="trip">{t("kind.trip")}</SelectItem>
+                                <SelectItem value="other">{t("kind.other")}</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </Field>
+                        )}
+
+                        <Field label={t("field.amount")} required>
+                          <Input
+                            type="number" value={item.amount || 0}
+                            onChange={(e) => updateItem(idx, { amount: parseFloat(e.target.value) || 0 })}
+                            required
+                            data-testid={`payments-item-${idx}-amount`}
+                          />
+                        </Field>
+                      </div>
+                    </div>
+                  ))}
+                  <Button type="button" variant="outline" size="sm" onClick={addItem} data-testid="payments-add-item">
+                    <Plus className="w-3.5 h-3.5 me-1.5" /> {t("payments.add_item")}
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Field label={t("field.discount")}>
+              <Input
+                type="number" value={form.discount || 0}
+                onChange={(e) => setForm({ ...form, discount: parseFloat(e.target.value) || 0 })}
+              />
             </Field>
-          )}
-          <Field label={t("field.discount")}>
-            <Input type="number" value={form.discount || 0} onChange={(e) => setForm({ ...form, discount: parseFloat(e.target.value) || 0 })} />
-          </Field>
-          <Field label={t("field.status")}>
-            <Select value={form.status || "paid"} onValueChange={(v) => setForm({ ...form, status: v })}>
-              <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
-              <SelectContent className="bg-popover">
-                <SelectItem value="paid">{t("status.paid")}</SelectItem>
-                <SelectItem value="pending">{t("status.pending")}</SelectItem>
-                <SelectItem value="partial">{t("status.partial")}</SelectItem>
-                <SelectItem value="refunded">{t("status.refunded")}</SelectItem>
-                <SelectItem value="cancelled">{t("status.cancelled")}</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label={t("field.reference")}>
-            <Input value={form.reference || ""} onChange={(e) => setForm({ ...form, reference: e.target.value })} placeholder="TXN-1234" />
-          </Field>
+            <Field label={t("field.status")}>
+              <Select value={form.status || "paid"} onValueChange={(v) => setForm({ ...form, status: v })}>
+                <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+                <SelectContent className="bg-popover">
+                  <SelectItem value="paid">{t("status.paid")}</SelectItem>
+                  <SelectItem value="pending">{t("status.pending")}</SelectItem>
+                  <SelectItem value="partial">{t("status.partial")}</SelectItem>
+                  <SelectItem value="refunded">{t("status.refunded")}</SelectItem>
+                  <SelectItem value="cancelled">{t("status.cancelled")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label={t("field.reference")}>
+              <Input value={form.reference || ""} onChange={(e) => setForm({ ...form, reference: e.target.value })} placeholder="TXN-1234" />
+            </Field>
+          </div>
+
+          <div className="rounded-lg bg-muted/40 p-3 space-y-1 text-sm">
+            <div className="flex justify-between text-muted-foreground">
+              <span>{t("payments.subtotal")}</span>
+              <span className="font-mono">{Math.round(subtotal).toLocaleString()} {currency}</span>
+            </div>
+            {discount > 0 && (
+              <div className="flex justify-between text-muted-foreground">
+                <span>{t("field.discount")}</span>
+                <span className="font-mono">&minus;{Math.round(discount).toLocaleString()} {currency}</span>
+              </div>
+            )}
+            <div className="flex justify-between font-semibold pt-1 border-t border-border">
+              <span>{t("payments.total")}</span>
+              <span className="font-mono">{Math.round(total).toLocaleString()} {currency}</span>
+            </div>
+          </div>
         </div>
         );
       }}

@@ -138,6 +138,25 @@ export function bookOptionLabel(book) {
   return book.title;
 }
 
+/** A payment/bill's line-item title — course/trip/book title resolved
+ * server-side on PaymentItemSerializer, falling back to the item's kind
+ * when it's a plain fee with no linked record. */
+export function paymentItemTitle(item) {
+  return item.trip_title || item.course_title || item.book_title || item.kind;
+}
+
+/** Single kind label if a bill's items all share one, otherwise
+ * "kind.mixed" — a bill can now cover a course, a trip, and a book
+ * together, so `payment.kind` alone (deprecated, no longer written to on
+ * new bills) can't answer this; derive it from the items instead. Shared
+ * by the Dashboard's recent-payments widget and the Payments list. */
+export function paymentKindLabel(payment, t) {
+  const items = payment.items || [];
+  if (items.length === 0) return "—";
+  const kinds = new Set(items.map((i) => i.kind));
+  return kinds.size === 1 ? t(`kind.${items[0].kind}`) : t("kind.mixed");
+}
+
 /** Room dropdown sourced from /rooms, used by Groups and Sessions forms
  * instead of a free-text field — lets the Rooms occupancy view actually
  * know which sessions are in which room. */

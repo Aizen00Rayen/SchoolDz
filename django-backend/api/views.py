@@ -27,8 +27,8 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, PermissionDenied, NotFound, APIException, NotAuthenticated
 from rest_framework.authtoken.models import Token
 
-from .models import Tenant, User, TenantMembership, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Trip, Book, BookCopy, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_FLAGS, STAFF_ROLES
-from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, RoomSerializer, AttendanceSerializer, PaymentSerializer, TripSerializer, BookSerializer, BookCopySerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer, TimetableEntrySerializer
+from .models import Tenant, User, TenantMembership, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, PaymentItem, Trip, Book, BookCopy, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_FLAGS, STAFF_ROLES
+from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, RoomSerializer, AttendanceSerializer, PaymentSerializer, PaymentItemSerializer, TripSerializer, BookSerializer, BookCopySerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer, TimetableEntrySerializer
 from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle, EnrollmentRateThrottle, StudentLookupRateThrottle, RegisterRateThrottle, QuizSubmitRateThrottle, log_activity
 
 # Single source of truth for pricing:
@@ -1094,7 +1094,9 @@ def payment_invoice_pdf(request, payment_id):
     own guardian, or a super admin — deliberately not a PaymentViewSet action
     since TenantScopedViewSet blocks role='parent' outright."""
     user = request.user
-    payment = Payment.objects.select_related('student', 'student__parent', 'course', 'group', 'tenant').filter(id=payment_id).first()
+    payment = Payment.objects.select_related('student', 'student__parent', 'tenant').prefetch_related(
+        Prefetch('items', queryset=PaymentItem.objects.select_related('course', 'group', 'trip', 'book', 'book_copy'))
+    ).filter(id=payment_id).first()
     if not payment:
         raise NotFound('Payment not found')
 
@@ -1142,19 +1144,26 @@ def payment_invoice_pdf(request, payment_id):
         status_label = INVOICE_STATUS_AR.get(payment.status, payment.get_status_display())
         status_line = status_label
 
-    kind_label_ar = INVOICE_KIND_AR.get(payment.kind, payment.get_kind_display())
-
-    item_sub_parts = []
-    if payment.group:
-        item_sub_parts.append(payment.group.name)
-    if payment.trip:
-        item_sub_parts.append(payment.trip.destination)
-    if payment.book_copy:
-        item_sub_parts.append(payment.book_copy.copy_code)
-    # Only add the kind label when it isn't already the item title (that
-    # happens when there's no linked course/trip/book — kind is the title itself then).
-    if payment.course or payment.trip or payment.book:
-        item_sub_parts.append(kind_label_ar)
+    lines = []
+    for item in payment.items.all():
+        kind_label_ar = INVOICE_KIND_AR.get(item.kind, item.get_kind_display())
+        sub_parts = []
+        if item.group:
+            sub_parts.append(item.group.name)
+        if item.trip:
+            sub_parts.append(item.trip.destination)
+        if item.book_copy:
+            sub_parts.append(item.book_copy.copy_code)
+        # Only add the kind label when it isn't already the line's title
+        # (that happens when there's no linked course/trip/book — kind is
+        # the title itself then).
+        if item.course or item.trip or item.book:
+            sub_parts.append(kind_label_ar)
+        lines.append({
+            'title': item.trip.title if item.trip else (item.course.title if item.course else (item.book.title if item.book else kind_label_ar)),
+            'sub': ' · '.join(sub_parts),
+            'amount': f"{item.amount:,.2f}",
+        })
 
     subtotal = payment.amount
     discount = payment.discount or 0
@@ -1182,8 +1191,7 @@ def payment_invoice_pdf(request, payment_id):
         'method_label': INVOICE_METHOD_AR.get(payment.method, payment.get_method_display()),
         'due_date': payment.due_date.strftime('%d/%m/%Y') if payment.due_date and payment.status != 'paid' else None,
         'student_code': student.student_code,
-        'item_title': payment.trip.title if payment.trip else (payment.course.title if payment.course else (payment.book.title if payment.book else kind_label_ar)),
-        'item_sub': ' · '.join(item_sub_parts),
+        'lines': lines,
         'subtotal': f"{subtotal:,.2f}",
         'discount': f"{discount:,.2f}",
         'total': f"{total:,.2f}",
@@ -4196,10 +4204,12 @@ class PaymentViewSet(TenantScopedViewSet):
     module_key = 'payments'
 
     def get_queryset(self):
-        # book_copy_code (PaymentSerializer) reads book_copy.copy_code —
+        # PaymentSerializer.items iterates payment.items.all() per row —
         # without this, a 500-row payments list fires a query per row just
-        # for that one field.
-        return super().get_queryset().select_related('book_copy')
+        # to list each bill's line items.
+        return super().get_queryset().prefetch_related(
+            Prefetch('items', queryset=PaymentItem.objects.select_related('course', 'trip', 'book', 'book_copy', 'group'))
+        )
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -4224,63 +4234,97 @@ class PaymentViewSet(TenantScopedViewSet):
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
     def create(self, request, *args, **kwargs):
+        """A bill is one or more line items (course/trip/book, each with its
+        own amount) under one student/status/discount/method — see
+        PaymentItem's docstring. Items are validated and created one at a
+        time inside the same atomic block as the bill itself, so an
+        out-of-stock book anywhere in the list rolls back the whole bill
+        rather than leaving a partial invoice behind."""
         self.check_module_add()
         user = request.user
         tenant = Tenant.objects.filter(id=user.tenant_id).first()
         if not tenant:
             raise ValidationError('Tenant not found')
 
+        items_payload = request.data.get('items')
+        if not isinstance(items_payload, list) or not items_payload:
+            raise ValidationError({'items': 'At least one item is required.'})
+
         count = Payment.objects.filter(tenant_id=user.tenant_id).count()
         invoice_number = f"{tenant.invoice_prefix or 'INV-'}{str(count + 1).zfill(6)}"
 
-        data = request.data.copy()
-        data['invoice_number'] = invoice_number
+        bill_data = {k: v for k, v in request.data.items() if k != 'items'}
+        bill_data['invoice_number'] = invoice_number
+        try:
+            bill_data['amount'] = sum(float(item.get('amount') or 0) for item in items_payload)
+        except (TypeError, AttributeError, ValueError):
+            raise ValidationError({'items': 'Each item needs a numeric amount.'})
 
-        status_val = data.get('status', 'paid')
-        if status_val == 'paid' and not data.get('paid_at'):
-            data['paid_at'] = timezone.now().isoformat()
+        status_val = bill_data.get('status', 'paid')
+        if status_val == 'paid' and not bill_data.get('paid_at'):
+            bill_data['paid_at'] = timezone.now().isoformat()
 
-        serializer = self.get_serializer(data=data)
+        serializer = self.get_serializer(data=bill_data)
         serializer.is_valid(raise_exception=True)
 
         with transaction.atomic():
-            self.perform_create(serializer)
-            payment = serializer.instance
-            # A book sale doesn't let the caller pick which physical copy
-            # goes out — lock and grab the next available one atomically so
-            # two simultaneous sales of the last copy can't both succeed.
-            if payment.book_id:
-                copy = (
-                    BookCopy.objects.select_for_update()
-                    .filter(tenant_id=user.tenant_id, book_id=payment.book_id, status='in_stock')
-                    .order_by('copy_code')
-                    .first()
-                )
-                if not copy:
-                    raise ValidationError({'book_id': 'This book is out of stock.'})
-                copy.status = 'sold'
-                copy.sold_by = user
-                copy.sold_at = timezone.now()
-                copy.save(update_fields=['status', 'sold_by', 'sold_at'])
-                payment.book_copy = copy
-                payment.save(update_fields=['book_copy'])
+            # amount is read_only on PaymentSerializer (never trusted from
+            # the client — see its docstring), which means DRF strips it
+            # from validated_data entirely, so it has to be passed as an
+            # explicit save() kwarg here rather than through
+            # self.perform_create()'s normal validated_data-only save.
+            if user.tenant_id and not user.is_super_admin() and user.tenant.status != 'active':
+                raise PermissionDenied('This workspace is not active yet — complete billing to continue.')
+            payment = serializer.save(tenant_id=user.tenant_id, amount=bill_data['amount']) if user.tenant_id else serializer.save(amount=bill_data['amount'])
+            self._log_model_action('create', payment)
 
-        return Response(serializer.data, status=status.HTTP_200_OK)
+            for item_payload in items_payload:
+                item_serializer = PaymentItemSerializer(data=item_payload, context=self.get_serializer_context())
+                item_serializer.is_valid(raise_exception=True)
+                item = item_serializer.save(payment=payment)
 
-    def _restore_book_copy(self, payment):
-        """Undoes the stock decrement from create() — called when a book
-        sale is cancelled/refunded/deleted, so the physical copy becomes
-        available to sell again instead of permanently vanishing from
-        inventory counts. Keeps payment.book_copy pointed at the copy (for
-        the invoice's own history) and only flips the copy's own status."""
-        copy = payment.book_copy
-        if copy and copy.status == 'sold':
+                # A book item doesn't let the caller pick which physical
+                # copy goes out — lock and grab the next available one
+                # atomically so two simultaneous sales of the last copy
+                # can't both succeed.
+                if item.book_id:
+                    copy = (
+                        BookCopy.objects.select_for_update()
+                        .filter(tenant_id=user.tenant_id, book_id=item.book_id, status='in_stock')
+                        .order_by('copy_code')
+                        .first()
+                    )
+                    if not copy:
+                        raise ValidationError({'items': f'"{item.book.title}" is out of stock.'})
+                    copy.status = 'sold'
+                    copy.sold_by = user
+                    copy.sold_at = timezone.now()
+                    copy.save(update_fields=['status', 'sold_by', 'sold_at'])
+                    item.book_copy = copy
+                    item.save(update_fields=['book_copy'])
+
+        return Response(self.get_serializer(payment).data, status=status.HTTP_200_OK)
+
+    def _restore_book_copies(self, payment):
+        """Undoes the stock decrement from create() for every book item on
+        this bill — called when the sale is cancelled/refunded/deleted, so
+        each physical copy becomes available to sell again instead of
+        permanently vanishing from inventory counts. Keeps each item's
+        book_copy pointed at the copy (for the invoice's own history) and
+        only flips the copy's own status."""
+        for copy in BookCopy.objects.filter(sale_items__payment=payment, status='sold'):
             copy.status = 'in_stock'
             copy.sold_by = None
             copy.sold_at = None
             copy.save(update_fields=['status', 'sold_by', 'sold_at'])
 
     def update(self, request, *args, **kwargs):
+        """Only bill-level fields (status/discount/method/due_date/reference/
+        notes) are editable after creation — items are set once at create()
+        and don't change afterward (see create()'s docstring and
+        PaymentSerializer.items being read-only), so there's no item-level
+        stock reconciliation to do here beyond the whole-bill cancel/refund
+        restore below."""
         self.check_module_modify()
         partial = kwargs.get('partial', False)
         instance = self.get_object()
@@ -4297,12 +4341,8 @@ class PaymentViewSet(TenantScopedViewSet):
             self.perform_update(serializer)
             payment = serializer.instance
             new_status = payment.status
-            if (
-                payment.book_copy_id
-                and previous_status not in ('cancelled', 'refunded')
-                and new_status in ('cancelled', 'refunded')
-            ):
-                self._restore_book_copy(payment)
+            if previous_status not in ('cancelled', 'refunded') and new_status in ('cancelled', 'refunded'):
+                self._restore_book_copies(payment)
 
         return Response(serializer.data)
 
@@ -4314,8 +4354,8 @@ class PaymentViewSet(TenantScopedViewSet):
         self.check_module_delete()
         instance = self.get_object()
         with transaction.atomic():
-            if instance.book_copy_id and instance.status not in ('cancelled', 'refunded'):
-                self._restore_book_copy(instance)
+            if instance.status not in ('cancelled', 'refunded'):
+                self._restore_book_copies(instance)
             self.perform_destroy(instance)
         return Response({'message': 'Deleted successfully'}, status=status.HTTP_200_OK)
 
@@ -4329,7 +4369,7 @@ def payments_overdue(request):
         tenant_id=tid,
         status__in=['pending', 'partial'],
         due_date__lt=timezone.now().date(),
-    ).order_by('due_date')[:500]
+    ).prefetch_related('items').order_by('due_date')[:500]
 
     total_data = Payment.objects.filter(
         tenant_id=tid,
@@ -4422,11 +4462,15 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
     """Whether each student has paid enough for `course_id` to cover the
     present/excused sessions they've actually attended in it — same
     session-based cost model as compute_student_balances, but scoped to one
-    course and counting only payments explicitly tied to that course
-    (Payment.course_id), so a payment made for a different course, a trip,
-    or a book doesn't count toward it. This is what backs the "did they pay
-    for this yet" indicator next to each student on the attendance roster —
-    a course-specific answer, not the student's overall balance across
+    course and counting only the portion of a bill that's actually for that
+    course (via PaymentItem, since a bill can now cover a course, a trip,
+    and a book together — the trip/book portions shouldn't count toward
+    "did they pay for this course"). A bill-level discount is split across
+    its items in proportion to their own amount, so a discounted multi-item
+    bill still attributes a fair share of what was actually paid to each
+    item's course. This is what backs the "did they pay for this yet"
+    indicator next to each student on the attendance roster — a
+    course-specific answer, not the student's overall balance across
     everything. Returns {student_id: bool}, present only for students with
     at least one present/excused attendance in this course."""
     course = Course.objects.filter(id=course_id, tenant_id=tenant_id).values(
@@ -4455,11 +4499,16 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
         cost[row['student_id']] = amount
 
     paid = {}
-    payments_qs = Payment.objects.filter(tenant_id=tenant_id, status='paid', course_id=course_id)
+    items_qs = PaymentItem.objects.filter(
+        payment__tenant_id=tenant_id, payment__status='paid', course_id=course_id,
+    ).select_related('payment')
     if student_ids is not None:
-        payments_qs = payments_qs.filter(student_id__in=student_ids)
-    for p in payments_qs.values('student_id', 'amount', 'discount'):
-        paid[p['student_id']] = paid.get(p['student_id'], 0.0) + float(p['amount']) - float(p['discount'])
+        items_qs = items_qs.filter(payment__student_id__in=student_ids)
+    for item in items_qs:
+        bill = item.payment
+        subtotal = float(bill.amount)
+        net_factor = (subtotal - float(bill.discount)) / subtotal if subtotal else 1.0
+        paid[bill.student_id] = paid.get(bill.student_id, 0.0) + float(item.amount) * net_factor
 
     return {
         student_id: paid.get(student_id, 0.0) + BALANCE_THRESHOLD >= cost_amount
@@ -5420,14 +5469,18 @@ def finance_report(request):
     if not user.can_view('reports'):
         raise PermissionDenied('Forbidden')
 
-    payments = Payment.objects.filter(tenant_id=tid).select_related('student', 'group', 'course')
+    payments = Payment.objects.filter(tenant_id=tid).select_related('student').prefetch_related('items')
     payments = filter_by_date_range(payments, request, 'due_date')
     group_id = request.GET.get('group_id')
     if group_id:
-        payments = payments.filter(group_id=group_id)
+        # A bill matches (and counts in full — see the docstring above,
+        # this doesn't try to split a bill's total across its items) if
+        # ANY of its items belong to the group/teacher, since a bill can
+        # now cover several groups/courses at once via PaymentItem.
+        payments = payments.filter(items__group_id=group_id).distinct()
     teacher_id = request.GET.get('teacher_id')
     if teacher_id:
-        payments = payments.filter(group__teacher_id=teacher_id)
+        payments = payments.filter(items__group__teacher_id=teacher_id).distinct()
 
     paid = [p for p in payments if p.status == 'paid']
     outstanding = [p for p in payments if p.status in ('pending', 'partial')]
@@ -5459,10 +5512,12 @@ def finance_report(request):
     # would misleadingly suggest they belong to that subset.
     transactions = []
     for p in payments:
+        item_kinds = {it.kind for it in p.items.all()}
+        bill_kind = next(iter(item_kinds)) if len(item_kinds) == 1 else 'mixed'
         transactions.append({
             'date': (p.paid_at.isoformat() if p.paid_at else None) or (p.due_date.isoformat() if p.due_date else None),
             'type': 'revenue',
-            'kind': p.kind,
+            'kind': bill_kind,
             'status': p.status,
             'description': f'{p.student.first_name} {p.student.last_name}' if p.student else p.invoice_number,
             'reference': p.invoice_number,
