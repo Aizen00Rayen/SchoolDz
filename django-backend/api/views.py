@@ -62,7 +62,7 @@ PLANS_CONFIG = {
         'premium': {
             'name': 'Premium',
             'monthly': 9000,
-            'annual': 75000,
+            'annual': 89000,
             'max_students': None,
             'max_users': None,
             'custom_branding': True,
@@ -2726,23 +2726,41 @@ class TenantViewSet(viewsets.ModelViewSet):
     def create(self, request, *args, **kwargs):
         if not request.user.is_super_admin():
             raise PermissionDenied('Forbidden')
-            
-        required_fields = ['name', 'slug', 'owner_email', 'owner_password', 'owner_name']
+
+        # Two owner modes: create a brand-new owner account (default, as
+        # before), or attach this new workspace to an existing owner/
+        # director's login via TenantMembership — the admin-side equivalent
+        # of a self-service owner clicking "add another school", except the
+        # admin can do it on any existing owner's behalf. In link mode the
+        # owner_name/email/password fields aren't needed at all.
+        link_to_owner_email = (request.data.get('link_to_owner_email') or '').strip().lower()
+
+        required_fields = ['name', 'slug']
+        if not link_to_owner_email:
+            required_fields += ['owner_email', 'owner_password', 'owner_name']
         for f in required_fields:
             if not request.data.get(f):
                 return Response({'error': f'{f} is required'}, status=status.HTTP_400_BAD_REQUEST)
-                
+
         slug = request.data['slug'].strip().lower()
         import re
         if not re.match(r'^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$', slug):
             return Response({'error': 'Invalid slug'}, status=status.HTTP_400_BAD_REQUEST)
-            
+
         if Tenant.objects.filter(slug=slug).exists():
             return Response({'error': 'Slug already taken'}, status=status.HTTP_409_CONFLICT)
-            
-        email = request.data['owner_email'].strip().lower()
-        if User.objects.filter(email=email).exists():
-            return Response({'error': 'Owner email already registered'}, status=status.HTTP_409_CONFLICT)
+
+        existing_owner = None
+        if link_to_owner_email:
+            existing_owner = User.objects.filter(email=link_to_owner_email).first()
+            if not existing_owner:
+                return Response({'error': 'No account with that owner email exists'}, status=status.HTTP_404_NOT_FOUND)
+            if existing_owner.role not in ('owner', 'director'):
+                return Response({'error': 'That account is not an owner/director'}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            email = request.data['owner_email'].strip().lower()
+            if User.objects.filter(email=email).exists():
+                return Response({'error': 'Owner email already registered'}, status=status.HTTP_409_CONFLICT)
 
         # Optional: grant a plan directly (skips Chargily entirely) for a
         # duration the super admin picks — e.g. comping a school, running a
@@ -2782,14 +2800,31 @@ class TenantViewSet(viewsets.ModelViewSet):
                     plan_expires_at=plan_expires_at,
                 )
             tenant = Tenant.objects.create(**tenant_fields)
-            owner = User.objects.create_user(
-                email=email,
-                password=request.data['owner_password'],
-                name=request.data['owner_name'].strip(),
-                tenant=tenant,
-                role='owner',
-                email_verified=True
-            )
+
+            if existing_owner:
+                owner = existing_owner
+                # Their very first membership is trivially their principal
+                # school; later ones stay non-primary unless the admin
+                # explicitly changes it via admin_set_tenant_ownership.
+                is_first_membership = not TenantMembership.objects.filter(user=owner).exists()
+                TenantMembership.objects.create(user=owner, tenant=tenant, role='owner', is_primary=is_first_membership)
+                # Deliberately NOT switching the owner's active tenant here —
+                # unlike owner_create_school (self-service, the caller IS the
+                # owner and expects to land in what they just created), this
+                # is an admin acting on someone else's behalf; silently
+                # moving them out of whatever school they're actively using
+                # right now would be surprising. They switch via the
+                # workspace dropdown themselves whenever they're ready.
+            else:
+                owner = User.objects.create_user(
+                    email=email,
+                    password=request.data['owner_password'],
+                    name=request.data['owner_name'].strip(),
+                    tenant=tenant,
+                    role='owner',
+                    email_verified=True
+                )
+                TenantMembership.objects.create(user=owner, tenant=tenant, role='owner', is_primary=True)
 
         return Response({
             'tenant': TenantSerializer(tenant).data,
@@ -4498,11 +4533,28 @@ def admin_platform_summary(request):
     users_counts = dict(User.objects.filter(tenant_id__in=tenant_ids).values('tenant_id').annotate(c=Count('id')).values_list('tenant_id', 'c'))
     students_counts = dict(Student.objects.filter(tenant_id__in=tenant_ids).values('tenant_id').annotate(c=Count('id')).values_list('tenant_id', 'c'))
 
+    # Owner/linking info for the multi-school admin UI: which account owns
+    # each tenant, whether it's that owner's principal school, and how many
+    # schools that same owner has linked in total (so the panel can show a
+    # "3 schools" badge without a query per row).
+    memberships = list(
+        TenantMembership.objects.filter(tenant_id__in=tenant_ids).select_related('user').order_by('created_at')
+    )
+    membership_by_tenant = {}
+    schools_per_owner = {}
+    for m in memberships:
+        membership_by_tenant.setdefault(m.tenant_id, m)  # first (earliest) wins if a tenant has 2+ owners
+        schools_per_owner[m.user_id] = schools_per_owner.get(m.user_id, 0) + 1
+
     tenants_list = []
     for t in tenants:
         t_data = TenantSerializer(t).data
         t_data['users_count'] = users_counts.get(t.id, 0)
         t_data['students_count'] = students_counts.get(t.id, 0)
+        owner_membership = membership_by_tenant.get(t.id)
+        t_data['owner_email'] = owner_membership.user.email if owner_membership else None
+        t_data['is_primary_school'] = bool(owner_membership.is_primary) if owner_membership else False
+        t_data['linked_schools_count'] = schools_per_owner.get(owner_membership.user_id, 0) if owner_membership else 0
         tenants_list.append(t_data)
         
     return Response({
@@ -4657,6 +4709,59 @@ def admin_set_tenant_subscription(request, tenant_id):
             f"status {before['status']} -> {tenant.status}, "
             f"expires {before['expires_at']} -> "
             f"{tenant.plan_expires_at.isoformat() if tenant.plan_expires_at else None}"
+        ),
+    )
+
+    return Response(TenantSerializer(tenant).data)
+
+
+@api_view(['PATCH'])
+@permission_classes([IsAuthenticated])
+def admin_set_tenant_ownership(request, tenant_id):
+    """Links a tenant to an existing owner/director account (creating a
+    TenantMembership if one doesn't already exist) and/or marks it as that
+    owner's principal school. This is the admin-side complement to
+    TenantViewSet.create's link_to_owner_email — that only covers linking
+    at creation time, this retroactively groups workspaces that were each
+    created separately (e.g. three schools set up one at a time, each with
+    its own owner account, that the admin now wants to consolidate under
+    one login) or simply relabels which one is principal."""
+    if not request.user.is_super_admin():
+        raise PermissionDenied('Forbidden')
+
+    tenant = Tenant.objects.filter(id=tenant_id).first()
+    if not tenant:
+        raise NotFound('Not found')
+
+    owner_email = (request.data.get('owner_email') or '').strip().lower()
+    if not owner_email:
+        return Response({'error': 'owner_email is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    owner = User.objects.filter(email=owner_email).first()
+    if not owner:
+        return Response({'error': 'No account with that email exists'}, status=status.HTTP_404_NOT_FOUND)
+    if owner.role not in ('owner', 'director'):
+        return Response({'error': 'That account is not an owner/director'}, status=status.HTTP_400_BAD_REQUEST)
+
+    make_primary = bool(request.data.get('is_primary'))
+
+    with transaction.atomic():
+        membership, created = TenantMembership.objects.get_or_create(
+            user=owner, tenant=tenant, defaults={'role': 'owner'},
+        )
+        # Explicit request, or this owner's very first membership ever —
+        # either way they should never end up with zero principal schools.
+        if make_primary or not TenantMembership.objects.filter(user=owner, is_primary=True).exists():
+            TenantMembership.objects.filter(user=owner).exclude(id=membership.id).update(is_primary=False)
+            membership.is_primary = True
+            membership.save(update_fields=['is_primary'])
+
+    log_activity(
+        request, tenant.id, 'update', category='billing',
+        entity_type='tenant', entity_id=tenant.id,
+        description=(
+            f"Super admin {'linked' if created else 're-linked'} this workspace to owner {owner.email}"
+            + (" as their principal school" if membership.is_primary else "")
         ),
     )
 

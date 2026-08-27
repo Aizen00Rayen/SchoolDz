@@ -147,6 +147,8 @@ urlpatterns = [
     path('admin/tenants/<str:tenant_id>/status', views.admin_set_tenant_status, name='admin_set_tenant_status_noslash'),
     path('admin/tenants/<str:tenant_id>/subscription/', views.admin_set_tenant_subscription, name='admin_set_tenant_subscription'),
     path('admin/tenants/<str:tenant_id>/subscription', views.admin_set_tenant_subscription, name='admin_set_tenant_subscription_noslash'),
+    path('admin/tenants/<str:tenant_id>/ownership/', views.admin_set_tenant_ownership, name='admin_set_tenant_ownership'),
+    path('admin/tenants/<str:tenant_id>/ownership', views.admin_set_tenant_ownership, name='admin_set_tenant_ownership_noslash'),
     path('admin/tenants/<str:tenant_id>/', views.admin_destroy_tenant, name='admin_destroy_tenant'),
     path('admin/tenants/<str:tenant_id>', views.admin_destroy_tenant, name='admin_destroy_tenant_noslash'),
 

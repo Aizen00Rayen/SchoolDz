@@ -229,6 +229,13 @@ class TenantMembership(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, db_column='user_id', related_name='tenant_memberships')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='memberships')
     role = models.CharField(max_length=50, default='owner')
+    # Which of a multi-school owner's linked workspaces is their "main" one —
+    # purely a label the owner/admin sets (doesn't affect access or scoping
+    # at all), surfaced in the workspace switcher and the admin panel.
+    # Enforced as at-most-one-per-user at the application layer (see
+    # admin_set_tenant_ownership / TenantViewSet.create in views.py), not a
+    # DB constraint, since "no primary yet" is a valid transient state.
+    is_primary = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

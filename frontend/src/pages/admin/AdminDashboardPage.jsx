@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import {
-  ArrowUpRight, Building2, CalendarClock, GraduationCap, LogOut, Moon, Sun, Tag,
+  ArrowUpRight, Building2, CalendarClock, Crown, GraduationCap, Link2, LogOut, Moon, Sun, Tag,
   ShieldCheck, Trash2, Users, Wallet, PowerOff, Power, Pencil, Plus,
 } from "lucide-react";
 
@@ -39,9 +39,15 @@ const DURATION_PRESETS = [
 ];
 const EMPTY_TENANT_FORM = {
   name: "", slug: "", center_type: "tutoring",
-  owner_name: "", owner_email: "", owner_password: "",
+  owner_mode: "new", owner_name: "", owner_email: "", owner_password: "", link_to_owner_email: "",
   plan: "premium", duration_days: 30,
 };
+
+// "" for owner_email means "set/keep this owner's principal school as-is" —
+// the ownership dialog always requires an owner_email though (unlike the
+// subscription dialog's "leave field blank to skip" convention), since
+// linking without knowing which owner to link to is meaningless.
+const EMPTY_OWNERSHIP_FORM = { owner_email: "", is_primary: false };
 
 // "" for plan means "leave the tenant's current plan alone" — the endpoint
 // treats an absent plan as no-change, so the admin can extend time without
@@ -179,11 +185,55 @@ export default function AdminDashboardPage() {
 
   const submitTenant = (e) => {
     e.preventDefault();
-    createTenantMut.mutate({
-      ...tenantForm,
+    const { owner_mode, owner_name, owner_email, owner_password, link_to_owner_email, ...rest } = tenantForm;
+    const payload = {
+      ...rest,
       slug: tenantForm.slug.trim().toLowerCase(),
       duration_days: parseInt(tenantForm.duration_days, 10) || 30,
-    });
+    };
+    if (owner_mode === "link") {
+      payload.link_to_owner_email = link_to_owner_email.trim().toLowerCase();
+    } else {
+      payload.owner_name = owner_name;
+      payload.owner_email = owner_email;
+      payload.owner_password = owner_password;
+    }
+    createTenantMut.mutate(payload);
+  };
+
+  // Ownership dialog — links a workspace (new or already-existing) to an
+  // existing owner/director account and/or marks it as that owner's
+  // principal school. Same open/tenant-separate-from-open shape as the
+  // subscription dialog above, for the same Radix pointer-events reason.
+  const [ownershipOpen, setOwnershipOpen] = useState(false);
+  const [ownershipTenant, setOwnershipTenant] = useState(null);
+  const [ownershipForm, setOwnershipForm] = useState(EMPTY_OWNERSHIP_FORM);
+
+  const openOwnership = (tt) => {
+    setOwnershipTenant(tt);
+    setOwnershipOpen(true);
+    setOwnershipForm({ owner_email: tt.owner_email || "", is_primary: !!tt.is_primary_school });
+  };
+
+  const ownershipMut = useMutation({
+    mutationFn: ({ id, payload }) =>
+      api.patch(`/admin/tenants/${id}/ownership`, payload).then((r) => r.data),
+    onSuccess: () => {
+      toast.success("Ownership updated");
+      qc.invalidateQueries({ queryKey: ["admin-platform"] });
+      setOwnershipOpen(false);
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
+  const submitOwnership = (e) => {
+    e.preventDefault();
+    const owner_email = ownershipForm.owner_email.trim().toLowerCase();
+    if (!owner_email) {
+      toast.error("Owner email is required");
+      return;
+    }
+    ownershipMut.mutate({ id: ownershipTenant.id, payload: { owner_email, is_primary: ownershipForm.is_primary } });
   };
 
   const { data: usersData, isLoading: usersLoading } = useQuery({
@@ -415,6 +465,7 @@ export default function AdminDashboardPage() {
                   <tr>
                     <Th>Workspace</Th>
                     <Th>Slug</Th>
+                    <Th>Owner</Th>
                     <Th>Plan</Th>
                     <Th>Status</Th>
                     <Th>Expires</Th>
@@ -450,6 +501,23 @@ export default function AdminDashboardPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3 font-mono text-xs">{tt.slug}</td>
+                      <td className="px-4 py-3">
+                        {tt.owner_email ? (
+                          <div className="flex items-center gap-1.5">
+                            {tt.is_primary_school && (
+                              <Crown className="w-3 h-3 text-accent flex-shrink-0" aria-label="Principal school" />
+                            )}
+                            <div className="min-w-0">
+                              <div className="text-xs truncate max-w-[160px]">{tt.owner_email}</div>
+                              {tt.linked_schools_count > 1 && (
+                                <div className="text-[10px] text-muted-foreground">{tt.linked_schools_count} schools</div>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <span className="text-xs px-2 py-0.5 rounded-full bg-muted capitalize">
                           {tt.plan}
@@ -493,6 +561,15 @@ export default function AdminDashboardPage() {
                           >
                             <CalendarClock className="w-3 h-3 me-1" />
                             Plan &amp; duration
+                          </Button>
+                          <Button
+                            size="sm" variant="outline"
+                            onClick={() => openOwnership(tt)}
+                            data-testid={`admin-ownership-${tt.id}`}
+                            className="h-8 text-xs"
+                          >
+                            <Link2 className="w-3 h-3 me-1" />
+                            Ownership
                           </Button>
                           {tt.status !== "suspended" ? (
                             <Button
@@ -884,43 +961,89 @@ export default function AdminDashboardPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="tenant-owner-name">Owner name</Label>
-                <Input
-                  id="tenant-owner-name"
-                  value={tenantForm.owner_name}
-                  onChange={(e) => setTenantForm({ ...tenantForm, owner_name: e.target.value })}
-                  required
-                  data-testid="admin-tenant-form-owner-name"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="tenant-owner-email">Owner email</Label>
-                <Input
-                  id="tenant-owner-email"
-                  type="email"
-                  value={tenantForm.owner_email}
-                  onChange={(e) => setTenantForm({ ...tenantForm, owner_email: e.target.value })}
-                  required
-                  data-testid="admin-tenant-form-owner-email"
-                />
+            <div className="space-y-2">
+              <Label>Owner</Label>
+              <div className="inline-flex rounded-md border border-border overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setTenantForm({ ...tenantForm, owner_mode: "new" })}
+                  className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                    tenantForm.owner_mode === "new" ? "bg-accent text-accent-foreground" : "bg-background hover:bg-muted text-muted-foreground"
+                  }`}
+                  data-testid="admin-tenant-owner-mode-new"
+                >
+                  New owner account
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTenantForm({ ...tenantForm, owner_mode: "link" })}
+                  className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                    tenantForm.owner_mode === "link" ? "bg-accent text-accent-foreground" : "bg-background hover:bg-muted text-muted-foreground"
+                  }`}
+                  data-testid="admin-tenant-owner-mode-link"
+                >
+                  Link to existing owner
+                </button>
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="tenant-owner-password">Owner password</Label>
-              <Input
-                id="tenant-owner-password"
-                type="password"
-                minLength={8}
-                value={tenantForm.owner_password}
-                onChange={(e) => setTenantForm({ ...tenantForm, owner_password: e.target.value })}
-                placeholder="At least 8 characters"
-                required
-                data-testid="admin-tenant-form-owner-password"
-              />
-            </div>
+            {tenantForm.owner_mode === "link" ? (
+              <div className="space-y-2">
+                <Label htmlFor="tenant-link-owner-email">Existing owner's email</Label>
+                <Input
+                  id="tenant-link-owner-email"
+                  type="email"
+                  value={tenantForm.link_to_owner_email}
+                  onChange={(e) => setTenantForm({ ...tenantForm, link_to_owner_email: e.target.value })}
+                  placeholder="owner@theirotherschool.com"
+                  required
+                  data-testid="admin-tenant-form-link-owner-email"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Must already be an owner/director account. This workspace joins their "my schools" list — their active workspace doesn't change until they switch to it themselves.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="tenant-owner-name">Owner name</Label>
+                    <Input
+                      id="tenant-owner-name"
+                      value={tenantForm.owner_name}
+                      onChange={(e) => setTenantForm({ ...tenantForm, owner_name: e.target.value })}
+                      required
+                      data-testid="admin-tenant-form-owner-name"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="tenant-owner-email">Owner email</Label>
+                    <Input
+                      id="tenant-owner-email"
+                      type="email"
+                      value={tenantForm.owner_email}
+                      onChange={(e) => setTenantForm({ ...tenantForm, owner_email: e.target.value })}
+                      required
+                      data-testid="admin-tenant-form-owner-email"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="tenant-owner-password">Owner password</Label>
+                  <Input
+                    id="tenant-owner-password"
+                    type="password"
+                    minLength={8}
+                    value={tenantForm.owner_password}
+                    onChange={(e) => setTenantForm({ ...tenantForm, owner_password: e.target.value })}
+                    placeholder="At least 8 characters"
+                    required
+                    data-testid="admin-tenant-form-owner-password"
+                  />
+                </div>
+              </>
+            )}
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -971,6 +1094,58 @@ export default function AdminDashboardPage() {
                 className="bg-accent hover:bg-accent/90 text-accent-foreground"
               >
                 {createTenantMut.isPending ? "Creating…" : "Create workspace"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Ownership dialog — links a workspace to an existing owner/director
+          account (creating the workspace-switcher membership if there isn't
+          one yet) and/or marks it as that owner's principal school. */}
+      <Dialog open={ownershipOpen} onOpenChange={setOwnershipOpen}>
+        <DialogContent className="max-w-md bg-card">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl">Ownership</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {ownershipTenant?.name} — link this workspace to an owner account and/or mark it as their principal school.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={submitOwnership} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="ownership-email">Owner's email</Label>
+              <Input
+                id="ownership-email"
+                type="email"
+                value={ownershipForm.owner_email}
+                onChange={(e) => setOwnershipForm({ ...ownershipForm, owner_email: e.target.value })}
+                placeholder="owner@example.com"
+                required
+                data-testid="admin-ownership-form-email"
+              />
+              <p className="text-xs text-muted-foreground">
+                Must be an existing owner/director account. If they don't already hold a membership on this workspace, one is created.
+              </p>
+            </div>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox
+                checked={ownershipForm.is_primary}
+                onCheckedChange={(v) => setOwnershipForm({ ...ownershipForm, is_primary: !!v })}
+                data-testid="admin-ownership-form-primary"
+              />
+              Set as this owner's principal school
+            </label>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button type="button" variant="outline" onClick={() => setOwnershipOpen(false)}>
+                {t("actions.cancel")}
+              </Button>
+              <Button
+                type="submit"
+                disabled={ownershipMut.isPending}
+                data-testid="admin-ownership-form-submit"
+                className="bg-accent hover:bg-accent/90 text-accent-foreground"
+              >
+                {ownershipMut.isPending ? "Saving…" : "Save"}
               </Button>
             </div>
           </form>
