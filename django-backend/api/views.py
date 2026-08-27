@@ -27,8 +27,8 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, PermissionDenied, NotFound, APIException, NotAuthenticated
 from rest_framework.authtoken.models import Token
 
-from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Trip, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_FLAGS, STAFF_ROLES
-from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, RoomSerializer, AttendanceSerializer, PaymentSerializer, TripSerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer, TimetableEntrySerializer
+from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Trip, Book, BookCopy, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_FLAGS, STAFF_ROLES
+from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, RoomSerializer, AttendanceSerializer, PaymentSerializer, TripSerializer, BookSerializer, BookCopySerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer, TimetableEntrySerializer
 from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle, EnrollmentRateThrottle, StudentLookupRateThrottle, log_activity
 
 # Single source of truth for pricing:
@@ -248,6 +248,7 @@ INVOICE_KIND_AR = {
     'course': 'دورة',
     'per_session': 'بالحصة',
     'trip': 'رحلة مدرسية',
+    'book': 'كتاب',
     'other': 'آخر',
 }
 INVOICE_METHOD_AR = {
@@ -1145,9 +1146,11 @@ def payment_invoice_pdf(request, payment_id):
         item_sub_parts.append(payment.group.name)
     if payment.trip:
         item_sub_parts.append(payment.trip.destination)
+    if payment.book_copy:
+        item_sub_parts.append(payment.book_copy.copy_code)
     # Only add the kind label when it isn't already the item title (that
-    # happens when there's no linked course/trip — kind is the title itself then).
-    if payment.course or payment.trip:
+    # happens when there's no linked course/trip/book — kind is the title itself then).
+    if payment.course or payment.trip or payment.book:
         item_sub_parts.append(kind_label_ar)
 
     subtotal = payment.amount
@@ -1176,7 +1179,7 @@ def payment_invoice_pdf(request, payment_id):
         'method_label': INVOICE_METHOD_AR.get(payment.method, payment.get_method_display()),
         'due_date': payment.due_date.strftime('%d/%m/%Y') if payment.due_date and payment.status != 'paid' else None,
         'student_code': student.student_code,
-        'item_title': payment.trip.title if payment.trip else (payment.course.title if payment.course else kind_label_ar),
+        'item_title': payment.trip.title if payment.trip else (payment.course.title if payment.course else (payment.book.title if payment.book else kind_label_ar)),
         'item_sub': ' · '.join(item_sub_parts),
         'subtotal': f"{subtotal:,.2f}",
         'discount': f"{discount:,.2f}",
@@ -3769,6 +3772,71 @@ class TripViewSet(TenantScopedViewSet):
         return Response(self.get_serializer(instance).data, status=status.HTTP_200_OK)
 
 
+class BookViewSet(TenantScopedViewSet):
+    queryset = Book.objects.all()
+    serializer_class = BookSerializer
+    module_key = 'books'
+
+    def get_queryset(self):
+        # in_stock_count/sold_count on BookSerializer iterate obj.copies.all()
+        # — prefetch here so a book list of N titles doesn't fire N queries.
+        return super().get_queryset().prefetch_related('copies')
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        q = request.GET.get('q')
+        if q:
+            queryset = queryset.filter(title__icontains=q)
+        queryset = queryset.order_by('title')[:500]
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({'items': serializer.data, 'total': len(serializer.data)})
+
+    @action(detail=True, methods=['post'])
+    def restock(self, request, pk=None):
+        """Bulk-creates `quantity` new in-stock copies — adding inventory,
+        so gated the same as creating any other new record."""
+        self.check_module_add()
+        book = self.get_object()
+        try:
+            quantity = int(request.data.get('quantity'))
+        except (TypeError, ValueError):
+            raise ValidationError('quantity must be an integer')
+        if quantity < 1 or quantity > 1000:
+            raise ValidationError('quantity must be between 1 and 1000')
+
+        # Tenant-wide sequential counter (not per-title), same convention as
+        # Student.student_code / Payment.invoice_number.
+        existing_count = BookCopy.objects.filter(tenant_id=book.tenant_id).count()
+        BookCopy.objects.bulk_create([
+            BookCopy(tenant_id=book.tenant_id, book=book, copy_code=f"BK-{str(existing_count + i + 1).zfill(6)}")
+            for i in range(quantity)
+        ])
+        log_activity(request, book.tenant_id, 'update', entity_type='books', entity_id=book.id,
+                     description=f'Restocked {quantity} cop{"y" if quantity == 1 else "ies"} of "{book.title}"')
+        # `book` carries a prefetched (now-stale) `copies` cache from
+        # get_object() above — re-fetch a clean instance so in_stock_count/
+        # sold_count reflect the copies just bulk-created.
+        book = Book.objects.get(pk=book.pk)
+        return Response(self.get_serializer(book).data)
+
+    @action(detail=True, methods=['get'])
+    def copies(self, request, pk=None):
+        """Per-copy lookup — who bought copy X, when, and which staff member
+        sold it. get_object() already enforces the module view-check via
+        get_queryset()."""
+        book = self.get_object()
+        queryset = book.copies.select_related('sold_by')
+        q = request.GET.get('q')
+        if q:
+            queryset = queryset.filter(copy_code__icontains=q)
+        status_val = request.GET.get('status')
+        if status_val in ('in_stock', 'sold'):
+            queryset = queryset.filter(status=status_val)
+        queryset = queryset.order_by('-created_at')[:500]
+        serializer = BookCopySerializer(queryset, many=True)
+        return Response({'items': serializer.data, 'total': len(serializer.data)})
+
+
 class ClassSessionViewSet(TenantScopedViewSet):
     queryset = ClassSession.objects.all()
     serializer_class = ClassSessionSerializer
@@ -3913,17 +3981,39 @@ class PaymentViewSet(TenantScopedViewSet):
 
         count = Payment.objects.filter(tenant_id=user.tenant_id).count()
         invoice_number = f"{tenant.invoice_prefix or 'INV-'}{str(count + 1).zfill(6)}"
-        
+
         data = request.data.copy()
         data['invoice_number'] = invoice_number
-        
+
         status_val = data.get('status', 'paid')
         if status_val == 'paid' and not data.get('paid_at'):
             data['paid_at'] = timezone.now().isoformat()
-            
+
         serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
+
+        with transaction.atomic():
+            self.perform_create(serializer)
+            payment = serializer.instance
+            # A book sale doesn't let the caller pick which physical copy
+            # goes out — lock and grab the next available one atomically so
+            # two simultaneous sales of the last copy can't both succeed.
+            if payment.book_id:
+                copy = (
+                    BookCopy.objects.select_for_update()
+                    .filter(tenant_id=user.tenant_id, book_id=payment.book_id, status='in_stock')
+                    .order_by('copy_code')
+                    .first()
+                )
+                if not copy:
+                    raise ValidationError({'book_id': 'This book is out of stock.'})
+                copy.status = 'sold'
+                copy.sold_by = user
+                copy.sold_at = timezone.now()
+                copy.save(update_fields=['status', 'sold_by', 'sold_at'])
+                payment.book_copy = copy
+                payment.save(update_fields=['book_copy'])
+
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 

@@ -7,7 +7,7 @@ from rest_framework import serializers
 # student list out into a tenant they registered themselves. Nothing
 # legitimate needs it writable: creation sets the tenant server-side via
 # perform_create()'s save(tenant_id=...) kwarg, which bypasses this field.
-from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Trip, Grade, ChargilyCheckout, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry
+from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, Trip, Book, BookCopy, Grade, ChargilyCheckout, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry
 
 class TenantSerializer(serializers.ModelSerializer):
     class Meta:
@@ -159,10 +159,17 @@ class PaymentSerializer(serializers.ModelSerializer):
     trip_id = serializers.PrimaryKeyRelatedField(
         queryset=Trip.objects.all(), source='trip', allow_null=True, required=False
     )
+    book_id = serializers.PrimaryKeyRelatedField(
+        queryset=Book.objects.all(), source='book', allow_null=True, required=False
+    )
+    # The specific copy sold is picked server-side (see PaymentViewSet.create),
+    # never chosen by the caller — read-only here, just for display.
+    book_copy_id = serializers.PrimaryKeyRelatedField(source='book_copy', read_only=True)
+    book_copy_code = serializers.CharField(source='book_copy.copy_code', read_only=True, default=None)
 
     class Meta:
         model = Payment
-        exclude = ['tenant', 'student', 'course', 'group', 'trip']
+        exclude = ['tenant', 'student', 'course', 'group', 'trip', 'book', 'book_copy']
 
 
 class TripSerializer(serializers.ModelSerializer):
@@ -177,6 +184,44 @@ class TripSerializer(serializers.ModelSerializer):
         # See GroupSerializer.get_student_ids — .all() hits the prefetch
         # cache, .values_list() would re-query per row.
         return [s.id for s in obj.students.all()]
+
+
+class BookSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)
+    in_stock_count = serializers.SerializerMethodField()
+    sold_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Book
+        exclude = ['tenant']
+
+    def get_in_stock_count(self, obj):
+        # .all() hits the prefetch cache set up by the view (prefetch_related
+        # 'copies') rather than re-querying per row.
+        return sum(1 for c in obj.copies.all() if c.status == 'in_stock')
+
+    def get_sold_count(self, obj):
+        return sum(1 for c in obj.copies.all() if c.status == 'sold')
+
+
+class BookCopySerializer(serializers.ModelSerializer):
+    tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)
+    book_id = serializers.PrimaryKeyRelatedField(source='book', read_only=True)
+    sold_by_name = serializers.CharField(source='sold_by.name', read_only=True, default=None)
+    buyer_name = serializers.SerializerMethodField()
+    payment_id = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BookCopy
+        exclude = ['tenant', 'book', 'sold_by']
+
+    def get_buyer_name(self, obj):
+        payment = obj.sale_payment.select_related('student').first()
+        return f'{payment.student.first_name} {payment.student.last_name}' if payment and payment.student else None
+
+    def get_payment_id(self, obj):
+        payment = obj.sale_payment.first()
+        return payment.id if payment else None
 
 
 class GradeSerializer(serializers.ModelSerializer):

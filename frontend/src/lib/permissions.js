@@ -5,7 +5,7 @@ export const PERMISSION_MODULES = [
   "dashboard", "students", "teachers", "parents", "courses", "groups",
   "sessions", "calendar", "timetable", "rooms", "payments", "debts", "expenses", "teacher_payments",
   "grades", "attendance", "messages", "quizzes", "website", "reports",
-  "logs", "users", "settings", "trips",
+  "logs", "users", "settings", "trips", "books",
 ];
 export const PERMISSION_FLAGS = ["view", "add", "modify", "delete"];
 

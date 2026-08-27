@@ -132,6 +132,12 @@ export function tripOptionLabel(trip) {
   return parts.length ? `${trip.title} — ${parts.join(" · ")}` : trip.title;
 }
 
+/** Books don't need level/year-style disambiguation the way courses do —
+ * the title alone is what staff recognize a title by. */
+export function bookOptionLabel(book) {
+  return book.title;
+}
+
 /** Room dropdown sourced from /rooms, used by Groups and Sessions forms
  * instead of a free-text field — lets the Rooms occupancy view actually
  * know which sessions are in which room. */

@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Field } from "./StudentsPage";
-import { StudentSearchSelect, courseOptionLabel, tripOptionLabel } from "./_shared";
+import { StudentSearchSelect, courseOptionLabel, tripOptionLabel, bookOptionLabel } from "./_shared";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -25,7 +25,7 @@ const BALANCE_CLS = {
 };
 
 const DEFAULT_FORM = {
-  student_id: "", payment_for: "course", course_id: "", trip_id: "", kind: "monthly",
+  student_id: "", payment_for: "course", course_id: "", trip_id: "", book_id: "", kind: "monthly",
   amount: 0, discount: 0, method: "cash", status: "paid", reference: "", notes: "",
 };
 
@@ -45,6 +45,10 @@ export default function PaymentsPage() {
     queryKey: ["trips-list"],
     queryFn: async () => (await api.get("/trips")).data,
   });
+  const { data: books } = useQuery({
+    queryKey: ["books-list"],
+    queryFn: async () => (await api.get("/books")).data,
+  });
   const { data: overdue } = useQuery({
     queryKey: ["payments-overdue"],
     queryFn: async () => (await api.get("/payments/overdue")).data,
@@ -57,6 +61,7 @@ export default function PaymentsPage() {
   const stuMap = Object.fromEntries((students?.items || []).map((s) => [s.id, s]));
   const courseMap = Object.fromEntries((courses?.items || []).map((c) => [c.id, c]));
   const tripMap = Object.fromEntries((trips?.items || []).map((tr) => [tr.id, tr]));
+  const bookMap = Object.fromEntries((books?.items || []).map((b) => [b.id, b]));
   const balanceMap = Object.fromEntries((balances?.items || []).map((b) => [b.student_id, b]));
 
   return (
@@ -158,6 +163,13 @@ export default function PaymentsPage() {
               const trip = tripMap[r.trip_id];
               return trip ? tripOptionLabel(trip) : <span className="text-muted-foreground">—</span>;
             }
+            if (r.book_id) {
+              const book = bookMap[r.book_id];
+              const label = book ? bookOptionLabel(book) : <span className="text-muted-foreground">—</span>;
+              return r.book_copy_code ? (
+                <span>{label} <span className="font-mono text-[10px] text-muted-foreground">#{r.book_copy_code}</span></span>
+              ) : label;
+            }
             const c = courseMap[r.course_id];
             return c ? courseOptionLabel(c, t) : <span className="text-muted-foreground">—</span>;
           },
@@ -174,7 +186,7 @@ export default function PaymentsPage() {
         { key: "status", label: t("field.status"), render: (r) => <StatusPill status={r.status} /> },
       ]}
       renderForm={(form, setForm) => {
-        const forType = form.payment_for || (form.trip_id ? "trip" : "course");
+        const forType = form.payment_for || (form.trip_id ? "trip" : form.book_id ? "book" : "course");
         return (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label={t("field.student")} required>
@@ -185,7 +197,7 @@ export default function PaymentsPage() {
             <div className="inline-flex rounded-md border border-border overflow-hidden">
               <button
                 type="button"
-                onClick={() => setForm({ ...form, payment_for: "course", trip_id: "" })}
+                onClick={() => setForm({ ...form, payment_for: "course", trip_id: "", book_id: "" })}
                 className={`px-3 py-1.5 text-sm font-medium transition-colors ${
                   forType === "course" ? "bg-accent text-accent-foreground" : "bg-background hover:bg-muted text-muted-foreground"
                 }`}
@@ -195,13 +207,23 @@ export default function PaymentsPage() {
               </button>
               <button
                 type="button"
-                onClick={() => setForm({ ...form, payment_for: "trip", course_id: "" })}
+                onClick={() => setForm({ ...form, payment_for: "trip", course_id: "", book_id: "" })}
                 className={`px-3 py-1.5 text-sm font-medium transition-colors ${
                   forType === "trip" ? "bg-accent text-accent-foreground" : "bg-background hover:bg-muted text-muted-foreground"
                 }`}
                 data-testid="payments-for-trip"
               >
                 {t("payments.for_trip")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setForm({ ...form, payment_for: "book", course_id: "", trip_id: "" })}
+                className={`px-3 py-1.5 text-sm font-medium transition-colors ${
+                  forType === "book" ? "bg-accent text-accent-foreground" : "bg-background hover:bg-muted text-muted-foreground"
+                }`}
+                data-testid="payments-for-book"
+              >
+                {t("payments.for_book")}
               </button>
             </div>
           </div>
@@ -212,6 +234,19 @@ export default function PaymentsPage() {
                 <SelectContent className="bg-popover">
                   {(trips?.items || []).map((tr) => (
                     <SelectItem key={tr.id} value={tr.id}>{tripOptionLabel(tr)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          ) : forType === "book" ? (
+            <Field label={t("field.book")}>
+              <Select value={form.book_id || ""} onValueChange={(v) => setForm({ ...form, book_id: v })}>
+                <SelectTrigger className="bg-background"><SelectValue placeholder="—" /></SelectTrigger>
+                <SelectContent className="bg-popover">
+                  {(books?.items || []).map((b) => (
+                    <SelectItem key={b.id} value={b.id} disabled={b.in_stock_count === 0}>
+                      {bookOptionLabel(b)} {b.in_stock_count === 0 ? `(${t("books.out_of_stock")})` : `(${b.in_stock_count})`}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -237,6 +272,7 @@ export default function PaymentsPage() {
                 <SelectItem value="course">{t("kind.course")}</SelectItem>
                 <SelectItem value="per_session">{t("kind.per_session")}</SelectItem>
                 <SelectItem value="trip">{t("kind.trip")}</SelectItem>
+                <SelectItem value="book">{t("kind.book")}</SelectItem>
                 <SelectItem value="other">{t("kind.other")}</SelectItem>
               </SelectContent>
             </Select>

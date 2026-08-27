@@ -19,7 +19,7 @@ PERMISSION_MODULES = [
     'dashboard', 'students', 'teachers', 'parents', 'courses', 'groups',
     'sessions', 'calendar', 'timetable', 'rooms', 'payments', 'debts', 'expenses', 'teacher_payments',
     'grades', 'attendance', 'messages', 'quizzes', 'website', 'reports',
-    'logs', 'users', 'settings', 'trips',
+    'logs', 'users', 'settings', 'trips', 'books',
 ]
 # Each module's stored permission is now a flag object rather than a single
 # level string, so "can edit" can be granted as any independent combination
@@ -536,15 +536,23 @@ class Payment(models.Model):
     student = models.ForeignKey(Student, on_delete=models.CASCADE, db_column='student_id', related_name='payments')
     course = models.ForeignKey(Course, on_delete=models.SET_NULL, null=True, blank=True, db_column='course_id', related_name='payments')
     group = models.ForeignKey(Group, on_delete=models.SET_NULL, null=True, blank=True, db_column='group_id', related_name='payments')
-    # A payment is for either a course or a trip, never both — the frontend
-    # form only shows one selector at a time based on which the user picked.
+    # A payment is for a course, a trip, or a book, never more than one — the
+    # frontend form only shows one selector at a time based on which the
+    # user picked.
     trip = models.ForeignKey('Trip', on_delete=models.SET_NULL, null=True, blank=True, db_column='trip_id', related_name='payments')
+    book = models.ForeignKey('Book', on_delete=models.SET_NULL, null=True, blank=True, db_column='book_id', related_name='payments')
+    # The exact physical copy sold — assigned atomically at payment-creation
+    # time from the book's in-stock copies (see PaymentViewSet.create), not
+    # chosen by the caller. Lets a specific copy_code be traced back to
+    # which student bought it, when, and which staff member sold it.
+    book_copy = models.ForeignKey('BookCopy', on_delete=models.SET_NULL, null=True, blank=True, db_column='book_copy_id', related_name='sale_payment')
     KIND_CHOICES = [
         ('registration', 'registration'),
         ('monthly', 'monthly'),
         ('course', 'course'),
         ('per_session', 'per_session'),
         ('trip', 'trip'),
+        ('book', 'book'),
         ('other', 'other'),
     ]
     kind = models.CharField(max_length=50, choices=KIND_CHOICES, default='monthly')
@@ -596,6 +604,50 @@ class Trip(models.Model):
     class Meta:
         db_table = 'trips'
         ordering = ['-trip_date', '-created_at']
+
+
+class Book(models.Model):
+    """A book/material catalog entry a school prints or buys and resells to
+    students — a revenue stream (sale) and an expense (printing/purchase)
+    separate from course enrollment. Each physical unit is its own BookCopy
+    row, not a bare count, so a specific copy can be traced back to who
+    bought it, when, and which staff member sold it."""
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='books')
+    title = models.CharField(max_length=255)
+    description = models.TextField(null=True, blank=True)
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'books'
+        ordering = ['title']
+
+
+class BookCopy(models.Model):
+    """One physical unit of a Book. `copy_code` is the tenant-scoped,
+    human-readable label (mirrors Student.student_code/Payment.invoice_number)
+    staff use to look a specific copy up; `id` remains the real PK. Restocking
+    a book bulk-creates new rows here with status='in_stock'; selling one
+    (via PaymentViewSet.create) flips a single row to 'sold' and stamps who
+    sold it and when."""
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='book_copies')
+    book = models.ForeignKey(Book, on_delete=models.CASCADE, db_column='book_id', related_name='copies')
+    copy_code = models.CharField(max_length=32)
+    STATUS_CHOICES = [
+        ('in_stock', 'in_stock'),
+        ('sold', 'sold'),
+    ]
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='in_stock')
+    sold_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    sold_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'book_copies'
+        ordering = ['copy_code']
 
 
 class Grade(models.Model):
@@ -824,7 +876,7 @@ class SchoolGalleryPhoto(models.Model):
 # translate them; tenant-added categories carry a free-text `name` instead.
 DEFAULT_EXPENSE_CATEGORIES = [
     'rent', 'salaries', 'utilities', 'supplies', 'maintenance',
-    'marketing', 'transport', 'taxes', 'equipment', 'trip', 'other',
+    'marketing', 'transport', 'taxes', 'equipment', 'trip', 'books', 'other',
 ]
 
 

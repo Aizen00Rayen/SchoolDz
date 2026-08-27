@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Award, BarChart3, BookOpen, Building2, CalendarClock, CalendarDays, ChevronDown, ChevronsUpDown, ChevronRight, CircleDollarSign, ClipboardCheck,
-  DoorOpen, FileBarChart2, FileQuestion, GraduationCap, Globe, HandCoins, Languages, LogOut, Menu, MessageSquare, Moon,
+  DoorOpen, FileBarChart2, FileQuestion, GraduationCap, Globe, HandCoins, Languages, Library, LogOut, Menu, MessageSquare, Moon,
   PanelLeft, PanelLeftClose, Plane, Receipt, ScrollText, Search, Settings, Sun, Users, UserRound, Wallet, Layers, Table2, X,
 } from "lucide-react";
 
@@ -61,6 +61,7 @@ const NAV_GROUPS = [
     key: "activities",
     items: [
       { key: "trips", to: "/app/trips", icon: Plane, module: "trips" },
+      { key: "books", to: "/app/books", icon: Library, module: "books" },
     ],
   },
   {
