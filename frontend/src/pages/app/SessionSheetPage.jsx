@@ -4,9 +4,22 @@ import { toast } from "sonner";
 import { LayoutGrid, Printer, Loader2 } from "lucide-react";
 import { PageHeader, EmptyState, LoadingRows, groupOptionLabel } from "./_shared";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
 import { api, extractError, openSessionSheetPdf } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
+
+function InfoField({ label, value }) {
+  if (!value) return null;
+  return (
+    <div>
+      <div className="text-[11px] uppercase tracking-wide text-muted-foreground mb-0.5">{label}</div>
+      <div className="text-sm font-medium">{value}</div>
+    </div>
+  );
+}
 
 function currentMonthValue() {
   const d = new Date();
@@ -30,6 +43,7 @@ export default function SessionSheetPage() {
   const [selectedGroupIds, setSelectedGroupIds] = useState([]);
   const [month, setMonth] = useState(currentMonthValue());
   const [printing, setPrinting] = useState(false);
+  const [detailStudentId, setDetailStudentId] = useState(null);
 
   const { data: groups } = useQuery({
     queryKey: ["groups-list"],
@@ -69,10 +83,21 @@ export default function SessionSheetPage() {
   // Binary tick/blank, matching the paper — late/excused stay editable only
   // from the full Attendance page, which already handles that nuance.
   const toggleBox = (sessionId, studentId, currentStatus) => {
-    if (!canModify || markMut.isPending) return;
+    if (!sessionId || !canModify || markMut.isPending) return;
     const ticked = currentStatus === "present" || currentStatus === "late";
     markMut.mutate({ sessionId, studentId, nextStatus: ticked ? "absent" : "present" });
   };
+
+  const { data: detailStudent, isLoading: detailLoading, isError: detailError } = useQuery({
+    queryKey: ["student-detail", detailStudentId],
+    queryFn: async () => (await api.get(`/students/${detailStudentId}`)).data,
+    enabled: Boolean(detailStudentId),
+  });
+  const { data: detailParent } = useQuery({
+    queryKey: ["parent-detail", detailStudent?.parent_id],
+    queryFn: async () => (await api.get(`/parents/${detailStudent.parent_id}`)).data,
+    enabled: Boolean(detailStudent?.parent_id),
+  });
 
   const printSheet = async () => {
     setPrinting(true);
@@ -85,7 +110,15 @@ export default function SessionSheetPage() {
     }
   };
 
-  const sheets = data?.sheets || [];
+  const sheets = useMemo(() => data?.sheets || [], [data]);
+
+  const detailPaid = useMemo(() => {
+    for (const sheet of sheets) {
+      const s = sheet.students.find((x) => x.id === detailStudentId);
+      if (s) return s.paid;
+    }
+    return null;
+  }, [sheets, detailStudentId]);
 
   return (
     <div>
@@ -185,27 +218,41 @@ export default function SessionSheetPage() {
                   <table className="w-full text-sm">
                     <thead className="bg-muted/40 border-b border-border">
                       <tr>
+                        <th className="w-10 px-2 py-2.5 text-xs text-muted-foreground font-medium text-center">#</th>
                         <th className="text-start px-4 py-2.5 text-xs uppercase tracking-widest text-muted-foreground font-medium whitespace-nowrap">
                           {t("field.student")}
                         </th>
-                        {sheet.sessions.map((s) => (
+                        {sheet.sessions.map((s, idx) => (
                           <th
-                            key={s.id}
+                            key={s.id || `slot-${idx}`}
                             className="px-2 py-2.5 text-[10px] font-mono text-muted-foreground text-center whitespace-nowrap"
                           >
-                            {s.date}
+                            {s.date || "—"}
                           </th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {sheet.students.map((student) => (
-                        <tr key={student.id} className="border-b border-border last:border-0 hover:bg-muted/40">
+                      {sheet.students.map((student, rowIdx) => (
+                        <tr
+                          key={student.id}
+                          className={`border-b last:border-0 hover:bg-muted/40 ${
+                            (rowIdx + 1) % 5 === 0 ? "border-muted-foreground/30" : "border-border"
+                          }`}
+                        >
+                          <td className="px-2 py-2.5 text-center text-xs font-mono text-muted-foreground">
+                            {rowIdx + 1}
+                          </td>
                           <td className="px-4 py-2.5 font-medium whitespace-nowrap">
-                            <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setDetailStudentId(student.id)}
+                              data-testid={`session-sheet-student-${student.id}`}
+                              className="flex items-center gap-2 text-start hover:underline decoration-dotted underline-offset-2"
+                            >
                               {student.paid && (
                                 <span
-                                  className="w-1.5 h-4 rounded-full bg-success flex-shrink-0"
+                                  className="w-1.5 h-4 rounded-full bg-[#b9c23e] flex-shrink-0"
                                   title={t("session_sheet.paid")}
                                 />
                               )}
@@ -217,23 +264,26 @@ export default function SessionSheetPage() {
                                   </div>
                                 )}
                               </div>
-                            </div>
+                            </button>
                           </td>
                           {sheet.sessions.map((s, idx) => {
                             const boxStatus = student.boxes[idx];
                             const ticked = boxStatus === "present" || boxStatus === "late";
+                            const hasSession = Boolean(s.id);
                             return (
-                              <td key={s.id} className="px-2 py-2.5 text-center">
+                              <td key={s.id || `slot-${idx}`} className="px-2 py-2.5 text-center">
                                 <button
                                   type="button"
                                   onClick={() => toggleBox(s.id, student.id, boxStatus)}
-                                  disabled={!canModify}
-                                  data-testid={`session-sheet-box-${student.id}-${s.id}`}
+                                  disabled={!canModify || !hasSession}
+                                  data-testid={`session-sheet-box-${student.id}-${s.id || idx}`}
                                   className={`w-6 h-6 rounded border inline-flex items-center justify-center transition-colors ${
-                                    student.paid ? "bg-success/10 border-success/40" : "bg-background border-border"
-                                  } ${canModify ? "cursor-pointer hover:border-accent" : "cursor-default"}`}
+                                    student.paid ? "bg-[#d7e05a]/70 border-[#b9c23e]" : "bg-background border-border"
+                                  } ${
+                                    canModify && hasSession ? "cursor-pointer hover:border-accent" : "cursor-default"
+                                  } ${!hasSession ? "opacity-60" : ""}`}
                                 >
-                                  {ticked && <span className="text-success text-xs font-bold">✓</span>}
+                                  {ticked && <span className="text-[#5c6b00] text-xs font-bold">✓</span>}
                                 </button>
                               </td>
                             );
@@ -248,6 +298,81 @@ export default function SessionSheetPage() {
           ))}
         </div>
       )}
+
+      <Dialog open={Boolean(detailStudentId)} onOpenChange={(o) => !o && setDetailStudentId(null)}>
+        <DialogContent className="bg-card max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl">
+              {detailStudent ? `${detailStudent.first_name} ${detailStudent.last_name}` : t("session_sheet.student_info")}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {t("session_sheet.student_info")}
+            </DialogDescription>
+          </DialogHeader>
+
+          {detailLoading ? (
+            <LoadingRows rows={3} cols={2} />
+          ) : detailError ? (
+            <p className="text-sm text-muted-foreground">{t("crud.load_failed")}</p>
+          ) : detailStudent ? (
+            <div className="space-y-4">
+              {detailPaid !== null && (
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+                    detailPaid ? "bg-[#d7e05a]/40 text-[#5c6b00]" : "bg-destructive/10 text-destructive"
+                  }`}
+                >
+                  {detailPaid ? t("session_sheet.paid") : t("attendance.unpaid")}
+                </span>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <InfoField label={t("field.phone")} value={detailStudent.phone} />
+                <InfoField label={t("field.email")} value={detailStudent.email} />
+                <InfoField label={t("field.status")} value={t(`status.${detailStudent.status}`)} />
+                <InfoField label={t("field.student_code")} value={detailStudent.student_code} />
+                <InfoField
+                  label={t("field.school_level")}
+                  value={detailStudent.school_level ? t(`school_level.${detailStudent.school_level}`) : null}
+                />
+                <InfoField label={t("field.school_year")} value={detailStudent.school_year} />
+                <InfoField label={t("field.specialty")} value={detailStudent.specialty} />
+                <InfoField label={t("field.gender")} value={detailStudent.gender ? t(`gender.${detailStudent.gender}`) : null} />
+                <InfoField label={t("field.blood_type")} value={detailStudent.blood_type} />
+                <InfoField
+                  label={t("field.insurance_status")}
+                  value={detailStudent.insurance_status ? t(`insurance.${detailStudent.insurance_status}`) : null}
+                />
+                <InfoField label={t("field.address")} value={detailStudent.address} />
+                <InfoField label={t("field.emergency_contact")} value={detailStudent.emergency_contact} />
+              </div>
+
+              {(detailStudent.health_condition || detailStudent.medical_notes) && (
+                <div className="space-y-2 border-t border-border pt-3">
+                  <InfoField label={t("field.health_condition")} value={detailStudent.health_condition} />
+                  <InfoField label={t("field.medical_notes")} value={detailStudent.medical_notes} />
+                </div>
+              )}
+
+              {detailParent && (
+                <div className="space-y-2 border-t border-border pt-3">
+                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{t("field.parent")}</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <InfoField label={t("field.name")} value={detailParent.name} />
+                    <InfoField label={t("field.phone")} value={detailParent.phone} />
+                  </div>
+                </div>
+              )}
+
+              {detailStudent.notes && (
+                <div className="space-y-1 border-t border-border pt-3">
+                  <InfoField label={t("field.notes")} value={detailStudent.notes} />
+                </div>
+              )}
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

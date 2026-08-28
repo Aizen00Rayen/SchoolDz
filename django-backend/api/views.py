@@ -2585,12 +2585,19 @@ def _parse_sheet_month(request):
 
 def _build_session_sheet(tid, group, year, month):
     """One group's Session Sheet data for one month: the paper ledger the
-    client sent — a row per enrolled student, one box per session actually
-    scheduled that month (not Course.sessions_count, which is only a
-    nominal per-month rate for pricing — real scheduling drifts from it
-    with holidays/makeups, and this way the sheet works for any
-    pricing_type), colored per compute_course_payment_status's running
-    balance, checked per box from that session's Attendance record."""
+    client sent — a row per enrolled student, a FIXED number of boxes per
+    row (4 or 8, matching the paper) rather than however many sessions
+    happen to already be scheduled — the paper is filled in as the month
+    goes, not printed after the fact. The fixed count comes from
+    Course.sessions_count when pricing_type is 'per_month' (that field is
+    literally "how many sessions per month" for that pricing model). For
+    any other pricing_type (no reliable nominal monthly count), or if more
+    sessions were actually scheduled than the nominal count (extra
+    makeups), we extend rather than hide real data. Boxes past however many
+    sessions actually exist yet are blank placeholders — no id, not
+    markable — same as an untouched box on the physical paper. Colored per
+    compute_course_payment_status's running balance, checked per box from
+    that session's Attendance record."""
     course = group.course
     teacher = group.teacher
 
@@ -2598,7 +2605,15 @@ def _build_session_sheet(tid, group, year, month):
         ClassSession.objects.filter(tenant_id=tid, group_id=group.id, start_at__year=year, start_at__month=month)
         .order_by('start_at')
     )
+
+    nominal_count = None
+    if course and course.pricing_type == 'per_month' and course.sessions_count:
+        nominal_count = course.sessions_count
+    box_count = max(nominal_count or 0, len(sessions))
+
     session_ids = [s.id for s in sessions]
+    session_slots = [{'id': s.id, 'date': timezone.localtime(s.start_at).strftime('%d/%m')} for s in sessions]
+    session_slots += [{'id': None, 'date': None}] * (box_count - len(session_slots))
 
     paid_status = compute_course_payment_status(tid, course.id) if course else {}
 
@@ -2610,11 +2625,12 @@ def _build_session_sheet(tid, group, year, month):
     students = []
     for s in group.students.all().order_by('first_name', 'last_name'):
         student_marks = marks_by_student.get(s.id, {})
-        # One entry per session, in the same order as `sessions` below —
+        # One entry per slot, in the same order as `session_slots` below —
         # keeps both the print template and the frontend from needing a
         # dynamic dict-key lookup (Django templates can't do `dict[var]`
-        # without a custom filter); box i always corresponds to session i.
-        boxes = [student_marks.get(sess.id) for sess in sessions]
+        # without a custom filter); box i always corresponds to slot i.
+        # A blank slot (id None) has no attendance record to look up.
+        boxes = [student_marks.get(slot['id']) if slot['id'] else None for slot in session_slots]
         students.append({
             'id': s.id,
             'first_name': s.first_name,
@@ -2633,10 +2649,7 @@ def _build_session_sheet(tid, group, year, month):
         'course_title': course.title if course else None,
         'year': year,
         'month': month,
-        'sessions': [
-            {'id': s.id, 'date': timezone.localtime(s.start_at).strftime('%d/%m')}
-            for s in sessions
-        ],
+        'sessions': session_slots,
         'students': students,
     }
 

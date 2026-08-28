@@ -39,8 +39,10 @@
   }
   .doc-title { font-family: "DejaVu Sans Mono", monospace; font-size: 9pt; font-weight: bold; }
 
+  /* Header info strip — الأستاذ / المادة / الفوج / الشهر, exactly as the
+     paper's label-over-value fields across the top. */
   .sheet-meta {
-    display: flex; flex-direction: row-reverse; flex-wrap: wrap; gap: 18pt; margin-bottom: 14pt;
+    display: flex; flex-direction: row-reverse; flex-wrap: wrap; gap: 18pt; margin-bottom: 10pt;
   }
   .sheet-meta .item { min-width: 90pt; }
   .meta-label {
@@ -53,19 +55,23 @@
     text-align: center; font-size: 7pt; font-weight: bold; color: #8a8478;
     padding: 0 2pt 6pt; border-bottom: 1pt solid #c7c1b6; font-family: "DejaVu Sans Mono", monospace;
   }
+  table.grid thead th.num-col { width: 16pt; }
   table.grid thead th.name-col { text-align: right; text-transform: uppercase; letter-spacing: 0.8pt; }
   table.grid tbody td {
-    padding: 5pt 3pt; border-bottom: 0.75pt solid #dedad2; font-size: 8.8pt; vertical-align: middle;
+    padding: 4pt 3pt; border-bottom: 0.75pt solid #dedad2; font-size: 8.8pt; vertical-align: middle;
   }
+  table.grid tbody tr:nth-child(5n) td { border-bottom: 1pt solid #c7c1b6; }
+  table.grid tbody td.num-cell { text-align: center; color: #8a8478; font-family: "DejaVu Sans Mono", monospace; font-size: 8pt; }
   table.grid tbody td.name-cell { text-align: right; }
   .student-phone { font-size: 7.2pt; color: #8a8478; font-family: "DejaVu Sans Mono", monospace; direction: ltr; text-align: right; }
 
   .box-cell { text-align: center; }
   .box {
     display: inline-block; width: 13pt; height: 13pt; border: 1pt solid #c7c1b6; border-radius: 2pt;
-    text-align: center; line-height: 13pt; font-size: 8pt; font-weight: bold; color: #1f7a4d;
+    text-align: center; line-height: 13pt; font-size: 8pt; font-weight: bold; color: #5c6b00;
   }
-  .box.paid { background: {{ accent_color }}22; border-color: {{ accent_color }}; }
+  /* Paid rows get the same yellow-green fill the client's paper uses. */
+  .box.paid { background: #d7e05a; border-color: #b9c23e; }
 
   .foot { margin-top: 16pt; font-size: 6.8pt; color: #8a8478; text-align: center; }
 </style>
@@ -115,15 +121,17 @@
     <table class="grid">
       <thead>
         <tr>
+          <th class="num-col">#</th>
           <th class="name-col">التلميذ</th>
           {% for session in sheet.sessions %}
-          <th dir="ltr">{{ session.date }}</th>
+          <th dir="ltr">{% if session.date %}{{ session.date }}{% else %}—{% endif %}</th>
           {% endfor %}
         </tr>
       </thead>
       <tbody>
         {% for student in sheet.students %}
         <tr>
+          <td class="num-cell">{{ forloop.counter }}</td>
           <td class="name-cell">
             {{ student.first_name }} {{ student.last_name }}
             {% if student.phone %}<div class="student-phone">{{ student.phone }}</div>{% endif %}
