@@ -108,6 +108,10 @@ urlpatterns = [
     *_both('attendance/<str:attendance_id>/excuse-document', views.attendance_upload_excuse, 'attendance_upload_excuse'),
     *_both('attendance/<str:attendance_id>/recovery', views.attendance_set_recovery, 'attendance_set_recovery'),
 
+    # Session Sheet — printable per-group monthly attendance + payment grid
+    *_both('groups/session-sheet', views.group_session_sheet, 'group_session_sheet'),
+    *_both('groups/session-sheet/print', views.group_session_sheet_print, 'group_session_sheet_print'),
+
     # Payments
     *_both('payments/overdue', views.payments_overdue, 'payments_overdue'),
     *_both('payments/balances', views.payments_balances, 'payments_balances'),

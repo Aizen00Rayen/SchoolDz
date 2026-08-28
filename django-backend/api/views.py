@@ -2566,6 +2566,157 @@ def attendance_session_print(request, session_id):
     return response
 
 
+def _parse_sheet_month(request):
+    """?month=YYYY-MM, defaulting to the current month — shared by
+    group_session_sheet and its print counterpart."""
+    month_str = request.GET.get('month')
+    try:
+        if month_str:
+            year, month = (int(p) for p in month_str.split('-'))
+        else:
+            today = timezone.now()
+            year, month = today.year, today.month
+        if not (1 <= month <= 12):
+            raise ValueError
+    except (TypeError, ValueError):
+        raise ValidationError({'month': 'month must be YYYY-MM'})
+    return year, month
+
+
+def _build_session_sheet(tid, group, year, month):
+    """One group's Session Sheet data for one month: the paper ledger the
+    client sent — a row per enrolled student, one box per session actually
+    scheduled that month (not Course.sessions_count, which is only a
+    nominal per-month rate for pricing — real scheduling drifts from it
+    with holidays/makeups, and this way the sheet works for any
+    pricing_type), colored per compute_course_payment_status's running
+    balance, checked per box from that session's Attendance record."""
+    course = group.course
+    teacher = group.teacher
+
+    sessions = list(
+        ClassSession.objects.filter(tenant_id=tid, group_id=group.id, start_at__year=year, start_at__month=month)
+        .order_by('start_at')
+    )
+    session_ids = [s.id for s in sessions]
+
+    paid_status = compute_course_payment_status(tid, course.id) if course else {}
+
+    marks_by_student = {}
+    if session_ids:
+        for a in Attendance.objects.filter(tenant_id=tid, session_id__in=session_ids):
+            marks_by_student.setdefault(a.student_id, {})[a.session_id] = a.status
+
+    students = []
+    for s in group.students.all().order_by('first_name', 'last_name'):
+        student_marks = marks_by_student.get(s.id, {})
+        # One entry per session, in the same order as `sessions` below —
+        # keeps both the print template and the frontend from needing a
+        # dynamic dict-key lookup (Django templates can't do `dict[var]`
+        # without a custom filter); box i always corresponds to session i.
+        boxes = [student_marks.get(sess.id) for sess in sessions]
+        students.append({
+            'id': s.id,
+            'first_name': s.first_name,
+            'last_name': s.last_name,
+            'phone': s.phone,
+            # None when the student has no present/excused attendance in
+            # this course yet — see compute_course_payment_status.
+            'paid': paid_status.get(s.id),
+            'boxes': boxes,
+        })
+
+    return {
+        'group_id': group.id,
+        'group_name': group.name,
+        'teacher_name': f'{teacher.first_name} {teacher.last_name}' if teacher else None,
+        'course_title': course.title if course else None,
+        'year': year,
+        'month': month,
+        'sessions': [
+            {'id': s.id, 'date': timezone.localtime(s.start_at).strftime('%d/%m')}
+            for s in sessions
+        ],
+        'students': students,
+    }
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def group_session_sheet(request):
+    """Data for the Session Sheet page (see _build_session_sheet's
+    docstring). Accepts repeated ?group_id=&month=YYYY-MM."""
+    user = request.user
+    tid = user.tenant_id
+    if not tid:
+        raise PermissionDenied('User has no tenant')
+    if user.role == 'parent':
+        raise PermissionDenied('Forbidden')
+    if not user.is_super_admin() and not user.can_view('attendance'):
+        raise PermissionDenied('Forbidden')
+
+    group_ids = request.GET.getlist('group_id')
+    if not group_ids:
+        return Response({'sheets': []})
+
+    year, month = _parse_sheet_month(request)
+
+    groups = Group.objects.filter(tenant_id=tid, id__in=group_ids).select_related('course', 'teacher')
+    sheets = [_build_session_sheet(tid, group, year, month) for group in groups]
+    return Response({'sheets': sheets})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def group_session_sheet_print(request):
+    """PDF version of group_session_sheet — one section per group, each
+    starting on its own page (see session_sheet.html), so requesting
+    several groups in one call prints them as separate sheets in a single
+    document ("each group has that paper, or we can combine multiple
+    groups" per the client's own framing)."""
+    user = request.user
+    tid = user.tenant_id
+    if not tid:
+        raise PermissionDenied('User has no tenant')
+    if user.role == 'parent':
+        raise PermissionDenied('Forbidden')
+    if not user.is_super_admin() and not user.can_view('attendance'):
+        raise PermissionDenied('Forbidden')
+
+    group_ids = request.GET.getlist('group_id')
+    if not group_ids:
+        return Response({'error': 'group_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    year, month = _parse_sheet_month(request)
+
+    tenant = Tenant.objects.filter(id=tid).first()
+    logo_data_uri = None
+    if tenant and tenant.logo_url:
+        filename = tenant.logo_url.rsplit('/', 1)[-1]
+        logo_data_uri = _file_data_uri(os.path.join(settings.MEDIA_ROOT, 'logos', filename))
+
+    groups = Group.objects.filter(tenant_id=tid, id__in=group_ids).select_related('course', 'teacher')
+    sheets = [_build_session_sheet(tid, group, year, month) for group in groups]
+
+    context = {
+        'primary_color': (tenant.primary_color if tenant else None) or '#0A0A0B',
+        'accent_color': (tenant.accent_color if tenant else None) or '#E53935',
+        'tenant_name': tenant.name if tenant else '',
+        'tenant_initial': ((tenant.name if tenant else None) or 'S')[0].upper(),
+        'logo_data_uri': logo_data_uri,
+        'printed_at': timezone.localtime(timezone.now()).strftime('%d/%m/%Y %H:%M'),
+        'month_label': f'{month:02d}/{year}',
+        'sheets': sheets,
+    }
+
+    html_string = render_to_string('session_sheet.html', context)
+    pdf_bytes = HTML(string=html_string).write_pdf()
+
+    response = HttpResponse(pdf_bytes, content_type='application/pdf')
+    response['Content-Disposition'] = 'inline; filename="session-sheet.pdf"'
+    return response
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def attendance_set_recovery(request, attendance_id):

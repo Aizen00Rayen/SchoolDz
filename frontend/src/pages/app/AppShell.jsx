@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import { toast } from "sonner";
 import {
   Award, BarChart3, BookOpen, Building2, CalendarClock, CalendarDays, Check, ChevronDown, ChevronsUpDown, ChevronRight, CircleDollarSign, ClipboardCheck,
-  DoorOpen, FileBarChart2, FileQuestion, GaugeCircle, GraduationCap, Globe, HandCoins, Languages, Library, LogOut, Menu, MessageSquare, Moon,
+  DoorOpen, FileBarChart2, FileQuestion, GaugeCircle, GraduationCap, Globe, HandCoins, Languages, LayoutGrid, Library, LogOut, Menu, MessageSquare, Moon,
   PanelLeft, PanelLeftClose, Plane, Plus, Receipt, ScrollText, Search, Settings, Sun, Users, UserRound, Wallet, Layers, Table2, X,
 } from "lucide-react";
 
@@ -59,6 +59,7 @@ const NAV_GROUPS = [
       { key: "timetable", to: "/app/timetable", icon: Table2, module: "timetable" },
       { key: "rooms", to: "/app/rooms", icon: DoorOpen, module: "rooms" },
       { key: "attendance", to: "/app/attendance", icon: ClipboardCheck, module: "attendance" },
+      { key: "session_sheet", to: "/app/session-sheet", icon: LayoutGrid, module: "attendance" },
       { key: "grades", to: "/app/grades", icon: Award, module: "grades" },
       { key: "quizzes", to: "/app/quizzes", icon: FileQuestion, premiumOnly: true, module: "quizzes" },
     ],
