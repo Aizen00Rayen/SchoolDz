@@ -21,27 +21,22 @@ function InfoField({ label, value }) {
   );
 }
 
-function currentMonthValue() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
-/** "Session Sheet" — a printable, interactive per-group monthly grid: one
- * row per enrolled student, one box per session actually scheduled that
- * month, colored if the student is currently paid-up for the course
- * (compute_course_payment_status on the backend), ticked once that
- * session's attendance is marked present/late. This mirrors a paper ledger
- * format some schools already use by hand — see group_session_sheet /
- * _build_session_sheet in the backend for the data shape. Clicking a box
- * marks attendance immediately via the same endpoint the full Attendance
- * page uses (POST /attendance/session/<id>), so this is a second way to
- * take attendance, not just a read-only report. */
+/** "Session Sheet" — a printable, interactive grid covering a group's WHOLE
+ * course planning (every scheduled session, not one month at a time): one
+ * row per enrolled student, one box per session, colored if the student is
+ * currently paid-up for the course (compute_course_payment_status on the
+ * backend), ticked once that session's attendance is marked present/late.
+ * This mirrors a paper ledger format some schools already use by hand —
+ * see group_session_sheet / _build_session_sheet in the backend for the
+ * data shape. Clicking a box marks attendance immediately via the same
+ * endpoint the full Attendance page uses (POST /attendance/session/<id>),
+ * so this is a second way to take attendance, not just a read-only
+ * report. */
 export default function SessionSheetPage() {
   const { t } = useI18n();
   const { canModify } = usePermission("attendance");
   const qc = useQueryClient();
   const [selectedGroupIds, setSelectedGroupIds] = useState([]);
-  const [month, setMonth] = useState(currentMonthValue());
   const [printing, setPrinting] = useState(false);
   const [detailStudentId, setDetailStudentId] = useState(null);
 
@@ -63,11 +58,10 @@ export default function SessionSheetPage() {
   };
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["session-sheet", selectedGroupIds, month],
+    queryKey: ["session-sheet", selectedGroupIds],
     queryFn: async () => {
       const params = new URLSearchParams();
       selectedGroupIds.forEach((id) => params.append("group_id", id));
-      params.set("month", month);
       return (await api.get(`/groups/session-sheet?${params.toString()}`)).data;
     },
     enabled: selectedGroupIds.length > 0,
@@ -102,7 +96,7 @@ export default function SessionSheetPage() {
   const printSheet = async () => {
     setPrinting(true);
     try {
-      await openSessionSheetPdf(selectedGroupIds, month);
+      await openSessionSheetPdf(selectedGroupIds);
     } catch (e) {
       toast.error(extractError(e));
     } finally {
@@ -157,19 +151,6 @@ export default function SessionSheetPage() {
               </button>
             ))}
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="text-xs font-medium text-muted-foreground" htmlFor="session-sheet-month">
-            {t("session_sheet.select_month")}
-          </label>
-          <input
-            id="session-sheet-month"
-            type="month"
-            value={month}
-            onChange={(e) => setMonth(e.target.value)}
-            className="h-9 rounded-lg border border-border bg-background px-3 text-sm"
-            data-testid="session-sheet-month"
-          />
         </div>
       </div>
 

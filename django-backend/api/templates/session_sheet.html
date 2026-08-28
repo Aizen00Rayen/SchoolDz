@@ -4,8 +4,10 @@
 <meta charset="utf-8">
 <style>
   @page {
-    size: A4;
-    margin: 16mm 14mm;
+    /* Landscape — the whole course's session columns need the extra width,
+       and it matches the orientation of the client's original paper. */
+    size: A4 landscape;
+    margin: 14mm 16mm;
   }
   * { box-sizing: border-box; }
   body {
@@ -19,7 +21,7 @@
   .sheet { }
   .sheet.not-first { page-break-before: always; }
 
-  .band { height: 6mm; background: {{ primary_color }}; margin: -16mm -14mm 8mm; }
+  .band { height: 6mm; background: {{ primary_color }}; margin: -14mm -16mm 8mm; }
 
   .head {
     display: flex; flex-direction: row-reverse; justify-content: space-between; align-items: flex-start;
@@ -39,8 +41,8 @@
   }
   .doc-title { font-family: "DejaVu Sans Mono", monospace; font-size: 9pt; font-weight: bold; }
 
-  /* Header info strip — الأستاذ / المادة / الفوج / الشهر, exactly as the
-     paper's label-over-value fields across the top. */
+  /* Header info strip — الأستاذ / المادة / الفوج, exactly as the paper's
+     label-over-value fields across the top. */
   .sheet-meta {
     display: flex; flex-direction: row-reverse; flex-wrap: wrap; gap: 18pt; margin-bottom: 10pt;
   }
@@ -89,7 +91,7 @@
         <div class="brand-name">{{ tenant_name }}</div>
       </div>
       <div class="doc-meta">
-        <div class="doc-eyebrow">كشف الحصص الشهري</div>
+        <div class="doc-eyebrow">كشف الحصص</div>
         <div class="doc-title" dir="ltr">{{ printed_at }}</div>
       </div>
     </div>
@@ -110,10 +112,6 @@
       <div class="item">
         <div class="meta-label">المجموعة</div>
         <div class="meta-value">{{ sheet.group_name }}</div>
-      </div>
-      <div class="item">
-        <div class="meta-label">الشهر</div>
-        <div class="meta-value" dir="ltr">{{ month_label }}</div>
       </div>
     </div>
 
@@ -146,7 +144,7 @@
       </tbody>
     </table>
     {% else %}
-    <p style="color: #8a8478; font-size: 9pt;">لا توجد حصص مبرمجة لهذا الشهر.</p>
+    <p style="color: #8a8478; font-size: 9pt;">لا توجد حصص مبرمجة.</p>
     {% endif %}
 
     <div class="foot">تم إنشاء هذا الكشف آليًا من منصة {{ tenant_name }}</div>

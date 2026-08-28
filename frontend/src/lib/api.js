@@ -47,13 +47,13 @@ export async function openInvoicePdf(paymentId) {
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
-/** Opens the printable Session Sheet PDF for one or more groups/month —
- * same auth'd-blob approach as openInvoicePdf. `groupIds` may be one id or
- * an array (multiple groups print as separate pages in one document). */
-export async function openSessionSheetPdf(groupIds, month) {
+/** Opens the printable Session Sheet PDF (the group's whole course
+ * planning, every session at once) for one or more groups — same auth'd-
+ * blob approach as openInvoicePdf. `groupIds` may be one id or an array
+ * (multiple groups print as separate pages in one document). */
+export async function openSessionSheetPdf(groupIds) {
   const params = new URLSearchParams();
   (Array.isArray(groupIds) ? groupIds : [groupIds]).forEach((id) => params.append("group_id", id));
-  if (month) params.set("month", month);
   const res = await api.get(`/groups/session-sheet/print?${params.toString()}`, { responseType: "blob" });
   const url = URL.createObjectURL(res.data);
   window.open(url, "_blank");

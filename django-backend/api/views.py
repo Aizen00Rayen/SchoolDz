@@ -2566,48 +2566,33 @@ def attendance_session_print(request, session_id):
     return response
 
 
-def _parse_sheet_month(request):
-    """?month=YYYY-MM, defaulting to the current month — shared by
-    group_session_sheet and its print counterpart."""
-    month_str = request.GET.get('month')
-    try:
-        if month_str:
-            year, month = (int(p) for p in month_str.split('-'))
-        else:
-            today = timezone.now()
-            year, month = today.year, today.month
-        if not (1 <= month <= 12):
-            raise ValueError
-    except (TypeError, ValueError):
-        raise ValidationError({'month': 'month must be YYYY-MM'})
-    return year, month
+def _build_session_sheet(tid, group):
+    """One group's Session Sheet data — the paper ledger the client sent —
+    covering the group's WHOLE course planning rather than a single month:
+    a row per enrolled student, one column per session across the entire
+    ClassSession schedule (past and future), so printing shows every
+    session at once, matching the client's request to see the full plan
+    rather than pick a month.
 
-
-def _build_session_sheet(tid, group, year, month):
-    """One group's Session Sheet data for one month: the paper ledger the
-    client sent — a row per enrolled student, a FIXED number of boxes per
-    row (4 or 8, matching the paper) rather than however many sessions
-    happen to already be scheduled — the paper is filled in as the month
-    goes, not printed after the fact. The fixed count comes from
-    Course.sessions_count when pricing_type is 'per_month' (that field is
-    literally "how many sessions per month" for that pricing model). For
-    any other pricing_type (no reliable nominal monthly count), or if more
-    sessions were actually scheduled than the nominal count (extra
-    makeups), we extend rather than hide real data. Boxes past however many
-    sessions actually exist yet are blank placeholders — no id, not
-    markable — same as an untouched box on the physical paper. Colored per
+    Column count is at least the number of real ClassSessions scheduled so
+    far, extended to Course.sessions_count when pricing_type is
+    'fixed_sessions' (that field is literally "the total number of
+    sessions the whole course is spread across" for that pricing model) so
+    the sheet still shows the full intended plan even before every session
+    has been individually scheduled. Boxes past however many sessions
+    actually exist are blank placeholders — no id, not markable — same as
+    an untouched box on the physical paper. Colored per
     compute_course_payment_status's running balance, checked per box from
     that session's Attendance record."""
     course = group.course
     teacher = group.teacher
 
     sessions = list(
-        ClassSession.objects.filter(tenant_id=tid, group_id=group.id, start_at__year=year, start_at__month=month)
-        .order_by('start_at')
+        ClassSession.objects.filter(tenant_id=tid, group_id=group.id).order_by('start_at')
     )
 
     nominal_count = None
-    if course and course.pricing_type == 'per_month' and course.sessions_count:
+    if course and course.pricing_type == 'fixed_sessions' and course.sessions_count:
         nominal_count = course.sessions_count
     box_count = max(nominal_count or 0, len(sessions))
 
@@ -2647,8 +2632,6 @@ def _build_session_sheet(tid, group, year, month):
         'group_name': group.name,
         'teacher_name': f'{teacher.first_name} {teacher.last_name}' if teacher else None,
         'course_title': course.title if course else None,
-        'year': year,
-        'month': month,
         'sessions': session_slots,
         'students': students,
     }
@@ -2658,7 +2641,7 @@ def _build_session_sheet(tid, group, year, month):
 @permission_classes([IsAuthenticated])
 def group_session_sheet(request):
     """Data for the Session Sheet page (see _build_session_sheet's
-    docstring). Accepts repeated ?group_id=&month=YYYY-MM."""
+    docstring). Accepts repeated ?group_id=."""
     user = request.user
     tid = user.tenant_id
     if not tid:
@@ -2672,10 +2655,8 @@ def group_session_sheet(request):
     if not group_ids:
         return Response({'sheets': []})
 
-    year, month = _parse_sheet_month(request)
-
     groups = Group.objects.filter(tenant_id=tid, id__in=group_ids).select_related('course', 'teacher')
-    sheets = [_build_session_sheet(tid, group, year, month) for group in groups]
+    sheets = [_build_session_sheet(tid, group) for group in groups]
     return Response({'sheets': sheets})
 
 
@@ -2700,8 +2681,6 @@ def group_session_sheet_print(request):
     if not group_ids:
         return Response({'error': 'group_id is required'}, status=status.HTTP_400_BAD_REQUEST)
 
-    year, month = _parse_sheet_month(request)
-
     tenant = Tenant.objects.filter(id=tid).first()
     logo_data_uri = None
     if tenant and tenant.logo_url:
@@ -2709,7 +2688,7 @@ def group_session_sheet_print(request):
         logo_data_uri = _file_data_uri(os.path.join(settings.MEDIA_ROOT, 'logos', filename))
 
     groups = Group.objects.filter(tenant_id=tid, id__in=group_ids).select_related('course', 'teacher')
-    sheets = [_build_session_sheet(tid, group, year, month) for group in groups]
+    sheets = [_build_session_sheet(tid, group) for group in groups]
 
     context = {
         'primary_color': (tenant.primary_color if tenant else None) or '#0A0A0B',
@@ -2718,7 +2697,6 @@ def group_session_sheet_print(request):
         'tenant_initial': ((tenant.name if tenant else None) or 'S')[0].upper(),
         'logo_data_uri': logo_data_uri,
         'printed_at': timezone.localtime(timezone.now()).strftime('%d/%m/%Y %H:%M'),
-        'month_label': f'{month:02d}/{year}',
         'sheets': sheets,
     }
 
