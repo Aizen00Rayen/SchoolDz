@@ -60,6 +60,19 @@ export async function openSessionSheetPdf(groupIds) {
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
+/** Opens the printable monthly finance report PDF (same branded/RTL look
+ * as the student invoice, but for the tenant's own totals + transaction
+ * list for one month) — same auth'd-blob approach as openInvoicePdf.
+ * `extraParams` carries the Reports page's own group_id/teacher_id filters
+ * through, so the PDF matches whatever's currently on screen. */
+export async function openFinanceReportPdf(month, extraParams = {}) {
+  const params = new URLSearchParams({ month, ...extraParams });
+  const res = await api.get(`/reports/finance/print?${params.toString()}`, { responseType: "blob" });
+  const url = URL.createObjectURL(res.data);
+  window.open(url, "_blank");
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
 /** Downloads a CSV/XLSX export of a resource list (students/parents/teachers) —
  * same auth'd-blob approach as openInvoicePdf, since a plain <a href> can't
  * carry the Bearer token. Query param is named "type", not "format" — DRF

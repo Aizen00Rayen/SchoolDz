@@ -1,15 +1,28 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { LayoutGrid, Printer, Loader2 } from "lucide-react";
+import { LayoutGrid, Printer, Loader2, Wallet } from "lucide-react";
 import { PageHeader, EmptyState, LoadingRows, groupOptionLabel } from "./_shared";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 import { api, extractError, openSessionSheetPdf } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
+
+// Course.pricing_type -> the PaymentItem "kind" that best represents a
+// quick one-off payment for that course, matching the choices PaymentsPage
+// itself offers (see EMPTY_ITEM there).
+const KIND_BY_PRICING_TYPE = {
+  per_session: "per_session",
+  per_month: "monthly",
+  fixed_sessions: "course",
+};
 
 function InfoField({ label, value }) {
   if (!value) return null;
@@ -35,10 +48,19 @@ function InfoField({ label, value }) {
 export default function SessionSheetPage() {
   const { t } = useI18n();
   const { canModify } = usePermission("attendance");
+  const { canAdd: canAddPayments } = usePermission("payments");
   const qc = useQueryClient();
   const [selectedGroupIds, setSelectedGroupIds] = useState([]);
   const [printing, setPrinting] = useState(false);
   const [detailStudentId, setDetailStudentId] = useState(null);
+  const [payOpen, setPayOpen] = useState(false);
+  const [payAmount, setPayAmount] = useState("");
+  const [payMethod, setPayMethod] = useState("cash");
+
+  const closeDetail = () => {
+    setDetailStudentId(null);
+    setPayOpen(false);
+  };
 
   const { data: groups } = useQuery({
     queryKey: ["groups-list"],
@@ -106,13 +128,48 @@ export default function SessionSheetPage() {
 
   const sheets = useMemo(() => data?.sheets || [], [data]);
 
+  // The sheet (group) the currently-open student was clicked from — gives
+  // us the course context (id/price/pricing_type) for the quick-pay form
+  // without a second fetch. A student in several selected groups just uses
+  // whichever sheet they were actually clicked from.
+  const detailSheet = useMemo(
+    () => sheets.find((sheet) => sheet.students.some((x) => x.id === detailStudentId)) || null,
+    [sheets, detailStudentId],
+  );
   const detailPaid = useMemo(() => {
-    for (const sheet of sheets) {
-      const s = sheet.students.find((x) => x.id === detailStudentId);
-      if (s) return s.paid;
-    }
-    return null;
-  }, [sheets, detailStudentId]);
+    const s = detailSheet?.students.find((x) => x.id === detailStudentId);
+    return s ? s.paid : null;
+  }, [detailSheet, detailStudentId]);
+
+  const payMut = useMutation({
+    mutationFn: (payload) => api.post("/payments", payload),
+    onSuccess: () => {
+      toast.success(t("session_sheet.payment_recorded"));
+      qc.invalidateQueries({ queryKey: ["session-sheet"] });
+      qc.invalidateQueries({ queryKey: ["payments-balances"] });
+      setPayOpen(false);
+      setPayAmount("");
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
+  const submitPayment = () => {
+    const amount = parseFloat(payAmount);
+    if (!amount || amount <= 0 || !detailSheet?.course_id) return;
+    payMut.mutate({
+      student_id: detailStudentId,
+      method: payMethod,
+      status: "paid",
+      discount: 0,
+      items: [
+        {
+          kind: KIND_BY_PRICING_TYPE[detailSheet.course_pricing_type] || "other",
+          course_id: detailSheet.course_id,
+          amount,
+        },
+      ],
+    });
+  };
 
   return (
     <div>
@@ -227,7 +284,11 @@ export default function SessionSheetPage() {
                           <td className="px-4 py-2.5 font-medium whitespace-nowrap">
                             <button
                               type="button"
-                              onClick={() => setDetailStudentId(student.id)}
+                              onClick={() => {
+                                setDetailStudentId(student.id);
+                                setPayOpen(false);
+                                setPayAmount("");
+                              }}
                               data-testid={`session-sheet-student-${student.id}`}
                               className="flex items-center gap-2 text-start hover:underline decoration-dotted underline-offset-2"
                             >
@@ -280,7 +341,7 @@ export default function SessionSheetPage() {
         </div>
       )}
 
-      <Dialog open={Boolean(detailStudentId)} onOpenChange={(o) => !o && setDetailStudentId(null)}>
+      <Dialog open={Boolean(detailStudentId)} onOpenChange={(o) => !o && closeDetail()}>
         <DialogContent className="bg-card max-w-lg">
           <DialogHeader>
             <DialogTitle className="font-display text-xl">
@@ -298,31 +359,106 @@ export default function SessionSheetPage() {
           ) : detailStudent ? (
             <div className="space-y-4">
               {detailPaid !== null && (
-                <span
-                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
-                    detailPaid ? "bg-[#d7e05a]/40 text-[#5c6b00]" : "bg-destructive/10 text-destructive"
-                  }`}
-                >
-                  {detailPaid ? t("session_sheet.paid") : t("attendance.unpaid")}
-                </span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span
+                    className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+                      detailPaid ? "bg-[#d7e05a]/40 text-[#5c6b00]" : "bg-destructive/10 text-destructive"
+                    }`}
+                  >
+                    {detailPaid ? t("session_sheet.paid") : t("attendance.unpaid")}
+                  </span>
+                  {!detailPaid && canAddPayments && detailSheet?.course_id && !payOpen && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      data-testid="session-sheet-make-payment"
+                      onClick={() => {
+                        setPayAmount(detailSheet.course_price || "");
+                        setPayOpen(true);
+                      }}
+                    >
+                      <Wallet className="w-3.5 h-3.5 me-1.5" />
+                      {t("session_sheet.make_payment")}
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {payOpen && (
+                <div className="rounded-lg border border-border p-3 space-y-3 bg-muted/30">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1 block">
+                        {t("field.amount")}
+                      </label>
+                      <Input
+                        type="number"
+                        value={payAmount}
+                        onChange={(e) => setPayAmount(e.target.value)}
+                        data-testid="session-sheet-pay-amount"
+                        autoFocus
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1 block">
+                        {t("field.method")}
+                      </label>
+                      <Select value={payMethod} onValueChange={setPayMethod}>
+                        <SelectTrigger className="bg-background" data-testid="session-sheet-pay-method">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="bg-popover">
+                          <SelectItem value="cash">{t("method.cash")}</SelectItem>
+                          <SelectItem value="card">{t("method.card")}</SelectItem>
+                          <SelectItem value="bank_transfer">{t("method.bank_transfer")}</SelectItem>
+                          <SelectItem value="cheque">{t("method.cheque")}</SelectItem>
+                          <SelectItem value="other">{t("method.other")}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-end gap-2">
+                    <Button type="button" size="sm" variant="ghost" onClick={() => setPayOpen(false)}>
+                      {t("actions.cancel")}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={submitPayment}
+                      disabled={payMut.isPending || !parseFloat(payAmount)}
+                      data-testid="session-sheet-pay-confirm"
+                    >
+                      {payMut.isPending && <Loader2 className="w-3.5 h-3.5 me-1.5 animate-spin" />}
+                      {t("session_sheet.confirm_payment")}
+                    </Button>
+                  </div>
+                </div>
               )}
 
               <div className="grid grid-cols-2 gap-3">
                 <InfoField label={t("field.phone")} value={detailStudent.phone} />
                 <InfoField label={t("field.email")} value={detailStudent.email} />
-                <InfoField label={t("field.status")} value={t(`status.${detailStudent.status}`)} />
+                <InfoField
+                  label={t("field.status")}
+                  value={detailStudent.status ? t(`status.${detailStudent.status.toLowerCase()}`) : null}
+                />
                 <InfoField label={t("field.student_code")} value={detailStudent.student_code} />
                 <InfoField
                   label={t("field.school_level")}
-                  value={detailStudent.school_level ? t(`school_level.${detailStudent.school_level}`) : null}
+                  value={detailStudent.school_level ? t(`school_level.${detailStudent.school_level.toLowerCase()}`) : null}
                 />
                 <InfoField label={t("field.school_year")} value={detailStudent.school_year} />
                 <InfoField label={t("field.specialty")} value={detailStudent.specialty} />
-                <InfoField label={t("field.gender")} value={detailStudent.gender ? t(`gender.${detailStudent.gender}`) : null} />
+                <InfoField
+                  label={t("field.gender")}
+                  value={detailStudent.gender ? t(`gender.${detailStudent.gender.toLowerCase()}`) : null}
+                />
                 <InfoField label={t("field.blood_type")} value={detailStudent.blood_type} />
                 <InfoField
                   label={t("field.insurance_status")}
-                  value={detailStudent.insurance_status ? t(`insurance.${detailStudent.insurance_status}`) : null}
+                  value={detailStudent.insurance_status ? t(`insurance.${detailStudent.insurance_status.toLowerCase()}`) : null}
                 />
                 <InfoField label={t("field.address")} value={detailStudent.address} />
                 <InfoField label={t("field.emergency_contact")} value={detailStudent.emergency_contact} />

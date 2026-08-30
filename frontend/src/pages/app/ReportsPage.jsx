@@ -1,24 +1,36 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
-  Download, TrendingUp, TrendingDown, Receipt, Wallet, TriangleAlert, HandCoins,
+  Download, FileDown, TrendingUp, TrendingDown, Receipt, Wallet, TriangleAlert, HandCoins, Loader2,
 } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
-import { api, downloadFrom } from "@/lib/api";
+import { api, downloadFrom, extractError, openFinanceReportPdf } from "@/lib/api";
 import { PageHeader, Field, StatusPill, groupOptionLabel } from "./_shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { categoryLabel } from "./ExpensesPage";
+
+function currentMonthValue() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
 
 export default function ReportsPage() {
   const { t } = useI18n();
   const { tenant } = useAuth();
   const [filters, setFilters] = useState({ from: "", to: "", group_id: "", teacher_id: "" });
+  const [pdfDialogOpen, setPdfDialogOpen] = useState(false);
+  const [pdfMonth, setPdfMonth] = useState(currentMonthValue());
+  const [pdfDownloading, setPdfDownloading] = useState(false);
 
   const query = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
 
@@ -48,15 +60,35 @@ export default function ReportsPage() {
   const money = (v) => `${Number(v || 0).toLocaleString()} ${currency}`;
   const byCategory = Object.entries(finance?.expenses_by_category || {});
 
+  const downloadPdf = async () => {
+    setPdfDownloading(true);
+    try {
+      const extra = {};
+      if (filters.group_id) extra.group_id = filters.group_id;
+      if (filters.teacher_id) extra.teacher_id = filters.teacher_id;
+      await openFinanceReportPdf(pdfMonth, extra);
+      setPdfDialogOpen(false);
+    } catch (e) {
+      toast.error(extractError(e));
+    } finally {
+      setPdfDownloading(false);
+    }
+  };
+
   return (
     <div>
       <PageHeader
         title={t("menu.reports")}
         subtitle={t("reports.subtitle")}
         actions={
-          <Button variant="outline" onClick={() => downloadFrom(`/reports/finance?${query}`, "xlsx", "financial-report")}>
-            <Download className="w-4 h-4 me-2" /> {t("export.excel")}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={() => setPdfDialogOpen(true)} data-testid="reports-export-pdf">
+              <FileDown className="w-4 h-4 me-2" /> {t("export.pdf")}
+            </Button>
+            <Button variant="outline" onClick={() => downloadFrom(`/reports/finance?${query}`, "xlsx", "financial-report")}>
+              <Download className="w-4 h-4 me-2" /> {t("export.excel")}
+            </Button>
+          </div>
         }
       />
 
@@ -238,6 +270,30 @@ export default function ReportsPage() {
           </div>
         )}
       </div>
+
+      <Dialog open={pdfDialogOpen} onOpenChange={setPdfDialogOpen}>
+        <DialogContent className="bg-card max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl">{t("reports.select_month")}</DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {t("reports.select_month_desc")}
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            type="month"
+            value={pdfMonth}
+            onChange={(e) => setPdfMonth(e.target.value)}
+            data-testid="reports-pdf-month"
+          />
+          <div className="flex justify-end gap-2 mt-2">
+            <Button variant="ghost" onClick={() => setPdfDialogOpen(false)}>{t("actions.cancel")}</Button>
+            <Button onClick={downloadPdf} disabled={pdfDownloading || !pdfMonth} data-testid="reports-pdf-download">
+              {pdfDownloading ? <Loader2 className="w-4 h-4 me-2 animate-spin" /> : <FileDown className="w-4 h-4 me-2" />}
+              {t("reports.download")}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

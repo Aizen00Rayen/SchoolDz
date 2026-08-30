@@ -250,6 +250,7 @@ INVOICE_KIND_AR = {
     'trip': 'رحلة مدرسية',
     'book': 'كتاب',
     'other': 'آخر',
+    'mixed': 'عدة عناصر',
 }
 INVOICE_METHOD_AR = {
     'cash': 'نقدًا',
@@ -260,6 +261,22 @@ INVOICE_METHOD_AR = {
 }
 INVOICE_CURRENCY_AR = {
     'DZD': 'دج',
+}
+# Same set/wording as expense_category.* in the frontend's i18n.jsx — backs
+# the printed monthly finance report's expense-by-category breakdown.
+EXPENSE_CATEGORY_AR = {
+    'rent': 'الإيجار',
+    'salaries': 'الأجور',
+    'utilities': 'الماء والكهرباء',
+    'supplies': 'اللوازم',
+    'maintenance': 'الصيانة',
+    'marketing': 'التسويق',
+    'transport': 'النقل',
+    'taxes': 'الضرائب',
+    'equipment': 'التجهيزات',
+    'trip': 'رحلة مدرسية',
+    'other': 'أخرى',
+    'uncategorized': 'بدون فئة',
 }
 
 # Anything under a public subdir is deliberately readable by anyone with the
@@ -2631,7 +2648,12 @@ def _build_session_sheet(tid, group):
         'group_id': group.id,
         'group_name': group.name,
         'teacher_name': f'{teacher.first_name} {teacher.last_name}' if teacher else None,
+        'course_id': course.id if course else None,
         'course_title': course.title if course else None,
+        # Lets the frontend's "Make Payment" quick action on an unpaid
+        # student prefill a sensible amount/kind without a second fetch.
+        'course_price': str(course.price) if course else None,
+        'course_pricing_type': course.pricing_type if course else None,
         'sessions': session_slots,
         'students': students,
     }
@@ -5601,16 +5623,12 @@ def activity_logs(request):
 
 # ------------------------------------------------------------ Finance report
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def finance_report(request):
-    """Payments + expenses + net for a date range, optionally narrowed to one
-    group or teacher. Backs the Reports page and its Excel export."""
-    user = request.user
-    tid = require_staff_tenant(user)
-    if not user.can_view('reports'):
-        raise PermissionDenied('Forbidden')
-
+def _compute_finance_report_data(tid, request):
+    """Payments + expenses + net for a date range, optionally narrowed to
+    one group or teacher — the shared core behind finance_report (JSON +
+    Excel) and finance_report_print (the monthly PDF). Reads from/to/
+    group_id/teacher_id off request.GET, same as filter_by_date_range and
+    compute_teacher_earnings already do."""
     payments = Payment.objects.filter(tenant_id=tid).select_related('student').prefetch_related('items')
     payments = filter_by_date_range(payments, request, 'due_date')
     group_id = request.GET.get('group_id')
@@ -5678,23 +5696,7 @@ def finance_report(request):
             })
     transactions.sort(key=lambda t: t['date'] or '', reverse=True)
 
-    if request.GET.get('type') in ('csv', 'xlsx'):
-        headers = ['Metric', 'Amount', 'Kind', 'Status', 'Description', 'Reference']
-        rows = [
-            ['Collected', collected, '', '', '', ''],
-            ['Outstanding', pending_amount, '', '', '', ''],
-            ['Expenses', expense_total, '', '', '', ''],
-            ['Teacher earnings', teacher_total, '', '', '', ''],
-            ['Net', round(collected - expense_total - teacher_total, 2), '', '', '', ''],
-        ] + [[f'Expenses — {k}', v, '', '', '', ''] for k, v in sorted(by_category.items())]
-        rows.append(['', '', '', '', '', ''])
-        rows.append(['Transactions', 'Amount', 'Kind', 'Status', 'Description', 'Reference'])
-        rows += [[
-            t['date'] or '', t['amount'], f"{t['type']}: {t['kind']}", t['status'] or '', t['description'], t['reference'] or '',
-        ] for t in transactions]
-        return export_rows(headers, rows, 'financial-report', request.GET.get('type'))
-
-    return Response({
+    return {
         'collected': collected,
         'outstanding': pending_amount,
         'expenses': expense_total,
@@ -5705,4 +5707,129 @@ def finance_report(request):
         'expenses_scoped_out': scoped_to_subset,
         'teachers': teacher_rows,
         'transactions': transactions,
-    })
+    }
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def finance_report(request):
+    """Payments + expenses + net for a date range, optionally narrowed to one
+    group or teacher. Backs the Reports page and its Excel export."""
+    user = request.user
+    tid = require_staff_tenant(user)
+    if not user.can_view('reports'):
+        raise PermissionDenied('Forbidden')
+
+    result = _compute_finance_report_data(tid, request)
+
+    if request.GET.get('type') in ('csv', 'xlsx'):
+        headers = ['Metric', 'Amount', 'Kind', 'Status', 'Description', 'Reference']
+        rows = [
+            ['Collected', result['collected'], '', '', '', ''],
+            ['Outstanding', result['outstanding'], '', '', '', ''],
+            ['Expenses', result['expenses'], '', '', '', ''],
+            ['Teacher earnings', result['teacher_earnings'], '', '', '', ''],
+            ['Net', result['net'], '', '', '', ''],
+        ] + [[f'Expenses — {k}', v, '', '', '', ''] for k, v in sorted(result['expenses_by_category'].items())]
+        rows.append(['', '', '', '', '', ''])
+        rows.append(['Transactions', 'Amount', 'Kind', 'Status', 'Description', 'Reference'])
+        rows += [[
+            t['date'] or '', t['amount'], f"{t['type']}: {t['kind']}", t['status'] or '', t['description'], t['reference'] or '',
+        ] for t in result['transactions']]
+        return export_rows(headers, rows, 'financial-report', request.GET.get('type'))
+
+    return Response(result)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def finance_report_print(request):
+    """PDF version of the finance report, scoped to a single calendar month
+    ("similar to the bill we give students" — same branded/RTL invoice
+    look, but for the tenant's own monthly totals + transaction list rather
+    than one student's bill). Reuses _compute_finance_report_data by
+    synthesizing ?from=/?to= for the requested month onto a mutable copy of
+    request.GET, so the numbers are guaranteed identical to what the
+    on-screen Reports page and Excel export would show for that month."""
+    user = request.user
+    tid = require_staff_tenant(user)
+    if not user.can_view('reports'):
+        raise PermissionDenied('Forbidden')
+
+    month_str = request.GET.get('month')
+    try:
+        if month_str:
+            year, month = (int(p) for p in month_str.split('-'))
+        else:
+            today = timezone.now()
+            year, month = today.year, today.month
+        if not (1 <= month <= 12):
+            raise ValueError
+    except (TypeError, ValueError):
+        raise ValidationError({'month': 'month must be YYYY-MM'})
+
+    first_day = datetime(year, month, 1)
+    next_month_first = datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)
+    last_day = next_month_first - timedelta(days=1)
+
+    scoped_get = request.GET.copy()
+    scoped_get['from'] = first_day.strftime('%Y-%m-%d')
+    scoped_get['to'] = last_day.strftime('%Y-%m-%d')
+    request.GET = scoped_get
+
+    result = _compute_finance_report_data(tid, request)
+
+    tenant = Tenant.objects.filter(id=tid).first()
+    logo_data_uri = None
+    if tenant and tenant.logo_url:
+        filename = tenant.logo_url.rsplit('/', 1)[-1]
+        logo_data_uri = _file_data_uri(os.path.join(settings.MEDIA_ROOT, 'logos', filename))
+
+    currency = (tenant.currency if tenant else None) or 'DZD'
+    currency_label = INVOICE_CURRENCY_AR.get(currency, currency)
+
+    def fmt(amount):
+        return f'{amount:,.2f}'
+
+    # Pre-resolved into display strings here rather than in the template —
+    # Django templates can't do a dynamic dict[key] lookup without a custom
+    # filter (same constraint as session_sheet.html elsewhere in this app).
+    by_category = [
+        {'label': EXPENSE_CATEGORY_AR.get(key, key.replace('_', ' ').title()), 'amount': fmt(amount)}
+        for key, amount in sorted(result['expenses_by_category'].items(), key=lambda kv: -kv[1])
+    ]
+    transactions = [{
+        'date': datetime.fromisoformat(t['date']).strftime('%d/%m/%Y') if t['date'] else '—',
+        'description': t['description'],
+        'reference': t['reference'],
+        'kind_label': INVOICE_KIND_AR.get(t['kind'], t['kind']),
+        'status_label': INVOICE_STATUS_AR.get(t['status'], t['status']) if t['status'] else None,
+        'is_expense': t['type'] == 'expense',
+        'amount': fmt(t['amount']),
+    } for t in result['transactions']]
+
+    context = {
+        'primary_color': (tenant.primary_color if tenant else None) or '#0A0A0B',
+        'accent_color': (tenant.accent_color if tenant else None) or '#E53935',
+        'tenant_name': tenant.name if tenant else '',
+        'tenant_initial': ((tenant.name if tenant else None) or 'S')[0].upper(),
+        'logo_data_uri': logo_data_uri,
+        'printed_at': timezone.localtime(timezone.now()).strftime('%d/%m/%Y %H:%M'),
+        'month_label': f'{month:02d}/{year}',
+        'currency_label': currency_label,
+        'collected': fmt(result['collected']),
+        'outstanding': fmt(result['outstanding']),
+        'expenses': fmt(result['expenses']),
+        'teacher_earnings': fmt(result['teacher_earnings']),
+        'net': fmt(result['net']),
+        'expenses_scoped_out': result['expenses_scoped_out'],
+        'by_category': by_category,
+        'transactions': transactions,
+    }
+
+    html_string = render_to_string('finance_report.html', context)
+    pdf_bytes = HTML(string=html_string).write_pdf()
+
+    response = HttpResponse(pdf_bytes, content_type='application/pdf')
+    response['Content-Disposition'] = 'inline; filename="financial-report.pdf"'
+    return response

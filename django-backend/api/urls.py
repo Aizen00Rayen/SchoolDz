@@ -127,6 +127,7 @@ urlpatterns = [
     *_both('teacher-payments/summary', views.teacher_payments_summary, 'teacher_payments_summary'),
     *_both('logs', views.activity_logs, 'activity_logs'),
     *_both('reports/finance', views.finance_report, 'finance_report'),
+    *_both('reports/finance/print', views.finance_report_print, 'finance_report_print'),
 
     # Parent portal
     *_both('portal/children', views.portal_children, 'portal_children'),
