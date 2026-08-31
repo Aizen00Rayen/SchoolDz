@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import CrudPanel, { StatusPill } from "./CrudPanel";
 import { Layers } from "lucide-react";
@@ -12,6 +13,7 @@ import {
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
+import { SCHOOL_LEVELS, SCHOOL_LEVEL_YEAR_COUNT } from "@/lib/schoolLevels";
 
 const DEFAULT_FORM = {
   course_id: "", name: "", teacher_id: "", room_id: "", capacity: 20,
@@ -33,6 +35,28 @@ export default function GroupsPage() {
   const courseMap = Object.fromEntries((courses?.items || []).map((c) => [c.id, c]));
   const teacherMap = Object.fromEntries((teachers?.items || []).map((t) => [t.id, t]));
 
+  // A big school ends up with dozens of groups — level/year narrows the
+  // course list down to what's actually relevant, then course pins it to
+  // one exact group set. Picking a level resets year+course since a course
+  // that matched before might not anymore; picking a year resets course
+  // the same way.
+  const [levelFilter, setLevelFilter] = useState("");
+  const [yearFilter, setYearFilter] = useState("");
+  const [courseFilter, setCourseFilter] = useState("");
+
+  const filterableCourses = useMemo(() => {
+    return (courses?.items || []).filter((c) => {
+      if (levelFilter && c.school_level !== levelFilter) return false;
+      if (yearFilter && String(c.school_year) !== yearFilter) return false;
+      return true;
+    });
+  }, [courses, levelFilter, yearFilter]);
+
+  const extraParams = {};
+  if (courseFilter) extraParams.course_id = courseFilter;
+  if (levelFilter) extraParams.school_level = levelFilter;
+  if (yearFilter) extraParams.school_year = yearFilter;
+
   return (
     <CrudPanel
       moduleKey="groups"
@@ -44,6 +68,60 @@ export default function GroupsPage() {
       canEdit={canModify}
       canDelete={canDelete}
       canCreate={canAdd}
+      extraParams={extraParams}
+      filterBar={(
+        <div className="flex items-center gap-1.5">
+          <Select
+            value={levelFilter || "__all"}
+            onValueChange={(v) => {
+              const next = v === "__all" ? "" : v;
+              setLevelFilter(next);
+              setYearFilter("");
+              setCourseFilter("");
+            }}
+          >
+            <SelectTrigger className="bg-background h-9 w-auto min-w-[130px]" data-testid="groups-filter-level">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-popover">
+              <SelectItem value="__all">{t("groups.all_levels")}</SelectItem>
+              {SCHOOL_LEVELS.map((lvl) => (
+                <SelectItem key={lvl} value={lvl}>{t(`school_level.${lvl}`)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={yearFilter || "__all"}
+            onValueChange={(v) => {
+              const next = v === "__all" ? "" : v;
+              setYearFilter(next);
+              setCourseFilter("");
+            }}
+            disabled={!levelFilter}
+          >
+            <SelectTrigger className="bg-background h-9 w-auto min-w-[110px]" data-testid="groups-filter-year">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-popover">
+              <SelectItem value="__all">{t("groups.all_years")}</SelectItem>
+              {Array.from({ length: SCHOOL_LEVEL_YEAR_COUNT[levelFilter] || 0 }, (_, i) => i + 1).map((y) => (
+                <SelectItem key={y} value={String(y)}>{t("common.year_n", { n: y })}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={courseFilter || "__all"} onValueChange={(v) => setCourseFilter(v === "__all" ? "" : v)}>
+            <SelectTrigger className="bg-background h-9 w-auto min-w-[160px]" data-testid="groups-filter-course">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-popover">
+              <SelectItem value="__all">{t("groups.all_courses")}</SelectItem>
+              {filterableCourses.map((c) => (
+                <SelectItem key={c.id} value={c.id}>{courseOptionLabel(c, t)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       columns={[
         {
           key: "name", label: t("field.group"),

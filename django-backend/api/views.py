@@ -4065,6 +4065,15 @@ class GroupViewSet(TenantScopedViewSet):
         course_id = request.GET.get('course_id')
         if course_id:
             queryset = queryset.filter(course_id=course_id)
+        # Narrowing by the course's level/year — lets a school with many
+        # groups filter down to "middle school, year 2" etc. without
+        # already knowing which course/group name to look for.
+        school_level = request.GET.get('school_level')
+        if school_level:
+            queryset = queryset.filter(course__school_level=school_level)
+        school_year = request.GET.get('school_year')
+        if school_year:
+            queryset = queryset.filter(course__school_year=school_year)
         q = request.GET.get('q')
         if q:
             queryset = queryset.filter(
