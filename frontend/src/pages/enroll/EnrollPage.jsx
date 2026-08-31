@@ -380,8 +380,11 @@ export default function EnrollPage() {
 
   const onSubmit = (e) => {
     e.preventDefault();
+    // The parent never picks a group — effectiveGroupId auto-assigns the
+    // first one with room (see its own comment above). No group with seats
+    // left means the course itself is full.
     if (!effectiveGroupId) {
-      toast.error("اختر مجموعة الدورة أولاً.");
+      toast.error("هذه الدورة مكتملة حاليًا. يرجى التواصل مع المدرسة.");
       return;
     }
     enrollMut.mutate({ ...form, group_id: effectiveGroupId });
@@ -720,20 +723,6 @@ export default function EnrollPage() {
                 </DialogDescription>
               </DialogHeader>
               <form onSubmit={onSubmit} className="space-y-4">
-                <Field label="المجموعة" required>
-                  <Select value={effectiveGroupId} onValueChange={(v) => setForm((f) => ({ ...f, group_id: v }))}>
-                    <SelectTrigger className="bg-background"><SelectValue placeholder="اختر مجموعة" /></SelectTrigger>
-                    <SelectContent className="bg-popover">
-                      {selectedCourse.groups.map((g) => (
-                        <SelectItem key={g.id} value={g.id} disabled={g.seats_left === 0}>
-                          {g.name}{g.schedule ? ` · ${g.schedule}` : ""}
-                          {g.seats_left === 0 ? " — مكتمل" : g.seats_left_is_low ? ` — تبقى ${g.seats_left} فقط!` : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Field label="الاسم الأول للطالب" required>
                     <Input value={form.student_first_name} onChange={(e) => setForm((f) => ({ ...f, student_first_name: e.target.value }))} required />
