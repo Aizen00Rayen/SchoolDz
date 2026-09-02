@@ -2461,6 +2461,21 @@ def _qr_data_uri(data):
     return f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode('ascii')}"
 
 
+def _darken_hex(hex_color, factor):
+    """`factor` < 1 darkens (e.g. 0.72 = 72% brightness) — used for the ID
+    card's two-stop gradient panel so it has real depth instead of a flat
+    fill, without needing a design-time second color from the tenant."""
+    h = (hex_color or '').lstrip('#')
+    if len(h) != 6:
+        return hex_color
+    try:
+        r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return hex_color
+    r, g, b = (max(0, min(255, int(c * factor))) for c in (r, g, b))
+    return f'#{r:02x}{g:02x}{b:02x}'
+
+
 # Same wording as SCHOOL_LEVEL_AR/SPECIALTY_AR/YEAR_ORDINALS_AR in the
 # frontend's EnrollPage.jsx, kept here too since the printed ID card is
 # server-rendered and can't reach the frontend's i18n.
@@ -2534,14 +2549,23 @@ def student_id_cards_print(request):
         'qr_data_uri': _qr_data_uri(s.id),
     } for s in students]
 
+    # 2x4 = 8 per A4 sheet ("if there is more than 8 only then we use
+    # another page") — chunked here rather than left to CSS wrapping/
+    # page-break-after guesswork, same explicit-sheets approach already
+    # proven in session_sheet.html/finance_report.html.
+    CARDS_PER_SHEET = 8
+    sheets = [cards[i:i + CARDS_PER_SHEET] for i in range(0, len(cards), CARDS_PER_SHEET)]
+
     is_single = len(cards) == 1
+    primary_color = (tenant.primary_color if tenant else None) or '#0A0A0B'
     context = {
-        'primary_color': (tenant.primary_color if tenant else None) or '#0A0A0B',
+        'primary_color': primary_color,
+        'primary_color_dark': _darken_hex(primary_color, 0.72),
         'accent_color': (tenant.accent_color if tenant else None) or '#E53935',
         'tenant_name': tenant.name if tenant else '',
         'tenant_initial': ((tenant.name if tenant else None) or 'S')[0].upper(),
         'logo_data_uri': logo_data_uri,
-        'cards': cards,
+        'sheets': sheets,
         'is_single': is_single,
         'page_size': '86mm 54mm' if is_single else 'A4',
         'page_margin': '0' if is_single else '10mm',
