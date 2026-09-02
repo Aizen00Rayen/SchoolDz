@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import CrudPanel, { StatusPill } from "./CrudPanel";
-import { Check, GraduationCap, Upload, X } from "lucide-react";
+import { Check, GraduationCap, IdCard, Loader2, Upload, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { api, extractError } from "@/lib/api";
+import { api, extractError, openStudentIdCardsPdf } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
 
@@ -134,6 +134,28 @@ export default function StudentsPage() {
   const { t } = useI18n();
   const { canAdd, canModify, canDelete } = usePermission("students");
   const qc = useQueryClient();
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [printing, setPrinting] = useState(false);
+
+  const toggleSelect = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const printCards = async (ids) => {
+    setPrinting(true);
+    try {
+      await openStudentIdCardsPdf(ids);
+    } catch (e) {
+      toast.error(extractError(e));
+    } finally {
+      setPrinting(false);
+    }
+  };
 
   const approveMut = useMutation({
     mutationFn: (id) => api.post(`/students/${id}/approve`).then((r) => r.data),
@@ -165,35 +187,72 @@ export default function StudentsPage() {
       canDelete={canDelete}
       canCreate={canAdd}
       rowClassName={approvalRowClass}
-      renderRowActions={(row) => row.approval_status === "pending" && canModify ? (
+      renderRowActions={(row) => (
         <>
+          {row.approval_status === "pending" && canModify && (
+            <>
+              <Button
+                size="icon" variant="ghost"
+                onClick={() => approveMut.mutate(row.id)}
+                className="h-8 w-8 text-success hover:bg-success/10"
+                title={t("students.approve")}
+                data-testid={`students-approve-${row.id}`}
+              >
+                <Check className="w-3.5 h-3.5" />
+              </Button>
+              <Button
+                size="icon" variant="ghost"
+                onClick={() => rejectMut.mutate(row.id)}
+                className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                title={t("students.reject")}
+                data-testid={`students-reject-${row.id}`}
+              >
+                <X className="w-3.5 h-3.5" />
+              </Button>
+            </>
+          )}
           <Button
             size="icon" variant="ghost"
-            onClick={() => approveMut.mutate(row.id)}
-            className="h-8 w-8 text-success hover:bg-success/10"
-            title={t("students.approve")}
-            data-testid={`students-approve-${row.id}`}
+            onClick={() => printCards(row.id)}
+            disabled={printing}
+            className="h-8 w-8"
+            title={t("students.print_id_card")}
+            data-testid={`students-print-card-${row.id}`}
           >
-            <Check className="w-3.5 h-3.5" />
-          </Button>
-          <Button
-            size="icon" variant="ghost"
-            onClick={() => rejectMut.mutate(row.id)}
-            className="h-8 w-8 text-destructive hover:bg-destructive/10"
-            title={t("students.reject")}
-            data-testid={`students-reject-${row.id}`}
-          >
-            <X className="w-3.5 h-3.5" />
+            <IdCard className="w-3.5 h-3.5" />
           </Button>
         </>
-      ) : null}
+      )}
       extraActions={(
         <>
+          {selectedIds.size > 0 && (
+            <Button
+              variant="outline"
+              onClick={() => printCards(Array.from(selectedIds))}
+              disabled={printing}
+              data-testid="students-print-selected-cards"
+            >
+              {printing ? <Loader2 className="w-4 h-4 me-2 animate-spin" /> : <IdCard className="w-4 h-4 me-2" />}
+              {t("students.print_selected_cards", { count: selectedIds.size })}
+            </Button>
+          )}
           {canAdd && <ImportCsvDialog />}
           <ExportMenu resource="students" />
         </>
       )}
       columns={[
+        {
+          key: "select", label: "",
+          render: (r) => (
+            <input
+              type="checkbox"
+              checked={selectedIds.has(r.id)}
+              onChange={() => toggleSelect(r.id)}
+              className="w-4 h-4 rounded border-border accent-accent cursor-pointer"
+              data-testid={`students-select-${r.id}`}
+            />
+          ),
+        },
         {
           key: "name", label: t("field.full_name"),
           render: (r) => (

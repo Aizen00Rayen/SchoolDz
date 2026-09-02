@@ -22,3 +22,5 @@ pypdf>=4.0.0,<6.0.0
 # uploads. Also a weasyprint transitive dep, but pinned here because we import
 # it ourselves and must not silently lose it if weasyprint's deps change.
 Pillow>=10.0.0
+# Generates the QR badge on printed student ID cards (student_id_cards_print).
+qrcode>=7.4.0,<8.0.0

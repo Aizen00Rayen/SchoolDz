@@ -9,6 +9,7 @@ import base64
 import mimetypes
 import requests
 import openpyxl
+import qrcode
 from PIL import Image, ImageOps
 from datetime import datetime, time, timedelta
 from django.conf import settings
@@ -2449,6 +2450,109 @@ def _file_data_uri(path):
         return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
     except OSError:
         return None
+
+
+def _qr_data_uri(data):
+    """PNG data URI for a QR code encoding `data` — same box=/border= a
+    phone camera can read comfortably at ID-card size once printed."""
+    img = qrcode.make(data, box_size=8, border=2)
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    return f"data:image/png;base64,{base64.b64encode(buf.getvalue()).decode('ascii')}"
+
+
+# Same wording as SCHOOL_LEVEL_AR/SPECIALTY_AR/YEAR_ORDINALS_AR in the
+# frontend's EnrollPage.jsx, kept here too since the printed ID card is
+# server-rendered and can't reach the frontend's i18n.
+SCHOOL_LEVEL_AR = {'primary': 'ابتدائي', 'middle': 'متوسط', 'high': 'ثانوي'}
+SPECIALTY_AR = {
+    'common_science': 'جذع مشترك علوم وتكنولوجيا',
+    'common_arts': 'جذع مشترك آداب وفلسفة',
+    'science_exp': 'علوم تجريبية',
+    'math': 'رياضيات',
+    'tech_math': 'تقني رياضي',
+    'management_econ': 'تسيير واقتصاد',
+    'arts_philo': 'آداب وفلسفة',
+    'foreign_lang': 'لغات أجنبية',
+}
+YEAR_ORDINALS_AR = ['الأولى', 'الثانية', 'الثالثة', 'الرابعة', 'الخامسة']
+
+
+def _student_grade_label_ar(student):
+    """"ثانوي · الثانية · علوم تجريبية" — the same level/year/specialty
+    composition courseLevelLabel() builds client-side, from the student's
+    own school_level/school_year/specialty (not a course's)."""
+    if not student.school_level:
+        return None
+    parts = [SCHOOL_LEVEL_AR.get(student.school_level, student.school_level)]
+    if student.school_year:
+        parts.append(YEAR_ORDINALS_AR[student.school_year - 1] if student.school_year <= len(YEAR_ORDINALS_AR) else f'السنة {student.school_year}')
+    if student.specialty:
+        parts.append(SPECIALTY_AR.get(student.specialty, student.specialty))
+    return ' · '.join(parts)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def student_id_cards_print(request):
+    """Printable student ID badges — accepts repeated ?student_id=. One
+    student prints as a single card sized to fit real ID-card stock; two or
+    more tile onto A4 sheets (see student_id_card.html) so a batch print
+    doesn't waste paper on one card per page. The QR encodes the student's
+    raw id — exactly what the teacher mobile app's badge scanner already
+    sends to GET /students/<id>/verify (see StudentViewSet.verify), so a
+    card printed here is immediately scannable with the existing app, no
+    new lookup path needed."""
+    user = request.user
+    tid = require_staff_tenant(user)
+    if not user.can_view('students'):
+        raise PermissionDenied('Forbidden')
+
+    student_ids = request.GET.getlist('student_id')
+    if not student_ids:
+        return Response({'error': 'student_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+
+    students = list(Student.objects.filter(tenant_id=tid, id__in=student_ids))
+    if not students:
+        raise NotFound('No matching students')
+    # Preserve the order the caller asked for (matches selection order in
+    # the UI) rather than whatever the DB happened to return.
+    by_id = {s.id: s for s in students}
+    students = [by_id[sid] for sid in student_ids if sid in by_id]
+
+    tenant = Tenant.objects.filter(id=tid).first()
+    logo_data_uri = None
+    if tenant and tenant.logo_url:
+        filename = tenant.logo_url.rsplit('/', 1)[-1]
+        logo_data_uri = _file_data_uri(os.path.join(settings.MEDIA_ROOT, 'logos', filename))
+
+    cards = [{
+        'first_name': s.first_name,
+        'last_name': s.last_name,
+        'student_code': s.student_code,
+        'grade_label': _student_grade_label_ar(s),
+        'qr_data_uri': _qr_data_uri(s.id),
+    } for s in students]
+
+    is_single = len(cards) == 1
+    context = {
+        'primary_color': (tenant.primary_color if tenant else None) or '#0A0A0B',
+        'accent_color': (tenant.accent_color if tenant else None) or '#E53935',
+        'tenant_name': tenant.name if tenant else '',
+        'tenant_initial': ((tenant.name if tenant else None) or 'S')[0].upper(),
+        'logo_data_uri': logo_data_uri,
+        'cards': cards,
+        'is_single': is_single,
+        'page_size': '86mm 54mm' if is_single else 'A4',
+        'page_margin': '0' if is_single else '10mm',
+    }
+
+    html_string = render_to_string('student_id_card.html', context)
+    pdf_bytes = HTML(string=html_string).write_pdf()
+
+    response = HttpResponse(pdf_bytes, content_type='application/pdf')
+    response['Content-Disposition'] = 'inline; filename="student-id-cards.pdf"'
+    return response
 
 
 @api_view(['GET'])

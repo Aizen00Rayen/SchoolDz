@@ -60,6 +60,19 @@ export async function openSessionSheetPdf(groupIds) {
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
+/** Opens the printable student ID card(s) PDF — one card sized to fit real
+ * ID-card stock for a single student, or a paper-saving A4 grid when
+ * several are selected. Same auth'd-blob approach as openInvoicePdf.
+ * `studentIds` may be one id or an array. */
+export async function openStudentIdCardsPdf(studentIds) {
+  const params = new URLSearchParams();
+  (Array.isArray(studentIds) ? studentIds : [studentIds]).forEach((id) => params.append("student_id", id));
+  const res = await api.get(`/students/id-cards/print?${params.toString()}`, { responseType: "blob" });
+  const url = URL.createObjectURL(res.data);
+  window.open(url, "_blank");
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
 /** Opens the printable monthly finance report PDF (same branded/RTL look
  * as the student invoice, but for the tenant's own totals + transaction
  * list for one month) — same auth'd-blob approach as openInvoicePdf.

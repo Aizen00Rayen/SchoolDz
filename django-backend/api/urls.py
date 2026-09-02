@@ -112,6 +112,9 @@ urlpatterns = [
     *_both('groups/session-sheet', views.group_session_sheet, 'group_session_sheet'),
     *_both('groups/session-sheet/print', views.group_session_sheet_print, 'group_session_sheet_print'),
 
+    # Student ID cards — printable QR badges, one card or tiled onto A4
+    *_both('students/id-cards/print', views.student_id_cards_print, 'student_id_cards_print'),
+
     # Payments
     *_both('payments/overdue', views.payments_overdue, 'payments_overdue'),
     *_both('payments/balances', views.payments_balances, 'payments_balances'),

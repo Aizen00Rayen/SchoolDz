@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+<meta charset="utf-8">
+<style>
+  @page {
+    size: {{ page_size }};
+    margin: {{ page_margin }};
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    color: #1c1b19;
+    font-family: "DejaVu Sans", sans-serif;
+  }
+
+  /* Grid mode (2+ cards): inline-block flows and paginates across A4 sheets
+     reliably in WeasyPrint — flexbox does not reflow across page breaks the
+     same way, so this is deliberate, not an arbitrary choice. */
+  .sheet { font-size: 0; }
+  .sheet .card { margin: 0 3mm 3mm 0; }
+
+  .card {
+    width: 86mm;
+    height: 54mm;
+    display: inline-block;
+    vertical-align: top;
+    overflow: hidden;
+    border: 0.5pt solid #d8d3c8;
+    border-radius: 2.5mm;
+    page-break-inside: avoid;
+    font-size: 9pt;
+    position: relative;
+  }
+  .single .card { border: none; border-radius: 0; margin: 0; }
+
+  .band {
+    height: 11mm;
+    background: {{ primary_color }};
+    color: #fff;
+    display: flex;
+    flex-direction: row-reverse;
+    align-items: center;
+    gap: 2.5mm;
+    padding: 0 3mm;
+  }
+  .band-mark {
+    width: 7mm; height: 7mm; border-radius: 1.5mm; background: rgba(255,255,255,0.18);
+    flex-shrink: 0; overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+    font-family: "DejaVu Serif", serif; font-weight: bold; font-size: 8pt;
+  }
+  .band-mark img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .band-name {
+    font-family: "DejaVu Serif", serif; font-weight: bold; font-size: 8.5pt;
+    line-height: 1.15;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  .body {
+    height: calc(54mm - 11mm);
+    display: flex;
+    flex-direction: row;
+    /* The QR must sit at the fixed visual LEFT regardless of the page's
+       RTL context (dir="rtl" on <html> makes "row" flow right-to-left
+       otherwise — the same gotcha invoice.html works around elsewhere in
+       this app, but here the fix is an explicit LTR context instead of
+       row-reverse, since it's the QR/info pairing that's direction-fixed,
+       not the text inside .info, which keeps its own RTL below). */
+    direction: ltr;
+    align-items: center;
+    gap: 3mm;
+    padding: 2.5mm 3mm;
+  }
+  .qr-wrap {
+    flex-shrink: 0;
+    width: 24mm; height: 24mm;
+    border: 0.5pt solid #ececE6;
+    border-radius: 1.5mm;
+    padding: 1mm;
+  }
+  .qr-wrap img { width: 100%; height: 100%; display: block; }
+
+  .info {
+    flex: 1;
+    min-width: 0;
+    text-align: right;
+    direction: rtl;
+  }
+  .info-eyebrow {
+    font-size: 5.6pt; font-weight: bold; letter-spacing: 0.6pt; text-transform: uppercase;
+    color: {{ accent_color }}; margin-bottom: 1.5mm;
+  }
+  .info-name {
+    font-size: 10.5pt; font-weight: bold; line-height: 1.2;
+    overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
+    margin-bottom: 1.5mm;
+  }
+  .info-grade {
+    font-size: 7.5pt; color: #55504a; margin-bottom: 2mm; line-height: 1.3;
+  }
+  .info-code {
+    font-size: 7pt; color: #8a8478; font-family: "DejaVu Sans Mono", monospace;
+    direction: ltr; text-align: right;
+  }
+</style>
+</head>
+<body class="{% if is_single %}single{% endif %}">
+  <div class="sheet">
+    {% for card in cards %}
+    <div class="card">
+      <div class="band">
+        <div class="band-mark">
+          {% if logo_data_uri %}<img src="{{ logo_data_uri }}">{% else %}{{ tenant_initial }}{% endif %}
+        </div>
+        <div class="band-name">{{ tenant_name }}</div>
+      </div>
+      <div class="body">
+        <div class="qr-wrap"><img src="{{ card.qr_data_uri }}"></div>
+        <div class="info">
+          <div class="info-eyebrow">بطاقة تعريف الطالب</div>
+          <div class="info-name">{{ card.first_name }} {{ card.last_name }}</div>
+          {% if card.grade_label %}<div class="info-grade">{{ card.grade_label }}</div>{% endif %}
+          {% if card.student_code %}<div class="info-code">{{ card.student_code }}</div>{% endif %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</body>
+</html>

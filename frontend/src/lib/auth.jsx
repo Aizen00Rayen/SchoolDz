@@ -47,6 +47,27 @@ export function AuthProvider({ children }) {
     loadMe();
   }, [loadMe]);
 
+  // Permission/role changes an owner makes from another tab/device don't
+  // reach an already-open session on their own — /auth/me is only called
+  // once on mount, so a staff member's stale `user.permissions` kept
+  // gating their UI by the OLD grant until they happened to hard-refresh.
+  // Backend enforcement was never actually behind (every request re-reads
+  // the user row fresh), but the frontend's own gating and nav visibility
+  // were — refetching whenever the tab regains focus closes that gap
+  // without needing a logout/login, matching how most SaaS apps refresh
+  // session state on tab-switch-back.
+  useEffect(() => {
+    const revalidate = () => {
+      if (document.visibilityState === "visible" && getAccessToken()) loadMe();
+    };
+    document.addEventListener("visibilitychange", revalidate);
+    window.addEventListener("focus", revalidate);
+    return () => {
+      document.removeEventListener("visibilitychange", revalidate);
+      window.removeEventListener("focus", revalidate);
+    };
+  }, [loadMe]);
+
   const login = async (email, password, tenantSlug) => {
     const { data } = await api.post("/auth/login", {
       email,
