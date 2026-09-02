@@ -105,6 +105,27 @@ export default function CrudPanel({
     setOpen(true);
   };
 
+  /** A PC-connected barcode/QR scanner acts as a keyboard — it types the
+   * scanned payload into whichever field has focus, then sends Enter. That
+   * happens fast enough that the debounced search query behind `items`
+   * often hasn't resolved yet by the time Enter fires, so this re-queries
+   * directly with the current `q` rather than trusting `items` to be
+   * fresh. Opens straight to the edit form when the scan (or a manually
+   * typed exact search) resolves to exactly one record — e.g. scanning a
+   * student's ID card badge to pull up their record instantly. */
+  const onSearchKeyDown = async (e) => {
+    if (e.key !== "Enter" || !canEdit || !q.trim()) return;
+    e.preventDefault();
+    try {
+      const { data } = await api.get(endpoint, { params: { q, ...(extraParams || {}) } });
+      const found = data?.items || [];
+      if (found.length === 1) openEdit(found[0]);
+    } catch (_e) {
+      // Leave the on-screen list/search state as-is — the query above is
+      // just a convenience shortcut, not the source of truth.
+    }
+  };
+
   const onSubmit = (e) => {
     e.preventDefault();
     const clean = cleanPayload(preparePayload ? preparePayload(form) : form);
@@ -176,6 +197,7 @@ export default function CrudPanel({
           <Input
             value={q}
             onChange={(e) => setQ(e.target.value)}
+            onKeyDown={onSearchKeyDown}
             placeholder={t("actions.search")}
             className="ps-9 h-9"
             data-testid={`${moduleKey}-search-input`}

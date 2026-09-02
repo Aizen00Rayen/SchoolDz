@@ -221,6 +221,22 @@ export function StudentSearchSelect({ value, onChange, placeholder }) {
     setOpen(false);
   };
 
+  /** Same scanner-friendly shortcut as CrudPanel's search box: a QR scanner
+   * types the scanned student id then Enter, faster than the 250ms debounce
+   * above can resolve — so re-query directly on Enter instead of trusting
+   * `results` to already reflect the just-typed value. */
+  const onKeyDown = async (e) => {
+    if (e.key !== "Enter" || !query.trim()) return;
+    e.preventDefault();
+    try {
+      const { data } = await api.get("/students", { params: { q: query.trim(), limit: 10 } });
+      const found = data?.items || [];
+      if (found.length === 1) select(found[0]);
+    } catch (_e) {
+      // Leave the dropdown's own state as-is — this is just a shortcut.
+    }
+  };
+
   const clear = () => {
     onChange("");
     setLabel("");
@@ -243,6 +259,7 @@ export function StudentSearchSelect({ value, onChange, placeholder }) {
       <Input
         value={query}
         onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={onKeyDown}
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         placeholder={placeholder || t("picker.search_students")}

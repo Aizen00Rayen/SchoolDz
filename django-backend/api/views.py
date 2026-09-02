@@ -3820,7 +3820,15 @@ class StudentViewSet(TenantScopedViewSet):
             queryset = queryset.filter(status=status_val)
         q = request.GET.get('q')
         if q:
-            queryset = queryset.filter(name_search_q(q, 'first_name', 'last_name', 'first_name_latin', 'last_name_latin', 'email', 'phone', 'student_code'))
+            # Also matches the raw id exactly — a PC-connected QR scanner
+            # acts as a keyboard, "typing" the scanned card's payload (the
+            # student's id, see student_id_cards_print) straight into
+            # whichever search box has focus and hitting Enter. Without this,
+            # a scan would search name/email/phone/code for a UUID and never
+            # match anything.
+            queryset = queryset.filter(
+                name_search_q(q, 'first_name', 'last_name', 'first_name_latin', 'last_name_latin', 'email', 'phone', 'student_code') | Q(id=q)
+            )
         ids_param = request.GET.get('ids')
         if ids_param:
             queryset = queryset.filter(id__in=[i for i in ids_param.split(',') if i])
