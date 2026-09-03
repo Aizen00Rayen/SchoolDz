@@ -939,7 +939,10 @@ def public_school_enroll(request, slug):
     """Self-service enrollment from a school's public page: creates the
     guardian's parent-portal account, the student, and a tuition Payment —
     either left pending for in-person payment, or backed by a fresh Chargily
-    checkout for online payment."""
+    checkout for online payment. A parent can enroll one child in several
+    courses at once (group_ids, plural) — one PaymentItem per course under
+    a single combined bill, the same shape PaymentViewSet.create already
+    uses for a multi-course bill made from the staff side."""
     tenant = Tenant.objects.filter(slug=slug.strip().lower(), status='active').first()
     if not tenant:
         raise NotFound('School not found')
@@ -951,28 +954,34 @@ def public_school_enroll(request, slug):
     password = data.get('password') or ''
     student_first = (data.get('student_first_name') or '').strip()
     student_last = (data.get('student_last_name') or '').strip()
-    group_id = data.get('group_id')
+    group_ids = data.get('group_ids')
+    if isinstance(group_ids, str):
+        group_ids = [group_ids]
+    group_ids = list(dict.fromkeys(g for g in (group_ids or []) if g))  # de-dupe, keep order
     # The public enrollment page no longer offers an online-payment choice —
     # parents just fill the form and pay at the school office — but keep
     # accepting 'online' here too, since nothing about the Chargily checkout
     # path below actually depends on the frontend exposing that choice.
     payment_method = data.get('payment_method') or 'office'
 
-    if not all([guardian_name, guardian_email, guardian_phone, password, student_first, student_last, group_id]):
+    if not all([guardian_name, guardian_email, guardian_phone, password, student_first, student_last]) or not group_ids:
         return Response({'error': 'All fields are required'}, status=status.HTTP_400_BAD_REQUEST)
     if payment_method not in ['online', 'office']:
         return Response({'error': 'Choose a payment method'}, status=status.HTTP_400_BAD_REQUEST)
     if len(password) < 8:
         return Response({'error': 'Password must be at least 8 characters'}, status=status.HTTP_400_BAD_REQUEST)
 
-    group = Group.objects.filter(
-        id=group_id, tenant=tenant, status='active', course__show_on_enrollment=True,
-    ).select_related('course').first()
-    if not group:
-        raise NotFound('That course is not available for enrollment')
+    groups = list(Group.objects.filter(
+        id__in=group_ids, tenant=tenant, status='active', course__show_on_enrollment=True,
+    ).select_related('course'))
+    if len(groups) != len(group_ids):
+        raise NotFound('One or more selected courses are not available for enrollment')
 
-    if group.students.count() >= group.capacity:
-        return Response({'error': 'This group is full — please choose another.'}, status=status.HTTP_409_CONFLICT)
+    full_courses = [g.course.title for g in groups if g.students.count() >= g.capacity]
+    if full_courses:
+        return Response({
+            'error': f"These courses are full — please remove them and try again: {', '.join(full_courses)}",
+        }, status=status.HTTP_409_CONFLICT)
 
     if User.objects.filter(email=guardian_email).exists():
         return Response({
@@ -983,7 +992,7 @@ def public_school_enroll(request, slug):
     if tenant.max_students is not None and existing_count >= tenant.max_students:
         return Response({'error': 'This school is at capacity — please contact them directly.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    course = group.course
+    total_amount = sum(g.course.price for g in groups)
 
     with transaction.atomic():
         guardian_user = User.objects.create_user(
@@ -1005,17 +1014,20 @@ def public_school_enroll(request, slug):
             # before it counts as a confirmed record (see StudentViewSet.approve).
             source='public', approval_status='pending',
         )
-        group.students.add(student)
+        for g in groups:
+            g.students.add(student)
         log_activity(request, tenant.id, 'create', category='data', entity_type='students', entity_id=student.id,
                      description=f'Public enrollment: {student.first_name} {student.last_name} (pending approval)')
 
         invoice_count = Payment.objects.filter(tenant_id=tenant.id).count()
         invoice_number = f"{tenant.invoice_prefix or 'INV-'}{str(invoice_count + 1).zfill(6)}"
         payment = Payment.objects.create(
-            tenant=tenant, student=student, course=course, group=group, kind='registration',
-            amount=course.price, method='card' if payment_method == 'online' else 'cash',
+            tenant=tenant, student=student, amount=total_amount,
+            method='card' if payment_method == 'online' else 'cash',
             status='pending', due_date=timezone.now().date(), invoice_number=invoice_number,
         )
+        for g in groups:
+            PaymentItem.objects.create(payment=payment, kind='registration', course=g.course, group=g, amount=g.course.price)
 
         auth_token = Token.objects.create(user=guardian_user)
 
@@ -1036,15 +1048,15 @@ def public_school_enroll(request, slug):
 
     checkout = ChargilyCheckout.objects.create(
         tenant=tenant, type='student_payment', payment=payment,
-        amount=int(course.price), currency=tenant.currency.lower(), status='pending',
+        amount=int(total_amount), currency=tenant.currency.lower(), status='pending',
     )
     client = ChargilyClient()
     try:
         response = client.createCheckout({
-            'amount': int(course.price),
+            'amount': int(total_amount),
             'currency': tenant.currency.lower(),
             'locale': locale,
-            'description': f"{course.title} — {student_first} {student_last}",
+            'description': f"{', '.join(g.course.title for g in groups)} — {student_first} {student_last}",
             'success_url': f"{frontend}/enroll/{tenant.slug}/success?checkout={checkout.id}",
             'failure_url': f"{frontend}/enroll/{tenant.slug}/failure?checkout={checkout.id}",
             'webhook_endpoint': f"{app_url}/api/v1/billing/webhook",

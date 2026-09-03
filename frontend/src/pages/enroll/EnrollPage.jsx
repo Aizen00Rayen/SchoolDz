@@ -22,7 +22,7 @@ import {
 
 const DEFAULT_FORM = {
   guardian_name: "", guardian_email: "", guardian_phone: "", password: "",
-  student_first_name: "", student_last_name: "", group_id: "",
+  student_first_name: "", student_last_name: "",
 };
 
 const DEFAULT_FILTERS = { level: "all", year: "all", specialty: "all", q: "" };
@@ -177,13 +177,15 @@ function GalleryLightbox({ photos, index, onClose, onNav }) {
 
 /** One course tile in the catalog grid — deliberately compact (a school
  * with 20-30 open courses used to render as one endless stacked list) and
- * fully clickable, opening the enrollment dialog rather than expanding an
- * inline form that would push everything below it down the page. A course
- * with no photo gets a flat tint of its own color plus a faint paper-grain
- * texture instead of a two-color gradient — a gradient between an arbitrary
- * course color and the school's accent can clash badly depending on what a
- * school picked; a single tone never does. */
-function CourseCard({ course: c, accent, currency, onSelect, index }) {
+ * fully clickable. Clicking toggles the course into the parent's selection
+ * (a course can be picked alongside others for the same child — see the
+ * floating summary bar/enrollment dialog below) rather than opening the
+ * enrollment form immediately, since a parent may want several courses on
+ * one bill. A course with no photo gets a flat tint of its own color plus
+ * a faint paper-grain texture instead of a two-color gradient — a gradient
+ * between an arbitrary course color and the school's accent can clash badly
+ * depending on what a school picked; a single tone never does. */
+function CourseCard({ course: c, accent, currency, selected, onToggle, index }) {
   const totalSeats = c.groups.reduce((s, g) => s + g.seats_left, 0);
   const scarce = c.groups.some((g) => g.seats_left_is_low);
   const allFull = totalSeats === 0;
@@ -192,14 +194,22 @@ function CourseCard({ course: c, accent, currency, onSelect, index }) {
   return (
     <motion.button
       type="button"
-      onClick={() => onSelect(c)}
+      onClick={() => onToggle(c)}
       initial={{ opacity: 0, y: 18 }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, margin: "-40px" }}
       transition={{ duration: 0.4, delay: Math.min(index, 6) * 0.05 }}
-      className="group text-start rounded-xl border border-border bg-card overflow-hidden flex flex-col transition-all hover:shadow-lg hover:border-[var(--card-accent)]"
-      style={{ "--card-accent": accent }}
+      className="group relative text-start rounded-xl border-2 bg-card overflow-hidden flex flex-col transition-all hover:shadow-lg"
+      style={{ borderColor: selected ? accent : "hsl(var(--border))", boxShadow: selected ? `0 0 0 3px ${accent}22` : undefined, "--card-accent": accent }}
     >
+      {selected && (
+        <span
+          className="absolute top-2 end-2 z-10 w-6 h-6 rounded-full grid place-items-center text-white shadow-md"
+          style={{ backgroundColor: accent }}
+        >
+          <Check className="w-3.5 h-3.5" />
+        </span>
+      )}
       <div className={`relative h-28 overflow-hidden ${!c.image_url ? "noise-bg" : ""}`}>
         {c.image_url ? (
           <img
@@ -253,7 +263,7 @@ export default function EnrollPage() {
   const nav = useNavigate();
   const { loginWithToken } = useAuth();
   const [form, setForm] = useState(DEFAULT_FORM);
-  const [selectedCourseId, setSelectedCourseId] = useState(null);
+  const [selectedCourseIds, setSelectedCourseIds] = useState([]);
   const [enrollOpen, setEnrollOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(null);
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
@@ -296,7 +306,7 @@ export default function EnrollPage() {
   const gallery = school?.gallery || [];
   const socialEntries = Object.entries(school?.social_links || {}).filter(([, url]) => safeExternalUrl(url));
   const hasLocation = school?.address || school?.phone || school?.map_url || socialEntries.length > 0;
-  const selectedCourse = courses.find((c) => c.id === selectedCourseId);
+  const selectedCourses = selectedCourseIds.map((id) => courses.find((c) => c.id === id)).filter(Boolean);
   const accent = school?.accent_color || "#E53935";
   const primary = school?.primary_color || "#0A0A0B";
   const currency = school?.currency || "";
@@ -354,22 +364,37 @@ export default function EnrollPage() {
     setVisibleCount(PAGE_SIZE);
   };
 
-  const openEnroll = (course) => {
-    setSelectedCourseId(course.id);
-    setForm((f) => ({ ...f, group_id: "" }));
-    setEnrollOpen(true);
+  // A parent can pick several courses for the same child before checking
+  // out — clicking a card toggles it in/out of this selection rather than
+  // opening the form immediately (see the floating summary bar below,
+  // which is what actually opens the enrollment dialog once ready).
+  const toggleCourse = (course) => {
+    setSelectedCourseIds((prev) => (
+      prev.includes(course.id) ? prev.filter((id) => id !== course.id) : [...prev, course.id]
+    ));
   };
+  const removeCourse = (id) => setSelectedCourseIds((prev) => prev.filter((x) => x !== id));
+  const selectedTotal = selectedCourses.reduce((sum, c) => sum + Number(c.price || 0), 0);
 
-  // Derived rather than synced into state via an effect: a course with only
-  // one open group shouldn't need an extra click on a dropdown that already
-  // shows its one option. An explicit user choice (form.group_id) always
-  // wins; this is purely the fallback when nothing's been picked yet.
-  const effectiveGroupId = form.group_id || selectedCourse?.groups.find((g) => g.seats_left > 0)?.id || "";
+  // If every course gets removed (from the card grid or from inside the
+  // dialog itself) while the dialog is open, there's nothing left to enroll
+  // in — close it instead of leaving an empty form up.
+  useEffect(() => {
+    if (enrollOpen && selectedCourses.length === 0) setEnrollOpen(false);
+  }, [enrollOpen, selectedCourses.length]);
+
+  // The parent never picks a specific group — one is auto-assigned per
+  // selected course, the first with an open seat (matching the previous
+  // single-course behavior, just applied per course now).
+  const effectiveGroupIds = selectedCourses
+    .map((c) => c.groups.find((g) => g.seats_left > 0)?.id)
+    .filter(Boolean);
 
   const enrollMut = useMutation({
     mutationFn: (payload) => api.post(`/public/schools/${slug}/enroll`, payload).then((r) => r.data),
     onSuccess: async (data) => {
       setEnrollOpen(false);
+      setSelectedCourseIds([]);
       // Log in first — the parent portal landing page needs an authenticated session.
       await loginWithToken(data.access_token, data.user);
       toast.success(`تم تسجيل ${data.student.first_name} بنجاح!`);
@@ -380,14 +405,13 @@ export default function EnrollPage() {
 
   const onSubmit = (e) => {
     e.preventDefault();
-    // The parent never picks a group — effectiveGroupId auto-assigns the
-    // first one with room (see its own comment above). No group with seats
-    // left means the course itself is full.
-    if (!effectiveGroupId) {
-      toast.error("هذه الدورة مكتملة حاليًا. يرجى التواصل مع المدرسة.");
+    // No group with seats left for one of the picked courses means that
+    // course is full — same per-course fallback as effectiveGroupIds above.
+    if (effectiveGroupIds.length !== selectedCourses.length) {
+      toast.error("واحدة أو أكثر من الدورات المختارة مكتملة حاليًا. يرجى إزالتها والمحاولة مرة أخرى.");
       return;
     }
-    enrollMut.mutate({ ...form, group_id: effectiveGroupId });
+    enrollMut.mutate({ ...form, group_ids: effectiveGroupIds });
   };
 
   if (isLoading) {
@@ -693,7 +717,10 @@ export default function EnrollPage() {
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {visibleCourses.map((c, i) => (
-                    <CourseCard key={c.id} course={c} accent={accent} currency={currency} onSelect={openEnroll} index={i} />
+                    <CourseCard
+                      key={c.id} course={c} accent={accent} currency={currency}
+                      selected={selectedCourseIds.includes(c.id)} onToggle={toggleCourse} index={i}
+                    />
                   ))}
                 </div>
                 {hasMore && (
@@ -709,19 +736,78 @@ export default function EnrollPage() {
         </div>
       )}
 
-      {/* Enrollment dialog — opened from a course card, so the catalog above
-          stays a compact grid instead of an inline form pushing it around. */}
+      {/* Floating selection summary — appears once at least one course is
+          picked, so a parent building a multi-course enrollment always has
+          a visible "continue" affordance without hunting for it, and the
+          catalog above never needs an inline form pushing it around. */}
+      <AnimatePresence>
+        {selectedCourses.length > 0 && !enrollOpen && (
+          <motion.div
+            initial={{ y: 80, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 80, opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 backdrop-blur-sm shadow-[0_-4px_20px_rgba(0,0,0,0.08)]"
+          >
+            <div className="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between gap-4">
+              <div className="font-arabic text-sm">
+                <span className="font-bold">{selectedCourses.length} {selectedCourses.length === 1 ? "دورة مختارة" : "دورات مختارة"}</span>
+                <span className="text-muted-foreground mx-2">·</span>
+                <span className="font-mono font-bold" style={{ color: accent }}>
+                  {selectedTotal.toLocaleString()} {currency}
+                </span>
+              </div>
+              <Button
+                type="button" onClick={() => setEnrollOpen(true)}
+                className="font-arabic font-bold flex-shrink-0" style={{ backgroundColor: accent }}
+              >
+                متابعة التسجيل
+              </Button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Enrollment dialog — opened from the summary bar once the parent's
+          done picking courses, so one form covers the whole bill. */}
       <Dialog open={enrollOpen} onOpenChange={setEnrollOpen}>
         <DialogContent className="max-w-lg bg-card max-h-[88vh] overflow-y-auto" dir="rtl">
-          {selectedCourse && (
+          {selectedCourses.length > 0 && (
             <>
               <DialogHeader>
-                <DialogTitle className="font-arabic text-xl font-bold">{selectedCourse.title}</DialogTitle>
+                <DialogTitle className="font-arabic text-xl font-bold">تسجيل الطفل</DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground">
-                  {courseLevelLabel(selectedCourse) ? `${courseLevelLabel(selectedCourse)} — ` : ""}
-                  املأ البيانات أدناه لتسجيل طفلك في هذه الدورة.
+                  املأ البيانات أدناه لتسجيل طفلك في الدورات المختارة.
                 </DialogDescription>
               </DialogHeader>
+
+              <div className="rounded-lg border border-border divide-y divide-border overflow-hidden">
+                {selectedCourses.map((c) => (
+                  <div key={c.id} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{c.title}</div>
+                      {courseLevelLabel(c) && <div className="text-[11px] text-muted-foreground truncate">{courseLevelLabel(c)}</div>}
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <span className="font-mono text-xs font-bold" style={{ color: accent }}>
+                        {Number(c.price).toLocaleString()} {currency}
+                      </span>
+                      <button
+                        type="button" onClick={() => removeCourse(c.id)}
+                        className="text-muted-foreground hover:text-destructive"
+                        aria-label="إزالة"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                <div className="flex items-center justify-between px-3 py-2 text-sm font-bold bg-muted/40">
+                  <span className="font-arabic">المجموع</span>
+                  <span className="font-mono" style={{ color: accent }}>{selectedTotal.toLocaleString()} {currency}</span>
+                </div>
+              </div>
+
               <form onSubmit={onSubmit} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Field label="الاسم الأول للطالب" required>
