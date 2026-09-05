@@ -3759,14 +3759,17 @@ class TeacherViewSet(TenantScopedViewSet):
 
     def _guard_percentage_edit(self, request, data):
         """Teacher.payment_percentage decides real money owed at payout time,
-        so unlike the rest of this form it isn't something a secretary's
-        'edit' access to the Teachers tab should reach — only the workspace
-        owner/director (or super admin) may set it. The Teacher Payments
-        page is the only place the UI actually offers this field."""
+        so unlike the rest of this form it isn't gated by the Teachers tab's
+        own 'edit' permission — it's gated by 'modify' on Teacher payments
+        instead (the module whose page actually offers this field), same as
+        an owner/director/super admin always get via their full-access
+        shortcut. A user who's been explicitly granted modify there should
+        be able to use it, not silently blocked regardless of what they were
+        granted (see the client-reported issue this was tightened up for)."""
         if 'payment_percentage' in data:
             user = request.user
-            if not user.is_super_admin() and user.role not in ('owner', 'director'):
-                raise PermissionDenied('Only the workspace owner or director can set teacher payment percentages.')
+            if not user.is_super_admin() and not user.can_modify('teacher_payments'):
+                raise PermissionDenied('You do not have permission to set teacher payment percentages.')
             try:
                 pct = float(data['payment_percentage'])
             except (TypeError, ValueError):

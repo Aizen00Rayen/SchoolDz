@@ -6,7 +6,7 @@ import { Download, Plus, Wallet } from "lucide-react";
 import { api, extractError, downloadFrom } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
-import { usePermission, isFullAccessRole } from "@/lib/permissions";
+import { usePermission } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -25,13 +25,9 @@ const EMPTY_PAYOUT = {
 
 export default function TeacherPaymentsPage() {
   const { t } = useI18n();
-  const { tenant, user } = useAuth();
+  const { tenant } = useAuth();
   const qc = useQueryClient();
-  const { canAdd } = usePermission("teacher_payments");
-  // Percentages decide real payouts, so — unlike the rest of this page —
-  // only the workspace owner/director may change them, never a secretary or
-  // accountant even if they've been granted "edit" on Teacher payments.
-  const canEditPercentage = isFullAccessRole(user?.role);
+  const { canAdd, canModify: canEditPercentage } = usePermission("teacher_payments");
 
   const [filters, setFilters] = useState({ from: "", to: "", teacher_id: "", group_id: "" });
   const [open, setOpen] = useState(false);
