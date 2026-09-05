@@ -3749,33 +3749,44 @@ class TeacherViewSet(TenantScopedViewSet):
 
     def update(self, request, *args, **kwargs):
         self.check_module_modify()
-        self._guard_percentage_edit(request, request.data)
+        self._guard_percentage_edit(request, request.data, current=self.get_object())
         return super().update(request, *args, **kwargs)
 
     def partial_update(self, request, *args, **kwargs):
         self.check_module_modify()
-        self._guard_percentage_edit(request, request.data)
+        self._guard_percentage_edit(request, request.data, current=self.get_object())
         return super().partial_update(request, *args, **kwargs)
 
-    def _guard_percentage_edit(self, request, data):
-        """Teacher.payment_percentage decides real money owed at payout time,
-        so unlike the rest of this form it isn't gated by the Teachers tab's
-        own 'edit' permission — it's gated by 'modify' on Teacher payments
-        instead (the module whose page actually offers this field), same as
-        an owner/director/super admin always get via their full-access
-        shortcut. A user who's been explicitly granted modify there should
-        be able to use it, not silently blocked regardless of what they were
-        granted (see the client-reported issue this was tightened up for)."""
-        if 'payment_percentage' in data:
-            user = request.user
-            if not user.is_super_admin() and not user.can_modify('teacher_payments'):
-                raise PermissionDenied('You do not have permission to set teacher payment percentages.')
-            try:
-                pct = float(data['payment_percentage'])
-            except (TypeError, ValueError):
-                raise ValidationError('payment_percentage must be a number')
-            if pct < 0 or pct > 100:
-                raise ValidationError('payment_percentage must be between 0 and 100')
+    def _guard_percentage_edit(self, request, data, current=None):
+        """Teacher.payment_percentage decides real money owed at payout
+        time, so unlike the rest of this form it isn't gated by the
+        Teachers tab's own 'edit' permission — it's gated by 'modify' on
+        Teacher payments instead (the module whose page actually offers
+        this field), same as an owner/director/super admin always get via
+        their full-access shortcut.
+
+        But the Teachers edit form is pre-filled from the full teacher
+        record and resubmits every field verbatim on save — including this
+        one, with no input for it there — so 'payment_percentage' shows up
+        in the payload on every edit regardless of whether anyone touched
+        it. Only enforce the permission when the value is actually
+        *changing* from what's already stored; a secretary with modify on
+        Teachers but no access at all to Teacher payments can otherwise
+        freely edit a teacher's other fields without ever tripping this,
+        exactly because they have no way to change it in the first place."""
+        if 'payment_percentage' not in data:
+            return
+        try:
+            pct = float(data['payment_percentage'])
+        except (TypeError, ValueError):
+            raise ValidationError('payment_percentage must be a number')
+        if pct < 0 or pct > 100:
+            raise ValidationError('payment_percentage must be between 0 and 100')
+        if current is not None and pct == float(current.payment_percentage):
+            return
+        user = request.user
+        if not user.is_super_admin() and not user.can_modify('teacher_payments'):
+            raise PermissionDenied('You do not have permission to set teacher payment percentages.')
 
     @action(detail=True, methods=['post'])
     def invite(self, request, pk=None):
