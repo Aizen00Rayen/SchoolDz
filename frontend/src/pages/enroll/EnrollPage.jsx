@@ -33,7 +33,7 @@ const SOCIAL_ICONS = {
   youtube: Youtube, linkedin: Linkedin, tiktok: Music2,
 };
 
-const SCHOOL_LEVEL_AR = { primary: "ابتدائي", middle: "متوسط", high: "ثانوي" };
+const SCHOOL_LEVEL_AR = { preschool: "التحضيري", primary: "ابتدائي", middle: "متوسط", high: "ثانوي" };
 const SPECIALTY_AR = {
   common_science: "جذع مشترك علوم وتكنولوجيا",
   common_arts: "جذع مشترك آداب وفلسفة",

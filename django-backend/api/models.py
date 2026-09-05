@@ -345,6 +345,7 @@ class Student(models.Model):
     ]
     gender = models.CharField(max_length=50, choices=GENDER_CHOICES, null=True, blank=True)
     SCHOOL_LEVEL_CHOICES = [
+        ('preschool', 'preschool'),
         ('primary', 'primary'),
         ('middle', 'middle'),
         ('high', 'high'),

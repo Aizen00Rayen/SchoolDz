@@ -2491,7 +2491,7 @@ def _darken_hex(hex_color, factor):
 # Same wording as SCHOOL_LEVEL_AR/SPECIALTY_AR/YEAR_ORDINALS_AR in the
 # frontend's EnrollPage.jsx, kept here too since the printed ID card is
 # server-rendered and can't reach the frontend's i18n.
-SCHOOL_LEVEL_AR = {'primary': 'ابتدائي', 'middle': 'متوسط', 'high': 'ثانوي'}
+SCHOOL_LEVEL_AR = {'preschool': 'التحضيري', 'primary': 'ابتدائي', 'middle': 'متوسط', 'high': 'ثانوي'}
 SPECIALTY_AR = {
     'common_science': 'جذع مشترك علوم وتكنولوجيا',
     'common_arts': 'جذع مشترك آداب وفلسفة',
@@ -3938,8 +3938,8 @@ class StudentViewSet(TenantScopedViewSet):
                 continue
 
             school_level = (row.get('school_level') or '').strip().lower()
-            if school_level and school_level not in ('primary', 'middle', 'high'):
-                failed.append({'row': i, 'error': 'school_level must be primary, middle, or high'})
+            if school_level and school_level not in ('preschool', 'primary', 'middle', 'high'):
+                failed.append({'row': i, 'error': 'school_level must be preschool, primary, middle, or high'})
                 continue
 
             school_year_raw = (row.get('school_year') or '').strip()
