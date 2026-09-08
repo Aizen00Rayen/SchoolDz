@@ -28,7 +28,7 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, PermissionDenied, NotFound, APIException, NotAuthenticated
 from rest_framework.authtoken.models import Token
 
-from .models import Tenant, User, TenantMembership, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, PaymentItem, Trip, Book, BookCopy, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_FLAGS, STAFF_ROLES
+from .models import Tenant, User, TenantMembership, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, PaymentItem, Trip, Book, BookCopy, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, DebtWaiver, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_FLAGS, STAFF_ROLES
 from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, RoomSerializer, AttendanceSerializer, PaymentSerializer, PaymentItemSerializer, TripSerializer, BookSerializer, BookCopySerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer, TimetableEntrySerializer
 from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle, EnrollmentRateThrottle, StudentLookupRateThrottle, RegisterRateThrottle, QuizSubmitRateThrottle, log_activity
 
@@ -4800,10 +4800,16 @@ def compute_student_balances(tenant_id):
     for p in cancelled_payments:
         cancelled[p['student_id']] = cancelled.get(p['student_id'], 0.0) + float(p['amount']) - float(p['discount'])
 
+    # A written-off debt (see DebtWaiver) works the same way — subtracted
+    # from cost, never counted as paid, since it was never actually collected.
+    waived = {}
+    for w in DebtWaiver.objects.filter(tenant_id=tenant_id).values('student_id', 'amount'):
+        waived[w['student_id']] = waived.get(w['student_id'], 0.0) + float(w['amount'])
+
     balances = {}
     for student_id in set(cost) | set(paid):
         paid_amount = round(paid.get(student_id, 0.0), 2)
-        cost_amount = round(max(0.0, cost.get(student_id, 0.0) - cancelled.get(student_id, 0.0)), 2)
+        cost_amount = round(max(0.0, cost.get(student_id, 0.0) - cancelled.get(student_id, 0.0) - waived.get(student_id, 0.0)), 2)
         balance = round(paid_amount - cost_amount, 2)
         if balance > BALANCE_THRESHOLD:
             balance_status = 'overpaid'
@@ -4939,6 +4945,38 @@ def payments_student_summary(request):
         'balance': balance,
         'courses': courses,
     })
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def debts_waive(request, student_id):
+    """The Debts page's delete button. A debt isn't a stored row — it's
+    compute_student_balances() finding cost > paid for this student — so
+    "deleting" it writes off the exact amount currently owed (looked up
+    server-side, never trusted from the client) as a DebtWaiver, which that
+    same function already knows to subtract from cost. Nothing to touch on
+    the revenue side: an unpaid debt was never counted as revenue to begin
+    with, only as cost the student hadn't covered yet."""
+    user = request.user
+    tid = require_staff_tenant(user)
+    if not user.is_super_admin() and not user.can_delete('debts'):
+        raise PermissionDenied('Forbidden')
+
+    student = Student.objects.filter(id=student_id, tenant_id=tid).first()
+    if not student:
+        raise NotFound('Student not found')
+
+    balance = compute_student_balances(tid).get(student_id)
+    owed = abs(balance['balance']) if balance and balance['status'] == 'owes' else 0.0
+    if owed <= 0:
+        raise ValidationError('This student has no outstanding debt to write off.')
+
+    waiver = DebtWaiver.objects.create(tenant_id=tid, student_id=student_id, amount=round(owed, 2), created_by=user)
+    log_activity(
+        request, tid, 'delete', category='data', entity_type='debts', entity_id=waiver.id,
+        description=f'Wrote off {waiver.amount} owed by {student.first_name} {student.last_name}',
+    )
+    return Response({'waived': float(waiver.amount)})
 
 
 class GradeViewSet(TenantScopedViewSet):

@@ -1052,6 +1052,29 @@ class TeacherPayout(models.Model):
         ordering = ['-paid_at', '-created_at']
 
 
+class DebtWaiver(models.Model):
+    """A written-off student balance — the Debts page's "delete" action isn't
+    removing a stored row (a debt is just compute_student_balances() finding
+    cost > paid for that student, not a record of its own); it creates one of
+    these instead, for the exact amount owed at the moment it's deleted.
+    compute_student_balances() subtracts a student's total waived amount from
+    their cost the same way it already does for a cancelled payment, so a
+    written-off debt stops showing as owed everywhere that balance feeds
+    (the Debts page, the Payments page's balance coloring) without ever having
+    been counted as revenue in the first place — there's nothing to remove
+    from revenue, only from what the student is considered to still owe."""
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='debt_waivers')
+    student = models.ForeignKey(Student, on_delete=models.CASCADE, db_column='student_id', related_name='debt_waivers')
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'debt_waivers'
+        ordering = ['-created_at']
+
+
 class ActivityLog(models.Model):
     """Append-only audit trail of who did what inside a tenant. Written by
     log_activity() in api/services.py — never edited or deleted through the

@@ -122,6 +122,11 @@ urlpatterns = [
     path('payments/<str:payment_id>/invoice/', views.payment_invoice_pdf, name='payment_invoice_pdf'),
     path('payments/<str:payment_id>/invoice', views.payment_invoice_pdf, name='payment_invoice_pdf_noslash'),
 
+    # Debts — "delete" writes off the student's current owed balance rather
+    # than deleting a stored row (there isn't one — see debts_waive).
+    path('debts/<str:student_id>/waive/', views.debts_waive, name='debts_waive'),
+    path('debts/<str:student_id>/waive', views.debts_waive, name='debts_waive_noslash'),
+
     # Website builder — gallery photo delete/reorder (needs a second id
     # beyond the tenant pk, so it's a plain path rather than a router action)
     path('tenants/<str:tenant_id>/gallery/<str:photo_id>/', views.gallery_photo_detail, name='gallery_photo_detail'),

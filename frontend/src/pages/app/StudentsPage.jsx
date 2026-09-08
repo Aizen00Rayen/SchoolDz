@@ -158,20 +158,22 @@ export default function StudentsPage() {
     if (matches.length === 0) return true;
     return confirm({
       title: t("students.duplicate_title"),
+      // Radix's AlertDialogDescription renders as a <p> — block elements
+      // (div/ul/li) as children are invalid HTML nested inside it, so each
+      // match is its own display:block <span> (phrasing content, valid
+      // inside <p>) rather than a real list.
       description: (
-        <div className="space-y-1.5 text-start">
-          <p>{t("students.duplicate_intro")}</p>
-          <ul className="list-disc ps-4 space-y-0.5">
-            {matches.map((m) => (
-              <li key={m.id}>
-                {m.first_name} {m.last_name}
-                {m.parent_name ? ` — ${m.parent_name}` : ""}
-                {m.birth_date ? ` (${m.birth_date})` : ""}
-                {" "}<span className="font-mono text-xs text-muted-foreground">{m.student_code}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <span className="text-start" style={{ display: "block" }}>
+          <span style={{ display: "block" }}>{t("students.duplicate_intro")}</span>
+          {matches.map((m) => (
+            <span key={m.id} className="ps-2" style={{ display: "block", marginTop: 4 }}>
+              {"• "}{m.first_name} {m.last_name}
+              {m.parent_name ? ` — ${m.parent_name}` : ""}
+              {m.birth_date ? ` (${m.birth_date})` : ""}
+              {" "}<span className="font-mono text-xs text-muted-foreground">{m.student_code}</span>
+            </span>
+          ))}
+        </span>
       ),
       confirmLabel: t("actions.continue_anyway"),
       cancelLabel: t("actions.cancel"),

@@ -1,16 +1,23 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { CircleDollarSign } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { CircleDollarSign, Trash2 } from "lucide-react";
 
-import { api } from "@/lib/api";
+import { api, extractError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
+import { useConfirm } from "@/lib/confirm";
+import { usePermission } from "@/lib/permissions";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { PageHeader, EmptyState, LoadingRows } from "./_shared";
 
 export default function DebtsPage() {
   const { t } = useI18n();
   const { tenant } = useAuth();
+  const { canDelete } = usePermission("debts");
+  const confirm = useConfirm();
+  const qc = useQueryClient();
   const [q, setQ] = useState("");
   const currency = tenant?.currency || "DZD";
 
@@ -18,6 +25,29 @@ export default function DebtsPage() {
     queryKey: ["payments-balances"],
     queryFn: async () => (await api.get("/payments/balances")).data,
   });
+
+  const waiveMut = useMutation({
+    mutationFn: (studentId) => api.delete(`/debts/${studentId}/waive`).then((r) => r.data),
+    onSuccess: () => {
+      toast.success(t("toast.deleted"));
+      qc.invalidateQueries({ queryKey: ["payments-balances"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
+  const deleteDebt = async (row) => {
+    const ok = await confirm({
+      title: t("debts.confirm_delete_title"),
+      description: t("debts.confirm_delete_description", {
+        name: row.student_name,
+        amount: `${Math.round(Math.abs(row.balance)).toLocaleString()} ${currency}`,
+      }),
+      confirmLabel: t("actions.delete"),
+      destructive: true,
+    });
+    if (ok) waiveMut.mutate(row.student_id);
+  };
 
   const debtors = (data?.items || []).filter((r) => r.status === "owes");
   const filtered = q.trim()
@@ -68,6 +98,7 @@ export default function DebtsPage() {
                       {t(k)}
                     </th>
                   ))}
+                  {canDelete && <th className="px-4 py-2.5" />}
                 </tr>
               </thead>
               <tbody>
@@ -93,6 +124,20 @@ export default function DebtsPage() {
                       <td className="px-4 py-3 font-mono font-semibold text-destructive">
                         {Math.round(Math.abs(row.balance)).toLocaleString()} {currency}
                       </td>
+                      {canDelete && (
+                        <td className="px-4 py-3 text-end">
+                          <Button
+                            size="icon" variant="ghost"
+                            onClick={() => deleteDebt(row)}
+                            disabled={waiveMut.isPending}
+                            className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                            aria-label={t("actions.delete")}
+                            data-testid={`debts-delete-${row.student_id}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}

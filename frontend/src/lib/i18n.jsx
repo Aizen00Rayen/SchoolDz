@@ -198,6 +198,8 @@ const TRANSLATIONS = {
     "debts.none_description": "Tous les élèves sont à jour dans leurs paiements.",
     "debts.no_match_title": "Aucun résultat",
     "debts.no_match_description": "Aucun élève endetté ne correspond à cette recherche.",
+    "debts.confirm_delete_title": "Effacer cette dette ?",
+    "debts.confirm_delete_description": "{name} ne devra plus les {amount} actuellement dus — irréversible.",
     "field.amount_paid": "Montant payé",
     // Sidebar category headers
     "nav_category.overview": "Vue d'ensemble",
@@ -1080,6 +1082,8 @@ const TRANSLATIONS = {
     "debts.none_description": "Every student is fully paid up.",
     "debts.no_match_title": "No matches",
     "debts.no_match_description": "No student in debt matches this search.",
+    "debts.confirm_delete_title": "Write off this debt?",
+    "debts.confirm_delete_description": "{name} will no longer owe the {amount} currently due — this can't be undone.",
     "field.amount_paid": "Amount paid",
     // Sidebar category headers
     "nav_category.overview": "Overview",
@@ -1959,6 +1963,8 @@ const TRANSLATIONS = {
     "debts.none_description": "جميع التلاميذ مسدّدون بالكامل.",
     "debts.no_match_title": "لا نتائج",
     "debts.no_match_description": "لا يوجد تلميذ مدين يطابق هذا البحث.",
+    "debts.confirm_delete_title": "إلغاء هذا الدين؟",
+    "debts.confirm_delete_description": "لن يعود {name} مدينًا بمبلغ {amount} المستحق حاليًا — لا يمكن التراجع عن هذا.",
     "field.amount_paid": "المبلغ المدفوع",
     // عناوين تصنيفات القائمة الجانبية
     "nav_category.overview": "نظرة عامة",
