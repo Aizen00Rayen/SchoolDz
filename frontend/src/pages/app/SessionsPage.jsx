@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import CrudPanel, { StatusPill } from "./CrudPanel";
 import { CalendarClock, Repeat } from "lucide-react";
@@ -78,6 +79,7 @@ export default function SessionsPage() {
   const groupMap = Object.fromEntries((groups?.items || []).map((g) => [g.id, g]));
   const teacherMap = Object.fromEntries((teachers?.items || []).map((t) => [t.id, t]));
   const courseMap = Object.fromEntries((courses?.items || []).map((c) => [c.id, c]));
+  const [statusFilter, setStatusFilter] = useState("all");
 
   return (
     <CrudPanel
@@ -91,6 +93,20 @@ export default function SessionsPage() {
       canDelete={canDelete}
       canCreate={canAdd}
       extraActions={canAdd && tenant?.plan === "premium" ? <RecurringDialog groups={groups} /> : null}
+      extraParams={statusFilter !== "all" ? { status: statusFilter } : undefined}
+      filterBar={(
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="bg-background h-9 w-44" data-testid="sessions-status-filter">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="bg-popover">
+            <SelectItem value="all">{t("sessions.filter_all")}</SelectItem>
+            <SelectItem value="scheduled">{t("status.scheduled")}</SelectItem>
+            <SelectItem value="completed">{t("status.completed")}</SelectItem>
+            <SelectItem value="cancelled">{t("status.cancelled")}</SelectItem>
+          </SelectContent>
+        </Select>
+      )}
       columns={[
         {
           key: "series", label: "",

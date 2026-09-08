@@ -86,6 +86,9 @@ class StudentSerializer(serializers.ModelSerializer):
     parent_id = TenantScopedPKField(
         Guardian, source='parent', allow_null=True, required=False
     )
+    # Surfaced so the search dropdown/list can tell same-name students apart
+    # by their guardian, without a lookup request per row.
+    parent_name = serializers.CharField(source='parent.name', read_only=True, default=None)
 
     class Meta:
         model = Student
@@ -242,12 +245,19 @@ class TripSerializer(serializers.ModelSerializer):
 
 class BookSerializer(serializers.ModelSerializer):
     tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)
+    author_teacher_id = TenantScopedPKField(
+        Teacher, source='author_teacher', allow_null=True, required=False
+    )
+    author_teacher_name = serializers.SerializerMethodField()
     in_stock_count = serializers.SerializerMethodField()
     sold_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Book
-        exclude = ['tenant']
+        exclude = ['tenant', 'author_teacher']
+
+    def get_author_teacher_name(self, obj):
+        return f'{obj.author_teacher.first_name} {obj.author_teacher.last_name}' if obj.author_teacher else None
 
     def get_in_stock_count(self, obj):
         # .all() hits the prefetch cache set up by the view (prefetch_related

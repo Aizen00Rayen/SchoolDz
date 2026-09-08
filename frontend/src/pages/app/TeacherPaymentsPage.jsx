@@ -36,6 +36,7 @@ export default function TeacherPaymentsPage() {
   // id — only holds an entry while a field has been touched and not yet
   // saved, so unedited rows always reflect the server value.
   const [pctDrafts, setPctDrafts] = useState({});
+  const [bookPctDrafts, setBookPctDrafts] = useState({});
 
   const query = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
 
@@ -101,6 +102,33 @@ export default function TeacherPaymentsPage() {
       return;
     }
     percentageMut.mutate({ teacherId, value });
+  };
+
+  const bookPercentageMut = useMutation({
+    mutationFn: ({ teacherId, value }) => api.patch(`/teachers/${teacherId}`, { book_percentage: value }).then((r) => r.data),
+    onSuccess: (_, { teacherId }) => {
+      toast.success(t("toast.updated"));
+      qc.invalidateQueries({ queryKey: ["teacher-payments"] });
+      setBookPctDrafts((prev) => { const next = { ...prev }; delete next[teacherId]; return next; });
+    },
+    onError: (e, { teacherId }) => {
+      toast.error(extractError(e));
+      setBookPctDrafts((prev) => { const next = { ...prev }; delete next[teacherId]; return next; });
+    },
+  });
+
+  const saveBookPercentage = (teacherId, currentServerValue, draftValue) => {
+    let value = parseFloat(draftValue);
+    if (Number.isNaN(value)) {
+      setBookPctDrafts((prev) => { const next = { ...prev }; delete next[teacherId]; return next; });
+      return;
+    }
+    value = Math.min(100, Math.max(0, value));
+    if (value === currentServerValue) {
+      setBookPctDrafts((prev) => { const next = { ...prev }; delete next[teacherId]; return next; });
+      return;
+    }
+    bookPercentageMut.mutate({ teacherId, value });
   };
 
   const submit = (e) => {
@@ -202,7 +230,7 @@ export default function TeacherPaymentsPage() {
             <table className="w-full min-w-[640px] text-sm">
               <thead className="bg-muted/40 border-b border-border">
                 <tr>
-                  {["menu.teachers", "tp.percentage", "tp.present_count", "tp.earned", "tp.paid_out", "tp.balance"].map((k) => (
+                  {["menu.teachers", "tp.percentage", "tp.present_count", "tp.book_percentage", "tp.book_earned", "tp.earned", "tp.paid_out", "tp.balance"].map((k) => (
                     <th key={k} className="text-start px-4 py-2.5 font-medium text-xs uppercase tracking-widest text-muted-foreground">
                       {t(k)}
                     </th>
@@ -234,6 +262,27 @@ export default function TeacherPaymentsPage() {
                       )}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs">{r.present_count}</td>
+                    <td className="px-4 py-3 font-mono text-xs">
+                      {!canEditPercentage ? (
+                        `${r.book_percentage}%`
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <Input
+                            type="number" min="0" max="100" step="1"
+                            className="h-8 w-20 font-mono text-xs"
+                            value={bookPctDrafts[r.teacher_id] ?? r.book_percentage}
+                            onChange={(e) => setBookPctDrafts((prev) => ({ ...prev, [r.teacher_id]: e.target.value }))}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") e.target.blur();
+                            }}
+                            onBlur={(e) => saveBookPercentage(r.teacher_id, r.book_percentage, e.target.value)}
+                            data-testid={`tp-book-percentage-input-${r.teacher_id}`}
+                          />
+                          <span className="text-muted-foreground">%</span>
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{money(r.book_earned)}</td>
                     <td className="px-4 py-3 font-mono">{money(r.earned)}</td>
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{money(r.paid_out)}</td>
                     <td className={`px-4 py-3 font-mono font-semibold ${r.balance > 0 ? "text-destructive" : ""}`}>

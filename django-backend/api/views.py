@@ -3758,35 +3758,36 @@ class TeacherViewSet(TenantScopedViewSet):
         return super().partial_update(request, *args, **kwargs)
 
     def _guard_percentage_edit(self, request, data, current=None):
-        """Teacher.payment_percentage decides real money owed at payout
-        time, so unlike the rest of this form it isn't gated by the
-        Teachers tab's own 'edit' permission — it's gated by 'modify' on
-        Teacher payments instead (the module whose page actually offers
-        this field), same as an owner/director/super admin always get via
-        their full-access shortcut.
+        """Teacher.payment_percentage and Teacher.book_percentage both decide
+        real money owed at payout time, so unlike the rest of this form
+        neither is gated by the Teachers tab's own 'edit' permission —
+        they're gated by 'modify' on Teacher payments instead (the module
+        whose page actually offers these fields), same as an owner/director/
+        super admin always get via their full-access shortcut.
 
         But the Teachers edit form is pre-filled from the full teacher
-        record and resubmits every field verbatim on save — including this
-        one, with no input for it there — so 'payment_percentage' shows up
-        in the payload on every edit regardless of whether anyone touched
-        it. Only enforce the permission when the value is actually
-        *changing* from what's already stored; a secretary with modify on
-        Teachers but no access at all to Teacher payments can otherwise
-        freely edit a teacher's other fields without ever tripping this,
-        exactly because they have no way to change it in the first place."""
-        if 'payment_percentage' not in data:
-            return
-        try:
-            pct = float(data['payment_percentage'])
-        except (TypeError, ValueError):
-            raise ValidationError('payment_percentage must be a number')
-        if pct < 0 or pct > 100:
-            raise ValidationError('payment_percentage must be between 0 and 100')
-        if current is not None and pct == float(current.payment_percentage):
-            return
+        record and resubmits every field verbatim on save — including these,
+        with no input for them there — so both show up in the payload on
+        every edit regardless of whether anyone touched them. Only enforce
+        the permission when a value is actually *changing* from what's
+        already stored; a secretary with modify on Teachers but no access at
+        all to Teacher payments can otherwise freely edit a teacher's other
+        fields without ever tripping this, exactly because they have no way
+        to change either one in the first place."""
         user = request.user
-        if not user.is_super_admin() and not user.can_modify('teacher_payments'):
-            raise PermissionDenied('You do not have permission to set teacher payment percentages.')
+        for field in ('payment_percentage', 'book_percentage'):
+            if field not in data:
+                continue
+            try:
+                pct = float(data[field])
+            except (TypeError, ValueError):
+                raise ValidationError(f'{field} must be a number')
+            if pct < 0 or pct > 100:
+                raise ValidationError(f'{field} must be between 0 and 100')
+            if current is not None and pct == float(getattr(current, field)):
+                continue
+            if not user.is_super_admin() and not user.can_modify('teacher_payments'):
+                raise PermissionDenied('You do not have permission to set teacher payment percentages.')
 
     @action(detail=True, methods=['post'])
     def invite(self, request, pk=None):
@@ -3840,7 +3841,9 @@ class StudentViewSet(TenantScopedViewSet):
     module_view_exempt_actions = ['verify']
 
     def list(self, request, *args, **kwargs):
-        queryset = self.filter_queryset(self.get_queryset())
+        # select_related keeps the serializer's new parent_name field from
+        # firing a query per row.
+        queryset = self.filter_queryset(self.get_queryset()).select_related('parent')
         status_val = request.GET.get('status')
         if status_val:
             queryset = queryset.filter(status=status_val)
@@ -4452,7 +4455,14 @@ class ClassSessionViewSet(TenantScopedViewSet):
                 Q(topic__icontains=q) | Q(room__icontains=q)
             )
 
-        queryset = queryset.order_by('start_at')[:1000]
+        session_status = request.GET.get('status')
+        if session_status in ('scheduled', 'completed', 'cancelled'):
+            queryset = queryset.filter(status=session_status)
+
+        # Newest-first — a school accumulates a year's worth of sessions, and
+        # the ones anyone actually wants to look at (today's, this week's)
+        # are always at the top, not buried below terms of history.
+        queryset = queryset.order_by('-start_at')[:1000]
         serializer = self.get_serializer(queryset, many=True)
         return Response({'items': serializer.data, 'total': len(serializer.data)})
 
@@ -4778,10 +4788,22 @@ def compute_student_balances(tenant_id):
     for p in payments:
         paid[p['student_id']] = paid.get(p['student_id'], 0.0) + float(p['amount']) - float(p['discount'])
 
+    # A cancelled payment stops counting as money received (see `paid`
+    # above, which only looks at status='paid'), but cost here comes purely
+    # from attendance — independent of any specific payment — so without
+    # this, cancelling would leave the student looking like they now owe
+    # back whatever that payment used to cover. Writing the same amount off
+    # `cost` instead means a cancellation is a net no-op on the student's
+    # balance rather than a new debt.
+    cancelled = {}
+    cancelled_payments = Payment.objects.filter(tenant_id=tenant_id, status='cancelled').values('student_id', 'amount', 'discount')
+    for p in cancelled_payments:
+        cancelled[p['student_id']] = cancelled.get(p['student_id'], 0.0) + float(p['amount']) - float(p['discount'])
+
     balances = {}
     for student_id in set(cost) | set(paid):
         paid_amount = round(paid.get(student_id, 0.0), 2)
-        cost_amount = round(cost.get(student_id, 0.0), 2)
+        cost_amount = round(max(0.0, cost.get(student_id, 0.0) - cancelled.get(student_id, 0.0)), 2)
         balance = round(paid_amount - cost_amount, 2)
         if balance > BALANCE_THRESHOLD:
             balance_status = 'overpaid'
@@ -4845,8 +4867,22 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
         net_factor = (subtotal - float(bill.discount)) / subtotal if subtotal else 1.0
         paid[bill.student_id] = paid.get(bill.student_id, 0.0) + float(item.amount) * net_factor
 
+    # Same write-off as compute_student_balances: a cancelled bill's share of
+    # this course is forgiven from `cost` rather than left as an unpaid gap.
+    cancelled = {}
+    cancelled_items_qs = PaymentItem.objects.filter(
+        payment__tenant_id=tenant_id, payment__status='cancelled', course_id=course_id,
+    ).select_related('payment')
+    if student_ids is not None:
+        cancelled_items_qs = cancelled_items_qs.filter(payment__student_id__in=student_ids)
+    for item in cancelled_items_qs:
+        bill = item.payment
+        subtotal = float(bill.amount)
+        net_factor = (subtotal - float(bill.discount)) / subtotal if subtotal else 1.0
+        cancelled[bill.student_id] = cancelled.get(bill.student_id, 0.0) + float(item.amount) * net_factor
+
     return {
-        student_id: paid.get(student_id, 0.0) + BALANCE_THRESHOLD >= cost_amount
+        student_id: paid.get(student_id, 0.0) + BALANCE_THRESHOLD >= (cost_amount - cancelled.get(student_id, 0.0))
         for student_id, cost_amount in cost.items()
     }
 
@@ -4874,6 +4910,35 @@ def payments_balances(request):
     } for s in students]
     rows.sort(key=lambda r: r['balance'])
     return Response({'items': rows, 'total': len(rows)})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def payments_student_summary(request):
+    """Backs the Payments page's "click a student" detail panel: their
+    running balance (same figures as payments_balances, for one student) plus
+    which courses they're currently enrolled in — two things a secretary
+    otherwise has to open the Students and Groups pages separately to see."""
+    user = request.user
+    tid = require_staff_tenant(user)
+    if not user.can_view('payments') and not user.can_view('debts'):
+        raise PermissionDenied('Forbidden')
+
+    student_id = request.GET.get('student_id')
+    student = Student.objects.filter(id=student_id, tenant_id=tid).select_related('parent').first()
+    if not student:
+        raise NotFound('Student not found')
+
+    balance = compute_student_balances(tid).get(student_id, {'paid': 0.0, 'cost': 0.0, 'balance': 0.0, 'status': 'settled'})
+    groups = Group.objects.filter(tenant_id=tid, students__id=student_id).select_related('course')
+    courses = [{'group_id': g.id, 'group_name': g.name, 'course_id': g.course_id, 'course_title': g.course.title} for g in groups]
+
+    return Response({
+        'student_id': student.id,
+        'student_name': f'{student.first_name} {student.last_name}',
+        'balance': balance,
+        'courses': courses,
+    })
 
 
 class GradeViewSet(TenantScopedViewSet):
@@ -5681,17 +5746,41 @@ def compute_teacher_earnings(tenant_id, request, _context=None):
     for po in payouts:
         paid_out[po.teacher_id] = paid_out.get(po.teacher_id, 0.0) + float(po.amount)
 
+    # Book royalties: PaymentItems for books this teacher authored, on paid
+    # bills, times their book_percentage — a second income stream alongside
+    # session-teaching earnings, driven by sales rather than attendance so
+    # it's computed independently of the attendance loop above.
+    book_items = PaymentItem.objects.filter(
+        payment__tenant_id=tenant_id, payment__status='paid', kind='book',
+        book__author_teacher_id__isnull=False,
+    ).select_related('payment', 'book')
+    book_items = filter_by_date_range(book_items, request, 'payment__paid_at__date')
+    if teacher_id:
+        book_items = book_items.filter(book__author_teacher_id=teacher_id)
+    book_revenue = {}
+    for item in book_items:
+        bill = item.payment
+        subtotal = float(bill.amount)
+        net_factor = (subtotal - float(bill.discount)) / subtotal if subtotal else 1.0
+        author_id = item.book.author_teacher_id
+        book_revenue[author_id] = book_revenue.get(author_id, 0.0) + float(item.amount) * net_factor
+
     rows = []
     for t in teachers:
         count = present_count.get(t.id, 0)
         pct = float(t.payment_percentage or 0)
-        earned = round(base_value.get(t.id, 0.0) * pct / 100, 2)
+        session_earned = base_value.get(t.id, 0.0) * pct / 100
+        book_pct = float(t.book_percentage or 0)
+        book_earned = round(book_revenue.get(t.id, 0.0) * book_pct / 100, 2)
+        earned = round(session_earned + book_earned, 2)
         already = round(paid_out.get(t.id, 0.0), 2)
         rows.append({
             'teacher_id': t.id,
             'teacher_name': f'{t.first_name} {t.last_name}',
             'percentage': pct,
             'present_count': count,
+            'book_percentage': book_pct,
+            'book_earned': book_earned,
             'earned': earned,
             'paid_out': already,
             'balance': round(earned - already, 2),
@@ -5710,10 +5799,10 @@ def teacher_payments_summary(request):
 
     rows = compute_teacher_earnings(user.tenant_id, request)
     if request.GET.get('type') in ('csv', 'xlsx'):
-        headers = ['Teacher', 'Percentage', 'Present count', 'Earned', 'Paid out', 'Balance']
+        headers = ['Teacher', 'Percentage', 'Present count', 'Books %', 'Book earned', 'Earned', 'Paid out', 'Balance']
         return export_rows(
             headers,
-            [[r['teacher_name'], r['percentage'], r['present_count'], r['earned'], r['paid_out'], r['balance']] for r in rows],
+            [[r['teacher_name'], r['percentage'], r['present_count'], r['book_percentage'], r['book_earned'], r['earned'], r['paid_out'], r['balance']] for r in rows],
             'teacher-payments', request.GET.get('type'),
         )
     return Response({

@@ -201,18 +201,20 @@ export function StudentSearchSelect({ value, onChange, placeholder }) {
     enabled: open && debounced.length > 0,
   });
 
-  // Resolve a label for a pre-selected id (editing an existing record) that
-  // never came through a search result in this render.
-  useQuery({
+  // Resolve a label for a pre-selected id (editing an existing record, or a
+  // value set programmatically before the user ever searched) that never
+  // came through a search result in this render. Reacting to `data` via an
+  // effect — rather than setLabel as a side effect inside queryFn — means
+  // this still resolves on a cache hit, where queryFn doesn't re-run at all.
+  const { data: labelData } = useQuery({
     queryKey: ["students-labels", value],
-    queryFn: async () => {
-      const { data } = await api.get("/students", { params: { ids: value } });
-      const s = data.items[0];
-      if (s) setLabel(`${s.first_name} ${s.last_name}`);
-      return data;
-    },
+    queryFn: async () => (await api.get("/students", { params: { ids: value } })).data,
     enabled: !!value && !label,
   });
+  useEffect(() => {
+    const s = labelData?.items?.[0];
+    if (s) setLabel(`${s.first_name} ${s.last_name}`);
+  }, [labelData]);
 
   const select = (s) => {
     onChange(s.id);
@@ -243,7 +245,14 @@ export function StudentSearchSelect({ value, onChange, placeholder }) {
     setQuery("");
   };
 
-  if (value && label && !open) {
+  // Deliberately not gated on `open` — the only way this input's own
+  // `open` state can be true while a resolved value+label is showing here
+  // is a focus event landing on the search box before its label finished
+  // resolving (e.g. a dialog auto-focusing its first field while a
+  // pre-filled student id is still being looked up). That's not the user
+  // asking to search again, so it must never block showing the pill once
+  // the label is in.
+  if (value && label) {
     return (
       <div className="flex items-center gap-2 h-10 px-3 rounded-lg border border-border bg-background text-sm">
         <span className="flex-1 truncate font-medium">{label}</span>
@@ -281,8 +290,15 @@ export function StudentSearchSelect({ value, onChange, placeholder }) {
                 className="w-full flex items-center gap-2 px-2 py-1.5 text-sm text-start hover:bg-muted/60 cursor-pointer"
                 data-testid={`student-search-select-result-${s.id}`}
               >
-                <span>{s.first_name} {s.last_name}</span>
-                <span className="text-[11px] font-mono text-muted-foreground ms-auto">{s.student_code}</span>
+                <span className="flex-1 min-w-0">
+                  <span className="block truncate">{s.first_name} {s.last_name}</span>
+                  {(s.parent_name || s.birth_date) && (
+                    <span className="block truncate text-[11px] text-muted-foreground">
+                      {[s.parent_name, s.birth_date].filter(Boolean).join(" · ")}
+                    </span>
+                  )}
+                </span>
+                <span className="text-[11px] font-mono text-muted-foreground ms-auto flex-shrink-0">{s.student_code}</span>
               </button>
             ))
           )}

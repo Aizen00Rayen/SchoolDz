@@ -118,6 +118,7 @@ urlpatterns = [
     # Payments
     *_both('payments/overdue', views.payments_overdue, 'payments_overdue'),
     *_both('payments/balances', views.payments_balances, 'payments_balances'),
+    *_both('payments/student-summary', views.payments_student_summary, 'payments_student_summary'),
     path('payments/<str:payment_id>/invoice/', views.payment_invoice_pdf, name='payment_invoice_pdf'),
     path('payments/<str:payment_id>/invoice', views.payment_invoice_pdf, name='payment_invoice_pdf_noslash'),
 

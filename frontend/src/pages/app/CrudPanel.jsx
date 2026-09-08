@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { Fragment, forwardRef, useImperativeHandle, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Plus, Search, Trash2, Pencil, AlertTriangle } from "lucide-react";
@@ -41,12 +41,22 @@ function cleanPayload(obj) {
  *    state into the exact shape the API expects right before submit (e.g.
  *    dropping unused fields on a per-row basis inside a nested array,
  *    which cleanPayload's shallow strip doesn't reach).
+ *  - onBeforeSubmit?: (form) => Promise<boolean> — called on create only,
+ *    right before the record is actually sent. Resolving false cancels the
+ *    submission (e.g. warning about a likely-duplicate record and letting
+ *    the user back out); resolving true (or omitting the prop) proceeds as
+ *    normal.
+ *
+ * Also exposes an imperative ref API — `ref.current.openCreateWith(partial)`
+ * opens the create form with `partial` merged over defaultForm, for another
+ * page to jump straight into "add a record for this specific thing" (e.g.
+ * a "record a payment" shortcut for a student found elsewhere on the page).
  */
-export default function CrudPanel({
+const CrudPanel = forwardRef(function CrudPanel({
   moduleKey, endpoint, title, subtitle, columns, defaultForm, renderForm,
   emptyIcon: EmptyIcon, canEdit = true, canDelete = true, canCreate = true, extraActions,
-  rowClassName, renderRowActions, extraParams, filterBar, prepareEditForm, preparePayload,
-}) {
+  rowClassName, renderRowActions, extraParams, filterBar, prepareEditForm, preparePayload, onBeforeSubmit,
+}, ref) {
   const { t } = useI18n();
   const confirm = useConfirm();
   const qc = useQueryClient();
@@ -99,6 +109,14 @@ export default function CrudPanel({
     setOpen(true);
   };
 
+  const openCreateWith = (partial) => {
+    setEditing(null);
+    setForm({ ...(defaultForm || {}), ...partial });
+    setOpen(true);
+  };
+
+  useImperativeHandle(ref, () => ({ openCreateWith }));
+
   const openEdit = (row) => {
     setEditing(row);
     setForm({ ...defaultForm, ...(prepareEditForm ? prepareEditForm(row) : row) });
@@ -126,11 +144,15 @@ export default function CrudPanel({
     }
   };
 
-  const onSubmit = (e) => {
+  const onSubmit = async (e) => {
     e.preventDefault();
     const clean = cleanPayload(preparePayload ? preparePayload(form) : form);
-    if (editing) updateMut.mutate({ id: editing.id, payload: clean });
-    else createMut.mutate(clean);
+    if (editing) {
+      updateMut.mutate({ id: editing.id, payload: clean });
+      return;
+    }
+    if (onBeforeSubmit && !(await onBeforeSubmit(form))) return;
+    createMut.mutate(clean);
   };
 
   const items = data?.items || [];
@@ -344,6 +366,7 @@ export default function CrudPanel({
       </Dialog>
     </div>
   );
-}
+});
 
+export default CrudPanel;
 export { StatusPill };

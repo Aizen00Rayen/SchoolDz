@@ -307,6 +307,10 @@ class Teacher(models.Model):
     # Share of their students' payments this teacher earns, in percent — the
     # basis for the Teacher payments page. 0 means nothing is owed.
     payment_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    # Share of the sale price this teacher earns on books they authored (see
+    # Book.author_teacher) — a second, independent income stream on the
+    # Teacher payments page alongside session-teaching earnings.
+    book_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     photo_url = models.CharField(max_length=255, null=True, blank=True)
     # Optional HR documents — image or PDF, viewable/downloadable by the
     # tenant only (not shown on the public website, unlike photo_url).
@@ -596,6 +600,16 @@ class Payment(models.Model):
     kind = models.CharField(max_length=50, choices=KIND_CHOICES, default='monthly')
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     discount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    # What share of this bill's subtotal actually goes to the teacher vs the
+    # school — replaces a flat discount entry in the UI for the common case
+    # of a family member getting one or both shares waived. Purely a record
+    # of *why* `discount` is what it is; `discount` itself remains the one
+    # field every revenue/balance aggregate reads, so cancelling, reporting,
+    # and the invoice all keep working unchanged. Null when not set via the
+    # percentage UI (e.g. a bill with no course item, or written before this
+    # field existed).
+    teacher_percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    school_percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     METHOD_CHOICES = [
         ('cash', 'cash'),
         ('card', 'card'),
@@ -702,6 +716,13 @@ class Book(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField(null=True, blank=True)
     price = models.DecimalField(max_digits=10, decimal_places=2)
+    # Null means the school itself authored/owns this book (the historical
+    # default). Set when a teacher wrote it — Teacher.book_percentage then
+    # determines their cut of each sale on the Teacher payments page.
+    author_teacher = models.ForeignKey(
+        'Teacher', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='author_teacher_id', related_name='authored_books',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

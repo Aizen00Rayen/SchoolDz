@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
@@ -12,6 +12,9 @@ import { StudentSearchSelect, courseOptionLabel, tripOptionLabel, bookOptionLabe
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { api, extractError, openInvoicePdf } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
@@ -27,10 +30,22 @@ const BALANCE_CLS = {
 
 const EMPTY_ITEM = { item_type: "course", kind: "monthly", course_id: "", trip_id: "", book_id: "", amount: 0 };
 
+// Default to the full price (100% combined) — nothing waived unless the
+// secretary actively edits one of the two share fields down.
 const DEFAULT_FORM = {
   student_id: "", items: [{ ...EMPTY_ITEM }],
-  discount: 0, method: "cash", status: "paid", reference: "", notes: "",
+  teacher_percentage: 0, school_percentage: 100,
+  method: "cash", status: "paid", reference: "", notes: "",
 };
+
+function InfoRow({ label, value }) {
+  return (
+    <div className="flex justify-between text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      <span className="font-mono font-medium">{value}</span>
+    </div>
+  );
+}
 
 /** A bill's line-item titles, joined — "Test Course + Museum Trip". Reads
  * straight off the API's nested items (course_title/trip_title/book_title
@@ -65,6 +80,14 @@ export default function PaymentsPage() {
     queryKey: ["books-list"],
     queryFn: async () => (await api.get("/books")).data,
   });
+  const { data: groups } = useQuery({
+    queryKey: ["groups-list"],
+    queryFn: async () => (await api.get("/groups")).data,
+  });
+  const { data: teachers } = useQuery({
+    queryKey: ["teachers-list"],
+    queryFn: async () => (await api.get("/teachers")).data,
+  });
   const { data: overdue } = useQuery({
     queryKey: ["payments-overdue"],
     queryFn: async () => (await api.get("/payments/overdue")).data,
@@ -74,10 +97,33 @@ export default function PaymentsPage() {
     queryFn: async () => (await api.get("/payments/balances")).data,
   });
   const [balanceFilter, setBalanceFilter] = useState("all");
+  const [detailStudentId, setDetailStudentId] = useState(null);
+  const crudRef = useRef(null);
   const stuMap = Object.fromEntries((students?.items || []).map((s) => [s.id, s]));
+  const teacherMap = Object.fromEntries((teachers?.items || []).map((t) => [t.id, t]));
   const balanceMap = Object.fromEntries((balances?.items || []).map((b) => [b.student_id, b]));
 
+  const { data: detail, isLoading: detailLoading } = useQuery({
+    queryKey: ["payments-student-summary", detailStudentId],
+    queryFn: async () => (await api.get("/payments/student-summary", { params: { student_id: detailStudentId } })).data,
+    enabled: Boolean(detailStudentId),
+  });
+
   const subtotalOf = (items) => (items || []).reduce((sum, it) => sum + itemAmount(it), 0);
+
+  // Best-effort default for the teacher-% field: if the bill's course item
+  // matches a group this student is already enrolled in, suggest that
+  // group's teacher's standing percentage. Returns null when it can't be
+  // resolved (no matching group/teacher) — the field is always editable
+  // either way.
+  const suggestTeacherPct = (studentId, courseId) => {
+    if (!studentId || !courseId) return null;
+    const group = (groups?.items || []).find(
+      (g) => g.course_id === courseId && (g.student_ids || []).includes(studentId)
+    );
+    const teacher = group ? teacherMap[group.teacher_id] : null;
+    return teacher ? parseFloat(teacher.payment_percentage) || 0 : null;
+  };
 
   return (
     <div>
@@ -97,6 +143,7 @@ export default function PaymentsPage() {
         </div>
       )}
       <CrudPanel
+      ref={crudRef}
       moduleKey="payments"
       endpoint="/payments"
       title={t("menu.payments")}
@@ -118,6 +165,21 @@ export default function PaymentsPage() {
       // (e.g. trip_id: "" on a course item) that would fail validation.
       preparePayload={(form) => {
         const { items: rawItems, ...rest } = form;
+        // `discount` is derived, never typed directly — recompute it from
+        // teacher_percentage/school_percentage whenever either is actually
+        // set (a fresh bill always has both; see DEFAULT_FORM). A legacy
+        // bill from before this feature has both null — leave its stored
+        // discount untouched rather than silently zeroing it out just
+        // because someone re-saved its method/status.
+        const hasPercentages = !form.id || rest.teacher_percentage != null || rest.school_percentage != null;
+        if (hasPercentages) {
+          const subtotal = subtotalOf(rawItems);
+          const teacherPct = parseFloat(rest.teacher_percentage ?? 0) || 0;
+          const schoolPct = parseFloat(rest.school_percentage ?? 100) || 0;
+          rest.teacher_percentage = teacherPct;
+          rest.school_percentage = schoolPct;
+          rest.discount = Math.round(Math.max(0, subtotal * (1 - (teacherPct + schoolPct) / 100)) * 100) / 100;
+        }
         // Editing: items are read-only server-side and immutable in this
         // UI (see the isEditing branch below) — nothing to send for them.
         if (form.id) return rest;
@@ -189,9 +251,15 @@ export default function PaymentsPage() {
                 })
               : undefined;
             return (
-              <span className={`font-medium ${b ? BALANCE_CLS[b.status] : ""}`} title={tooltip}>
+              <button
+                type="button"
+                className={`font-medium hover:underline text-start ${b ? BALANCE_CLS[b.status] : ""}`}
+                title={tooltip}
+                onClick={() => setDetailStudentId(r.student_id)}
+                data-testid={`payments-student-detail-${r.student_id}`}
+              >
                 {s.first_name} {s.last_name}
-              </span>
+              </button>
             );
           },
         },
@@ -214,7 +282,9 @@ export default function PaymentsPage() {
         const isEditing = Boolean(form.id);
         const items = form.items || [];
         const subtotal = subtotalOf(items);
-        const discount = parseFloat(form.discount) || 0;
+        const teacherPct = parseFloat(form.teacher_percentage ?? 0) || 0;
+        const schoolPct = parseFloat(form.school_percentage ?? 100) || 0;
+        const discount = Math.max(0, subtotal * (1 - (teacherPct + schoolPct) / 100));
         const total = Math.max(0, subtotal - discount);
         const currency = tenant?.currency || "DZD";
 
@@ -344,7 +414,23 @@ export default function PaymentsPage() {
                           </Field>
                         ) : (
                           <Field label={t("field.course")}>
-                            <Select value={item.course_id || ""} onValueChange={(v) => updateItem(idx, { course_id: v })}>
+                            <Select
+                              value={item.course_id || ""}
+                              onValueChange={(v) => {
+                                const patch = { items: items.map((it, i) => (i === idx ? { ...it, course_id: v } : it)) };
+                                // Only auto-suggest once, before the secretary has
+                                // touched either share field — never overwrite an
+                                // in-progress manual edit.
+                                if (form.teacher_percentage === DEFAULT_FORM.teacher_percentage && form.school_percentage === DEFAULT_FORM.school_percentage) {
+                                  const suggested = suggestTeacherPct(form.student_id, v);
+                                  if (suggested != null) {
+                                    patch.teacher_percentage = suggested;
+                                    patch.school_percentage = Math.max(0, 100 - suggested);
+                                  }
+                                }
+                                setForm({ ...form, ...patch });
+                              }}
+                            >
                               <SelectTrigger className="bg-background"><SelectValue placeholder="—" /></SelectTrigger>
                               <SelectContent className="bg-popover">
                                 {(courses?.items || []).map((c) => (
@@ -391,10 +477,18 @@ export default function PaymentsPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label={t("field.discount")}>
+            <Field label={t("payments.teacher_percentage")}>
               <Input
-                type="number" value={form.discount || 0}
-                onChange={(e) => setForm({ ...form, discount: parseFloat(e.target.value) || 0 })}
+                type="number" min="0" max="100" value={teacherPct}
+                onChange={(e) => setForm({ ...form, teacher_percentage: parseFloat(e.target.value) || 0 })}
+                data-testid="payments-teacher-percentage"
+              />
+            </Field>
+            <Field label={t("payments.school_percentage")}>
+              <Input
+                type="number" min="0" max="100" value={schoolPct}
+                onChange={(e) => setForm({ ...form, school_percentage: parseFloat(e.target.value) || 0 })}
+                data-testid="payments-school-percentage"
               />
             </Field>
             <Field label={t("field.status")}>
@@ -434,6 +528,64 @@ export default function PaymentsPage() {
         );
       }}
       />
+
+      <Dialog open={Boolean(detailStudentId)} onOpenChange={(o) => !o && setDetailStudentId(null)}>
+        <DialogContent className="bg-card max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl">
+              {detail?.student_name || t("payments.detail_title")}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              {t("payments.detail_title")}
+            </DialogDescription>
+          </DialogHeader>
+
+          {detailLoading ? (
+            <div className="text-sm text-muted-foreground">{t("actions.loading")}</div>
+          ) : detail ? (
+            <div className="space-y-4">
+              <div className="rounded-lg bg-muted/40 p-3 space-y-1">
+                <InfoRow label={t("payments.total_paid")} value={`${Math.round(detail.balance.paid).toLocaleString()} ${tenant?.currency || "DZD"}`} />
+                <InfoRow label={t("payments.total_cost")} value={`${Math.round(detail.balance.cost).toLocaleString()} ${tenant?.currency || "DZD"}`} />
+                <div className={`flex justify-between text-sm font-semibold pt-1 border-t border-border ${BALANCE_CLS[detail.balance.status] || ""}`}>
+                  <span>{t("payments.balance_label")} — {t(`payments.balance_${detail.balance.status}`)}</span>
+                  <span className="font-mono">{Math.round(detail.balance.balance).toLocaleString()} {tenant?.currency || "DZD"}</span>
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-xs font-medium mb-1.5 block">{t("payments.enrolled_courses")}</Label>
+                {detail.courses.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">{t("payments.no_courses")}</div>
+                ) : (
+                  <div className="rounded-lg border border-border divide-y divide-border">
+                    {detail.courses.map((c) => (
+                      <div key={c.group_id} className="px-3 py-2 text-sm flex items-center justify-between">
+                        <span>{c.course_title}</span>
+                        <span className="text-xs text-muted-foreground">{c.group_name}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {canAdd && (
+                <Button
+                  type="button"
+                  className="w-full bg-accent hover:bg-accent/90 text-accent-foreground"
+                  onClick={() => {
+                    crudRef.current?.openCreateWith({ student_id: detailStudentId });
+                    setDetailStudentId(null);
+                  }}
+                  data-testid="payments-detail-record-payment"
+                >
+                  <Wallet className="w-4 h-4 me-2" /> {t("payments.record_payment")}
+                </Button>
+              )}
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

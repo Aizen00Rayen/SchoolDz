@@ -15,8 +15,12 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
 
-const DEFAULT_FORM = { title: "", description: "", price: 0 };
+const DEFAULT_FORM = { title: "", description: "", price: 0, author_teacher_id: "" };
+const SCHOOL_AUTHOR = "__school";
 
 function RestockDialog({ book, onClose }) {
   const { t } = useI18n();
@@ -142,6 +146,10 @@ export default function BooksPage() {
   const { canAdd, canModify, canDelete } = usePermission("books");
   const [restocking, setRestocking] = useState(null);
   const [viewingCopies, setViewingCopies] = useState(null);
+  const { data: teachers } = useQuery({
+    queryKey: ["teachers-list"],
+    queryFn: async () => (await api.get("/teachers")).data,
+  });
 
   return (
     <>
@@ -180,6 +188,10 @@ export default function BooksPage() {
             ),
           },
           { key: "sold", label: t("books.sold"), render: (r) => <span className="font-mono text-muted-foreground">{r.sold_count}</span> },
+          {
+            key: "author", label: t("books.author"),
+            render: (r) => <span className="text-xs">{r.author_teacher_name || t("books.school")}</span>,
+          },
         ]}
         renderRowActions={(row) => (
           <>
@@ -211,6 +223,20 @@ export default function BooksPage() {
             </Field>
             <Field label={t("field.description")}>
               <Textarea value={form.description || ""} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} />
+            </Field>
+            <Field label={t("books.author")}>
+              <Select
+                value={form.author_teacher_id || SCHOOL_AUTHOR}
+                onValueChange={(v) => setForm({ ...form, author_teacher_id: v === SCHOOL_AUTHOR ? "" : v })}
+              >
+                <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+                <SelectContent className="bg-popover">
+                  <SelectItem value={SCHOOL_AUTHOR}>{t("books.school")}</SelectItem>
+                  {(teachers?.items || []).map((tch) => (
+                    <SelectItem key={tch.id} value={tch.id}>{tch.first_name} {tch.last_name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </Field>
           </div>
         )}

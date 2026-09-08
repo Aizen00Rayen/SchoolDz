@@ -16,6 +16,7 @@ import {
 import { api, extractError, openStudentIdCardsPdf } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
+import { useConfirm } from "@/lib/confirm";
 
 const BLOOD_TYPES = ["O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"];
 
@@ -134,8 +135,48 @@ export default function StudentsPage() {
   const { t } = useI18n();
   const { canAdd, canModify, canDelete } = usePermission("students");
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [printing, setPrinting] = useState(false);
+
+  // Warn (not block) when a new student's name matches one already on file —
+  // same-name students are common (siblings, common names) but worth a
+  // second look before creating a record that turns out to be a duplicate.
+  const checkDuplicateName = async (form) => {
+    const first = (form.first_name || "").trim();
+    const last = (form.last_name || "").trim();
+    if (!first || !last) return true;
+    let matches = [];
+    try {
+      const { data } = await api.get("/students", { params: { q: `${first} ${last}`, limit: 10 } });
+      matches = (data?.items || []).filter(
+        (s) => s.first_name.trim().toLowerCase() === first.toLowerCase() && s.last_name.trim().toLowerCase() === last.toLowerCase()
+      );
+    } catch (_e) {
+      return true; // Don't block creation over a failed lookup.
+    }
+    if (matches.length === 0) return true;
+    return confirm({
+      title: t("students.duplicate_title"),
+      description: (
+        <div className="space-y-1.5 text-start">
+          <p>{t("students.duplicate_intro")}</p>
+          <ul className="list-disc ps-4 space-y-0.5">
+            {matches.map((m) => (
+              <li key={m.id}>
+                {m.first_name} {m.last_name}
+                {m.parent_name ? ` — ${m.parent_name}` : ""}
+                {m.birth_date ? ` (${m.birth_date})` : ""}
+                {" "}<span className="font-mono text-xs text-muted-foreground">{m.student_code}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ),
+      confirmLabel: t("actions.continue_anyway"),
+      cancelLabel: t("actions.cancel"),
+    });
+  };
 
   const toggleSelect = (id) => {
     setSelectedIds((prev) => {
@@ -186,6 +227,7 @@ export default function StudentsPage() {
       canEdit={canModify}
       canDelete={canDelete}
       canCreate={canAdd}
+      onBeforeSubmit={checkDuplicateName}
       rowClassName={approvalRowClass}
       renderRowActions={(row) => (
         <>
@@ -266,7 +308,12 @@ export default function StudentsPage() {
                   <span className="text-[10px] font-bold uppercase tracking-wide text-destructive">{t("students.approval_rejected")}</span>
                 )}
               </div>
-              <div className="text-[11px] font-mono text-muted-foreground">{r.student_code}</div>
+              <div className="text-[11px] text-muted-foreground">
+                <span className="font-mono">{r.student_code}</span>
+                {(r.parent_name || r.birth_date) && (
+                  <span> · {[r.parent_name, r.birth_date].filter(Boolean).join(" · ")}</span>
+                )}
+              </div>
             </div>
           ),
         },
