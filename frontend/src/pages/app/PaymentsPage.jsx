@@ -39,7 +39,7 @@ const EMPTY_ITEM = {
 
 const DEFAULT_FORM = {
   student_id: "", items: [{ ...EMPTY_ITEM }],
-  method: "cash", status: "paid", reference: "", notes: "",
+  method: "cash", status: "paid", notes: "",
 };
 
 function InfoRow({ label, value }) {
@@ -442,7 +442,14 @@ export default function PaymentsPage() {
                                 // teacher's % automatically too, same as a
                                 // returning student's payment does.
                                 const candidates = groupsForCourse(v);
-                                const patch = { course_id: v, group_id: "", teacher_percentage: null, school_percentage: null };
+                                const course = courseMap[v];
+                                const patch = {
+                                  course_id: v, group_id: "", teacher_percentage: null, school_percentage: null,
+                                  // The course's own price, same as it's set on the Courses
+                                  // page — not hand-typed, and only reducible via the
+                                  // teacher/school % split below, never edited directly.
+                                  amount: course ? parseFloat(course.price) || 0 : 0,
+                                };
                                 if (candidates.length === 1) {
                                   patch.group_id = candidates[0].id;
                                   Object.assign(patch, pctFromGroup(candidates[0]));
@@ -479,7 +486,13 @@ export default function PaymentsPage() {
                         <Field label={t("field.amount")} required>
                           <Input
                             type="number" value={item.amount || 0}
+                            // A course's price is fixed on the Courses page,
+                            // not typed per bill — the only way to charge less
+                            // is the teacher/school % split below. Trip/book
+                            // items still auto-fill from their own price but
+                            // stay editable, matching how those catalogs work.
                             onChange={(e) => updateItem(idx, { amount: parseFloat(e.target.value) || 0 })}
+                            disabled={item.item_type === "course"}
                             required
                             data-testid={`payments-item-${idx}-amount`}
                           />
@@ -562,9 +575,6 @@ export default function PaymentsPage() {
                   <SelectItem value="cancelled">{t("status.cancelled")}</SelectItem>
                 </SelectContent>
               </Select>
-            </Field>
-            <Field label={t("field.reference")}>
-              <Input value={form.reference || ""} onChange={(e) => setForm({ ...form, reference: e.target.value })} placeholder="TXN-1234" />
             </Field>
           </div>
 
