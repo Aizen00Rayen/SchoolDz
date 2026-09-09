@@ -4561,6 +4561,25 @@ class ClassSessionViewSet(TenantScopedViewSet):
         return Response({'items': ClassSessionSerializer(created, many=True).data, 'series_id': series_id})
 
 
+def _payment_item_discount(item_payload):
+    """How much of one item's own amount is waived, from its own
+    teacher_percentage/school_percentage — 0 when either is missing (a
+    trip/book item, or a course item nobody set a split for). Payment.discount
+    is the sum of this across every item on the bill, computed server-side so
+    the client never has to (and can't misreport it) — see PaymentViewSet.create."""
+    try:
+        amount = float(item_payload.get('amount') or 0)
+        teacher_pct = item_payload.get('teacher_percentage')
+        school_pct = item_payload.get('school_percentage')
+        if teacher_pct is None or school_pct is None:
+            return 0.0
+        teacher_pct = float(teacher_pct)
+        school_pct = float(school_pct)
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, amount * (1 - (teacher_pct + school_pct) / 100))
+
+
 class PaymentViewSet(TenantScopedViewSet):
     queryset = Payment.objects.all()
     serializer_class = PaymentSerializer
@@ -4622,6 +4641,9 @@ class PaymentViewSet(TenantScopedViewSet):
             bill_data['amount'] = sum(float(item.get('amount') or 0) for item in items_payload)
         except (TypeError, AttributeError, ValueError):
             raise ValidationError({'items': 'Each item needs a numeric amount.'})
+        # Server-computed from each item's own percentages — never trust a
+        # client-sent discount (see _payment_item_discount's docstring).
+        bill_data['discount'] = round(sum(_payment_item_discount(item) for item in items_payload), 2)
 
         status_val = bill_data.get('status', 'paid')
         # 'partial' is money genuinely received too (see compute_student_balances),
@@ -4882,14 +4904,13 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
     only the portion of a bill that's actually for that course (via
     PaymentItem, since a bill can now cover a course, a trip, and a book
     together — the trip/book portions shouldn't count toward "did they pay
-    for this course"). A bill-level discount is split across its items in
-    proportion to their own amount, so a discounted multi-item bill still
-    attributes a fair share of what was actually paid to each item's course.
-    This is what backs the "did they pay for this yet" indicator next to
-    each student on the attendance roster — a course-specific answer, not
-    the student's overall balance across everything. Returns
-    {student_id: bool}, present only for students with at least one
-    billable attendance in this course."""
+    for this course"). Each item carries its own teacher_percentage/
+    school_percentage (see PaymentItem), so its own discount is known
+    exactly rather than prorated from the bill's total. This is what backs
+    the "did they pay for this yet" indicator next to each student on the
+    attendance roster — a course-specific answer, not the student's overall
+    balance across everything. Returns {student_id: bool}, present only for
+    students with at least one billable attendance in this course."""
     course = Course.objects.filter(id=course_id, tenant_id=tenant_id).values(
         'price', 'pricing_type', 'sessions_count'
     ).first()
@@ -4921,14 +4942,12 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
     paid = {}
     items_qs = PaymentItem.objects.filter(
         payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial'), course_id=course_id,
-    ).select_related('payment')
+    )
     if student_ids is not None:
         items_qs = items_qs.filter(payment__student_id__in=student_ids)
-    for item in items_qs:
-        bill = item.payment
-        subtotal = float(bill.amount)
-        net_factor = (subtotal - float(bill.discount)) / subtotal if subtotal else 1.0
-        paid[bill.student_id] = paid.get(bill.student_id, 0.0) + float(item.amount) * net_factor
+    for row in items_qs.values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage'):
+        net = float(row['amount']) - _payment_item_discount(row)
+        paid[row['payment__student_id']] = paid.get(row['payment__student_id'], 0.0) + net
 
     # Same write-off as compute_student_balances — cancelled/refunded, but
     # only for a bill that had genuinely collected money at some point
@@ -4937,14 +4956,12 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
     written_off_items_qs = PaymentItem.objects.filter(
         payment__tenant_id=tenant_id, payment__status__in=('cancelled', 'refunded'),
         payment__paid_at__isnull=False, course_id=course_id,
-    ).select_related('payment')
+    )
     if student_ids is not None:
         written_off_items_qs = written_off_items_qs.filter(payment__student_id__in=student_ids)
-    for item in written_off_items_qs:
-        bill = item.payment
-        subtotal = float(bill.amount)
-        net_factor = (subtotal - float(bill.discount)) / subtotal if subtotal else 1.0
-        written_off[bill.student_id] = written_off.get(bill.student_id, 0.0) + float(item.amount) * net_factor
+    for row in written_off_items_qs.values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage'):
+        net = float(row['amount']) - _payment_item_discount(row)
+        written_off[row['payment__student_id']] = written_off.get(row['payment__student_id'], 0.0) + net
 
     return {
         student_id: paid.get(student_id, 0.0) + BALANCE_THRESHOLD >= (cost_amount - written_off.get(student_id, 0.0))
@@ -5846,21 +5863,24 @@ def compute_teacher_earnings(tenant_id, request, _context=None):
     # Book royalties: PaymentItems for books this teacher authored, on paid
     # bills, times their book_percentage — a second income stream alongside
     # session-teaching earnings, driven by sales rather than attendance so
-    # it's computed independently of the attendance loop above.
+    # it's computed independently of the attendance loop above. A book item
+    # never carries its own teacher_percentage/school_percentage (that's a
+    # course-item-only mechanism — see PaymentItem), so its own discount is
+    # always 0 here; earlier this used to prorate the *bill's* discount onto
+    # the book regardless of which item actually earned it, which wrongly
+    # docked a book's royalty for an unrelated course item's family discount
+    # in the same multi-item bill.
     book_items = PaymentItem.objects.filter(
         payment__tenant_id=tenant_id, payment__status='paid', kind='book',
         book__author_teacher_id__isnull=False,
-    ).select_related('payment', 'book')
+    ).select_related('book')
     book_items = filter_by_date_range(book_items, request, 'payment__paid_at__date')
     if teacher_id:
         book_items = book_items.filter(book__author_teacher_id=teacher_id)
     book_revenue = {}
     for item in book_items:
-        bill = item.payment
-        subtotal = float(bill.amount)
-        net_factor = (subtotal - float(bill.discount)) / subtotal if subtotal else 1.0
         author_id = item.book.author_teacher_id
-        book_revenue[author_id] = book_revenue.get(author_id, 0.0) + float(item.amount) * net_factor
+        book_revenue[author_id] = book_revenue.get(author_id, 0.0) + float(item.amount)
 
     rows = []
     for t in teachers:

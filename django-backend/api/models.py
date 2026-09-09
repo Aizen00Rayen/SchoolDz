@@ -603,24 +603,13 @@ class Payment(models.Model):
     # Never negative — a negative discount would mean charging the family
     # more than the bill's own subtotal. The frontend already clamps this,
     # but this is the one place every caller (including a direct API call)
-    # actually goes through.
+    # actually goes through. Server-computed at create() time as the sum of
+    # each item's own teacher_percentage/school_percentage-derived discount
+    # (see PaymentItem) — the one field every revenue/balance aggregate
+    # reads, so cancelling, reporting, and the invoice all keep working
+    # unchanged regardless of how many differently-discounted items a bill
+    # has.
     discount = models.DecimalField(max_digits=10, decimal_places=2, default=0, validators=[MinValueValidator(0)])
-    # What share of this bill's subtotal actually goes to the teacher vs the
-    # school — replaces a flat discount entry in the UI for the common case
-    # of a family member getting one or both shares waived. Purely a record
-    # of *why* `discount` is what it is; `discount` itself remains the one
-    # field every revenue/balance aggregate reads, so cancelling, reporting,
-    # and the invoice all keep working unchanged. Null when not set via the
-    # percentage UI (e.g. a bill with no course item, or written before this
-    # field existed).
-    teacher_percentage = models.DecimalField(
-        max_digits=5, decimal_places=2, null=True, blank=True,
-        validators=[MinValueValidator(0), MaxValueValidator(100)],
-    )
-    school_percentage = models.DecimalField(
-        max_digits=5, decimal_places=2, null=True, blank=True,
-        validators=[MinValueValidator(0), MaxValueValidator(100)],
-    )
     METHOD_CHOICES = [
         ('cash', 'cash'),
         ('card', 'card'),
@@ -690,6 +679,24 @@ class PaymentItem(models.Model):
     # see PaymentViewSet.create.
     book_copy = models.ForeignKey('BookCopy', on_delete=models.SET_NULL, null=True, blank=True, db_column='book_copy_id', related_name='sale_items')
     amount = models.DecimalField(max_digits=10, decimal_places=2)
+    # What share of THIS item's own amount goes to the teacher vs the
+    # school — only ever meaningfully set on a 'course' item (auto-filled in
+    # the UI from that item's own group's teacher, per Teacher.payment_percentage,
+    # overridable for a specific family). A trip/book item stays null — a
+    # book's own teacher royalty is a separate mechanism (Teacher.book_percentage
+    # in compute_teacher_earnings), untouched by this. Null means "no discount
+    # from this mechanism," not "0/0" — Payment.discount is the sum of every
+    # item's own amount × (1 − (teacher_percentage + school_percentage)/100)
+    # where both are set, so items are independently discountable within one
+    # multi-item bill instead of one split smeared across all of them.
+    teacher_percentage = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+    school_percentage = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

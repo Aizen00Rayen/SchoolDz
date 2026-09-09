@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Field } from "./StudentsPage";
-import { StudentSearchSelect, courseOptionLabel, tripOptionLabel, bookOptionLabel, paymentItemTitle, paymentKindLabel } from "./_shared";
+import { StudentSearchSelect, courseOptionLabel, groupOptionLabel, tripOptionLabel, bookOptionLabel, paymentItemTitle, paymentKindLabel } from "./_shared";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -28,13 +28,17 @@ const BALANCE_CLS = {
   settled: "",
 };
 
-const EMPTY_ITEM = { item_type: "course", kind: "monthly", course_id: "", trip_id: "", book_id: "", amount: 0 };
+// teacher_percentage/school_percentage live per-item (a bill can cover two
+// courses taught by two different teachers) — null until a group resolves
+// one, matching "nothing waived" (the item's full amount, no discount) the
+// same way DEFAULT_FORM used to mean at the bill level.
+const EMPTY_ITEM = {
+  item_type: "course", kind: "monthly", course_id: "", group_id: "", trip_id: "", book_id: "", amount: 0,
+  teacher_percentage: null, school_percentage: null,
+};
 
-// Default to the full price (100% combined) — nothing waived unless the
-// secretary actively edits one of the two share fields down.
 const DEFAULT_FORM = {
   student_id: "", items: [{ ...EMPTY_ITEM }],
-  teacher_percentage: 0, school_percentage: 100,
   method: "cash", status: "paid", reference: "", notes: "",
 };
 
@@ -58,6 +62,18 @@ function billItemsSummary(payment) {
 
 function itemAmount(item) {
   return parseFloat(item.amount) || 0;
+}
+
+/** How much of one item's own amount is waived — mirrors the backend's
+ * _payment_item_discount exactly (see views.py), so the live preview here
+ * always matches what the server will actually charge. Only a course item
+ * ever carries a split; a trip/book item is never discounted this way. */
+function itemDiscount(item) {
+  if (item.item_type !== "course") return 0;
+  const teacherPct = item.teacher_percentage;
+  const schoolPct = item.school_percentage;
+  if (teacherPct == null || schoolPct == null) return 0;
+  return Math.max(0, itemAmount(item) * (1 - (parseFloat(teacherPct) + parseFloat(schoolPct)) / 100));
 }
 
 export default function PaymentsPage() {
@@ -101,6 +117,7 @@ export default function PaymentsPage() {
   const crudRef = useRef(null);
   const stuMap = Object.fromEntries((students?.items || []).map((s) => [s.id, s]));
   const teacherMap = Object.fromEntries((teachers?.items || []).map((t) => [t.id, t]));
+  const courseMap = Object.fromEntries((courses?.items || []).map((c) => [c.id, c]));
   const balanceMap = Object.fromEntries((balances?.items || []).map((b) => [b.student_id, b]));
 
   const { data: detail, isLoading: detailLoading } = useQuery({
@@ -111,18 +128,20 @@ export default function PaymentsPage() {
 
   const subtotalOf = (items) => (items || []).reduce((sum, it) => sum + itemAmount(it), 0);
 
-  // Best-effort default for the teacher-% field: if the bill's course item
-  // matches a group this student is already enrolled in, suggest that
-  // group's teacher's standing percentage. Returns null when it can't be
-  // resolved (no matching group/teacher) — the field is always editable
-  // either way.
-  const suggestTeacherPct = (studentId, courseId) => {
-    if (!studentId || !courseId) return null;
-    const group = (groups?.items || []).find(
-      (g) => g.course_id === courseId && (g.student_ids || []).includes(studentId)
-    );
+  // Groups teaching a given course — resolved from the course itself, not
+  // from whether this particular student already happens to be enrolled, so
+  // a brand-new registration gets the same automatic percentage a returning
+  // student's payment does.
+  const groupsForCourse = (courseId) => (groups?.items || []).filter((g) => g.course_id === courseId);
+
+  // A group's teacher's standing percentage (from the Teacher Payments
+  // page), as the {teacher_percentage, school_percentage} pair to prefill an
+  // item with. Returns nulls when the group has no assigned teacher.
+  const pctFromGroup = (group) => {
     const teacher = group ? teacherMap[group.teacher_id] : null;
-    return teacher ? parseFloat(teacher.payment_percentage) || 0 : null;
+    if (!teacher) return { teacher_percentage: null, school_percentage: null };
+    const pct = parseFloat(teacher.payment_percentage) || 0;
+    return { teacher_percentage: pct, school_percentage: Math.max(0, 100 - pct) };
   };
 
   return (
@@ -165,27 +184,21 @@ export default function PaymentsPage() {
       // (e.g. trip_id: "" on a course item) that would fail validation.
       preparePayload={(form) => {
         const { items: rawItems, ...rest } = form;
-        // `discount` is derived, never typed directly — recompute it from
-        // teacher_percentage/school_percentage whenever either is actually
-        // set (a fresh bill always has both; see DEFAULT_FORM). A legacy
-        // bill from before this feature has both null — leave its stored
-        // discount untouched rather than silently zeroing it out just
-        // because someone re-saved its method/status.
-        const hasPercentages = !form.id || rest.teacher_percentage != null || rest.school_percentage != null;
-        if (hasPercentages) {
-          const subtotal = subtotalOf(rawItems);
-          const teacherPct = parseFloat(rest.teacher_percentage ?? 0) || 0;
-          const schoolPct = parseFloat(rest.school_percentage ?? 100) || 0;
-          rest.teacher_percentage = teacherPct;
-          rest.school_percentage = schoolPct;
-          rest.discount = Math.round(Math.max(0, subtotal * (1 - (teacherPct + schoolPct) / 100)) * 100) / 100;
-        }
-        // Editing: items are read-only server-side and immutable in this
-        // UI (see the isEditing branch below) — nothing to send for them.
+        // Editing: items (and the discount derived from their percentages)
+        // are immutable after creation — nothing left to send for them, only
+        // the bill-level fields (status/method/due_date/reference/notes).
         if (form.id) return rest;
+        // `discount` is never sent on create — the server derives it from
+        // each item's own teacher_percentage/school_percentage (see
+        // PaymentViewSet.create), the same math itemDiscount() previews here.
         const items = (rawItems || []).map((it) => {
           const out = { kind: it.item_type === "book" ? "book" : it.kind, amount: itemAmount(it) };
-          if (it.item_type === "course" && it.course_id) out.course_id = it.course_id;
+          if (it.item_type === "course" && it.course_id) {
+            out.course_id = it.course_id;
+            if (it.group_id) out.group_id = it.group_id;
+            if (it.teacher_percentage != null) out.teacher_percentage = it.teacher_percentage;
+            if (it.school_percentage != null) out.school_percentage = it.school_percentage;
+          }
           if (it.item_type === "trip" && it.trip_id) out.trip_id = it.trip_id;
           if (it.item_type === "book" && it.book_id) out.book_id = it.book_id;
           return out;
@@ -282,9 +295,7 @@ export default function PaymentsPage() {
         const isEditing = Boolean(form.id);
         const items = form.items || [];
         const subtotal = subtotalOf(items);
-        const teacherPct = parseFloat(form.teacher_percentage ?? 0) || 0;
-        const schoolPct = parseFloat(form.school_percentage ?? 100) || 0;
-        const discount = Math.max(0, subtotal * (1 - (teacherPct + schoolPct) / 100));
+        const discount = items.reduce((sum, it) => sum + itemDiscount(it), 0);
         const total = Math.max(0, subtotal - discount);
         const currency = tenant?.currency || "DZD";
 
@@ -339,7 +350,14 @@ export default function PaymentsPage() {
                 <div className="rounded-lg border border-border divide-y divide-border">
                   {items.map((item, idx) => (
                     <div key={item.id || idx} className="flex items-center justify-between px-3 py-2 text-sm">
-                      <span>{paymentItemTitle(item)}</span>
+                      <div>
+                        <div>{paymentItemTitle(item)}</div>
+                        {item.teacher_percentage != null && item.school_percentage != null && (
+                          <div className="text-[11px] text-muted-foreground">
+                            {t("payments.teacher_percentage")} {item.teacher_percentage}% · {t("payments.school_percentage")} {item.school_percentage}%
+                          </div>
+                        )}
+                      </div>
                       <span className="font-mono">{Math.round(itemAmount(item)).toLocaleString()} {currency}</span>
                     </div>
                   ))}
@@ -417,18 +435,19 @@ export default function PaymentsPage() {
                             <Select
                               value={item.course_id || ""}
                               onValueChange={(v) => {
-                                const patch = { items: items.map((it, i) => (i === idx ? { ...it, course_id: v } : it)) };
-                                // Only auto-suggest once, before the secretary has
-                                // touched either share field — never overwrite an
-                                // in-progress manual edit.
-                                if (form.teacher_percentage === DEFAULT_FORM.teacher_percentage && form.school_percentage === DEFAULT_FORM.school_percentage) {
-                                  const suggested = suggestTeacherPct(form.student_id, v);
-                                  if (suggested != null) {
-                                    patch.teacher_percentage = suggested;
-                                    patch.school_percentage = Math.max(0, 100 - suggested);
-                                  }
+                                // Resolve straight from the course's own
+                                // group(s) — not from whether this student
+                                // already happens to be enrolled — so a
+                                // brand-new registration gets the right
+                                // teacher's % automatically too, same as a
+                                // returning student's payment does.
+                                const candidates = groupsForCourse(v);
+                                const patch = { course_id: v, group_id: "", teacher_percentage: null, school_percentage: null };
+                                if (candidates.length === 1) {
+                                  patch.group_id = candidates[0].id;
+                                  Object.assign(patch, pctFromGroup(candidates[0]));
                                 }
-                                setForm({ ...form, ...patch });
+                                updateItem(idx, patch);
                               }}
                             >
                               <SelectTrigger className="bg-background"><SelectValue placeholder="—" /></SelectTrigger>
@@ -466,6 +485,61 @@ export default function PaymentsPage() {
                           />
                         </Field>
                       </div>
+
+                      {item.item_type === "course" && item.course_id && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-3 border-t border-border">
+                          {groupsForCourse(item.course_id).length > 1 && (
+                            <div className="md:col-span-2">
+                              <Field label={t("field.group")}>
+                                <Select
+                                  value={item.group_id || ""}
+                                  onValueChange={(v) => {
+                                    const group = groupsForCourse(item.course_id).find((g) => g.id === v);
+                                    updateItem(idx, { group_id: v, ...pctFromGroup(group) });
+                                  }}
+                                >
+                                  <SelectTrigger className="bg-background"><SelectValue placeholder="—" /></SelectTrigger>
+                                  <SelectContent className="bg-popover">
+                                    {groupsForCourse(item.course_id).map((g) => {
+                                      // Which group gets picked here is what decides the
+                                      // resolved teacher %, so — unlike groupOptionLabel's
+                                      // other call sites — the teacher's own name is the
+                                      // one thing worth surfacing in this specific picker.
+                                      const teacher = teacherMap[g.teacher_id];
+                                      const teacherName = teacher ? `${teacher.first_name} ${teacher.last_name}` : null;
+                                      return (
+                                        <SelectItem key={g.id} value={g.id}>
+                                          {groupOptionLabel(g, courseMap, t)}{teacherName ? ` (${teacherName})` : ""}
+                                        </SelectItem>
+                                      );
+                                    })}
+                                  </SelectContent>
+                                </Select>
+                              </Field>
+                            </div>
+                          )}
+                          <Field label={t("payments.teacher_percentage")}>
+                            <Input
+                              type="number" min="0" max="100" placeholder="—"
+                              value={item.teacher_percentage ?? ""}
+                              onChange={(e) => updateItem(idx, {
+                                teacher_percentage: e.target.value === "" ? null : parseFloat(e.target.value) || 0,
+                              })}
+                              data-testid={`payments-item-${idx}-teacher-percentage`}
+                            />
+                          </Field>
+                          <Field label={t("payments.school_percentage")}>
+                            <Input
+                              type="number" min="0" max="100" placeholder="—"
+                              value={item.school_percentage ?? ""}
+                              onChange={(e) => updateItem(idx, {
+                                school_percentage: e.target.value === "" ? null : parseFloat(e.target.value) || 0,
+                              })}
+                              data-testid={`payments-item-${idx}-school-percentage`}
+                            />
+                          </Field>
+                        </div>
+                      )}
                     </div>
                   ))}
                   <Button type="button" variant="outline" size="sm" onClick={addItem} data-testid="payments-add-item">
@@ -477,20 +551,6 @@ export default function PaymentsPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label={t("payments.teacher_percentage")}>
-              <Input
-                type="number" min="0" max="100" value={teacherPct}
-                onChange={(e) => setForm({ ...form, teacher_percentage: parseFloat(e.target.value) || 0 })}
-                data-testid="payments-teacher-percentage"
-              />
-            </Field>
-            <Field label={t("payments.school_percentage")}>
-              <Input
-                type="number" min="0" max="100" value={schoolPct}
-                onChange={(e) => setForm({ ...form, school_percentage: parseFloat(e.target.value) || 0 })}
-                data-testid="payments-school-percentage"
-              />
-            </Field>
             <Field label={t("field.status")}>
               <Select value={form.status || "paid"} onValueChange={(v) => setForm({ ...form, status: v })}>
                 <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
