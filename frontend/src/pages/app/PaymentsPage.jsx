@@ -508,6 +508,10 @@ export default function PaymentsPage() {
             </Field>
           </div>
 
+          {form.status === "partial" && (
+            <p className="text-xs text-muted-foreground -mt-2">{t("payments.partial_hint")}</p>
+          )}
+
           <div className="rounded-lg bg-muted/40 p-3 space-y-1 text-sm">
             <div className="flex justify-between text-muted-foreground">
               <span>{t("payments.subtotal")}</span>

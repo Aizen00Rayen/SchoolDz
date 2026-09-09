@@ -1109,6 +1109,7 @@ def portal_payment_checkout_status(request, checkout_id):
 
 STAMP_COLORS = {
     'paid': '#2F6B4F',
+    'partial': '#3E7CB1',
     'pending': '#A8762C',
     'overdue': '#B23A2E',
     'refunded': '#8A8478',
@@ -1156,7 +1157,11 @@ def payment_invoice_pdf(request, payment_id):
             logo_data_uri = None
 
     today = timezone.now().date()
-    is_overdue = payment.status in ['pending', 'partial'] and payment.due_date and payment.due_date < today
+    # 'partial' now means real money was received for exactly this receipt
+    # (see compute_student_balances) — it's no longer "this bill itself is
+    # unpaid," so it's excluded from the overdue check and gets its own
+    # label/stamp instead of being lumped in with 'pending'.
+    is_overdue = payment.status == 'pending' and payment.due_date and payment.due_date < today
     stamp_key = 'overdue' if is_overdue else payment.status
     stamp_color = STAMP_COLORS.get(stamp_key, '#8A8478')
 
@@ -1164,10 +1169,13 @@ def payment_invoice_pdf(request, payment_id):
     if payment.status == 'paid':
         status_label = INVOICE_STATUS_AR['paid']
         status_line = f"{INVOICE_STATUS_AR['paid']} — {payment.paid_at.strftime('%d/%m/%Y')}" if payment.paid_at else INVOICE_STATUS_AR['paid']
+    elif payment.status == 'partial':
+        status_label = INVOICE_STATUS_AR['partial']
+        status_line = f"{INVOICE_STATUS_AR['partial']} — {payment.paid_at.strftime('%d/%m/%Y')}" if payment.paid_at else INVOICE_STATUS_AR['partial']
     elif is_overdue:
         status_label = INVOICE_STATUS_AR['overdue']
         status_line = f"{INVOICE_STATUS_AR['overdue']} — {payment.due_date.strftime('%d/%m/%Y')}"
-    elif payment.status in ['pending', 'partial']:
+    elif payment.status == 'pending':
         status_label = INVOICE_STATUS_AR['pending']
         status_line = f"{INVOICE_STATUS_AR['due_on']} {payment.due_date.strftime('%d/%m/%Y')}" if payment.due_date else INVOICE_STATUS_AR['pending']
     else:
@@ -1359,7 +1367,8 @@ def owner_master_dashboard(request):
         Teacher.objects.filter(tenant_id__in=selected_ids).values('tenant_id').annotate(c=Count('id')).values_list('tenant_id', 'c')
     )
 
-    payments_qs = Payment.objects.filter(tenant_id__in=selected_ids, status='paid')
+    # 'partial' counts as collected money too (see compute_student_balances).
+    payments_qs = Payment.objects.filter(tenant_id__in=selected_ids, status__in=('paid', 'partial'))
     payments_qs = filter_by_date_range(payments_qs, request, 'paid_at')
     # Sum(amount - discount), matching dashboard_summary/finance_report —
     # a plain Sum('amount') would overstate revenue on every discounted
@@ -1990,26 +1999,29 @@ def dashboard_summary(request):
         start_at__range=(now, now + timedelta(days=7))
     ).select_related('teacher', 'course', 'group', 'room_ref').order_by('start_at')[:20]
     
-    # Calculate revenue today
+    # Calculate revenue today — 'partial' counts as collected money too
+    # (see compute_student_balances).
     rev_today_data = Payment.objects.filter(
         tenant_id=tid,
-        status='paid',
+        status__in=('paid', 'partial'),
         paid_at__range=(day_start, day_end)
     ).aggregate(total=Sum(F('amount') - F('discount')))
     revenue_today = float(rev_today_data['total'] or 0)
-    
+
     # Calculate revenue month
     rev_month_data = Payment.objects.filter(
         tenant_id=tid,
-        status='paid',
+        status__in=('paid', 'partial'),
         paid_at__gte=month_start
     ).aggregate(total=Sum(F('amount') - F('discount')))
     revenue_month = float(rev_month_data['total'] or 0)
     
-    # Outstanding
+    # Outstanding — 'partial' now counts as collected money (see
+    # compute_student_balances), so only a still-fully-unpaid 'pending'
+    # invoice is genuinely outstanding.
     out_data = Payment.objects.filter(
         tenant_id=tid,
-        status__in=['pending', 'partial']
+        status='pending'
     ).aggregate(total=Sum(F('amount') - F('discount')))
     outstanding = float(out_data['total'] or 0)
 
@@ -2087,7 +2099,7 @@ def dashboard_summary(request):
         
         m_rev_data = Payment.objects.filter(
             tenant_id=tid,
-            status='paid',
+            status__in=('paid', 'partial'),
             paid_at__range=(m_date, m_end)
         ).aggregate(total=Sum(F('amount') - F('discount')))
         m_exp_data = Expense.objects.filter(
@@ -2155,8 +2167,10 @@ def compute_at_risk_students(tid):
     stored state."""
     today = timezone.now().date()
     overdue_by_student = {}
+    # 'partial' counts as collected money elsewhere now — only a still-fully-
+    # unpaid 'pending' invoice is genuinely overdue.
     for student_id, amount, discount in Payment.objects.filter(
-        tenant_id=tid, status__in=['pending', 'partial'], due_date__lt=today
+        tenant_id=tid, status='pending', due_date__lt=today
     ).values_list('student_id', 'amount', 'discount'):
         overdue_by_student[student_id] = overdue_by_student.get(student_id, 0) + float(amount - discount)
 
@@ -2951,10 +2965,12 @@ def _portal_child(request, student_id):
 def portal_children(request):
     guardian = _portal_guardian(request)
     children = list(Student.objects.filter(tenant_id=request.user.tenant_id, parent_id=guardian.id).order_by('first_name'))
+    # 'partial' counts as collected money elsewhere now — only a still-fully-
+    # unpaid 'pending' invoice is genuinely overdue.
     overdue_ids = set(Payment.objects.filter(
         tenant_id=request.user.tenant_id,
         student_id__in=[c.id for c in children],
-        status__in=['pending', 'partial'],
+        status='pending',
         due_date__lt=timezone.now().date(),
     ).values_list('student_id', flat=True))
     data = StudentSerializer(children, many=True).data
@@ -4025,10 +4041,12 @@ class StudentViewSet(TenantScopedViewSet):
         here, and are they clear of overdue payments right now?"""
         student = self.get_object()
 
+        # 'partial' counts as collected money elsewhere now — only a still-
+        # fully-unpaid 'pending' invoice is genuinely overdue.
         has_overdue = Payment.objects.filter(
             tenant_id=student.tenant_id,
             student_id=student.id,
-            status__in=['pending', 'partial'],
+            status='pending',
             due_date__lt=timezone.now().date(),
         ).exists()
 
@@ -4606,7 +4624,11 @@ class PaymentViewSet(TenantScopedViewSet):
             raise ValidationError({'items': 'Each item needs a numeric amount.'})
 
         status_val = bill_data.get('status', 'paid')
-        if status_val == 'paid' and not bill_data.get('paid_at'):
+        # 'partial' is money genuinely received too (see compute_student_balances),
+        # so it stamps paid_at exactly like 'paid' does — that stamp is what
+        # later lets a cancel/refund correctly recognize this bill as having
+        # actually collected money, versus a 'pending' invoice that never did.
+        if status_val in ('paid', 'partial') and not bill_data.get('paid_at'):
             bill_data['paid_at'] = timezone.now().isoformat()
 
         serializer = self.get_serializer(data=bill_data)
@@ -4676,7 +4698,9 @@ class PaymentViewSet(TenantScopedViewSet):
         previous_status = instance.status
 
         data = request.data.copy()
-        if data.get('status') == 'paid' and not data.get('paid_at'):
+        # Same rule as create(): 'partial' also stamps paid_at, since it's
+        # real money received — see compute_student_balances's docstring.
+        if data.get('status') in ('paid', 'partial') and not data.get('paid_at'):
             data['paid_at'] = timezone.now().isoformat()
 
         serializer = self.get_serializer(instance, data=data, partial=partial)
@@ -4710,15 +4734,17 @@ class PaymentViewSet(TenantScopedViewSet):
 def payments_overdue(request):
     tid = require_staff_tenant(request.user)
 
+    # 'partial' now counts as collected money (see compute_student_balances),
+    # so only a still-fully-unpaid 'pending' invoice is genuinely overdue.
     items = Payment.objects.filter(
         tenant_id=tid,
-        status__in=['pending', 'partial'],
+        status='pending',
         due_date__lt=timezone.now().date(),
     ).prefetch_related('items').order_by('due_date')[:500]
 
     total_data = Payment.objects.filter(
         tenant_id=tid,
-        status__in=['pending', 'partial'],
+        status='pending',
         due_date__lt=timezone.now().date(),
     ).aggregate(total=Sum(F('amount') - F('discount')))
 
@@ -4733,13 +4759,14 @@ BALANCE_THRESHOLD = 1.0  # DZD-scale rounding noise shouldn't read as owing/over
 
 
 def compute_student_balances(tenant_id):
-    """Per-student running balance = money actually received (paid Payment
-    rows) minus the cost of every session they've actually used (present or
-    excused attendance, priced via course_per_session_price) — collection
-    status is tracked by attendance, not by manually re-deriving what's
-    "owed" from enrollment alone. Returns {student_id: {paid, cost, balance,
-    status}}, status one of 'owes' (they owe the school), 'overpaid' (the
-    school owes them), 'settled'.
+    """Per-student running balance = money actually received (paid or
+    partial Payment rows) minus the cost of every session they've actually
+    used (present, or excused-but-not-yet-recovered attendance, priced via
+    course_per_session_price) — collection status is tracked by attendance,
+    not by manually re-deriving what's "owed" from enrollment alone.
+    Returns {student_id: {paid, cost, balance, status}}, status one of
+    'owes' (they owe the school), 'overpaid' (the school owes them),
+    'settled'.
 
     Cost is accumulated per (student, course) before being summed, because a
     'fixed_sessions' course's price is a flat total for the whole course —
@@ -4750,8 +4777,18 @@ def compute_student_balances(tenant_id):
     fixed_sessions course's cost is capped at its price. 'per_session' and
     'per_month' have no such cap — they're deliberately unit-rate and
     recurring, so cost is meant to keep pace with however much was actually
-    attended."""
-    attendance = Attendance.objects.filter(tenant_id=tenant_id, status__in=['present', 'excused'])
+    attended.
+
+    An 'excused' absence stops being charged once staff mark it recovered
+    (Attendance.recovery_status) — the make-up session itself bills normally
+    through the ordinary 'present' path, so nothing is charged twice for one
+    missed lesson. recovery_status has no link to which later session is the
+    actual make-up (it's a bare staff-toggled flag), so this can't be scoped
+    any more precisely than "stop billing the missed slot once marked
+    recovered" without a schema change."""
+    attendance = Attendance.objects.filter(tenant_id=tenant_id).filter(
+        Q(status='present') | Q(status='excused', recovery_status__in=('not_applicable', 'needs_recovery'))
+    )
 
     sessions = ClassSession.objects.filter(tenant_id=tenant_id).values('id', 'course_id', 'group__course_id')
     session_course = {}
@@ -4783,22 +4820,37 @@ def compute_student_balances(tenant_id):
             amount = min(amount, float(course['price'] or 0))
         cost[student_id] = cost.get(student_id, 0.0) + amount
 
+    # 'partial' counts as real money received, same as 'paid' — a Payment's
+    # amount is always exactly what was collected in that one receipt (never
+    # an aspirational full-course total), so 'partial' just means "more is
+    # still due for this student/course, but this receipt itself is real
+    # money in hand." payments_overdue/dashboard 'outstanding' etc. already
+    # stop treating a 'partial' bill as still-owed once it's counted here.
     paid = {}
-    payments = Payment.objects.filter(tenant_id=tenant_id, status='paid').values('student_id', 'amount', 'discount')
+    payments = Payment.objects.filter(tenant_id=tenant_id, status__in=('paid', 'partial')).values('student_id', 'amount', 'discount')
     for p in payments:
         paid[p['student_id']] = paid.get(p['student_id'], 0.0) + float(p['amount']) - float(p['discount'])
 
-    # A cancelled payment stops counting as money received (see `paid`
-    # above, which only looks at status='paid'), but cost here comes purely
-    # from attendance — independent of any specific payment — so without
-    # this, cancelling would leave the student looking like they now owe
-    # back whatever that payment used to cover. Writing the same amount off
-    # `cost` instead means a cancellation is a net no-op on the student's
+    # A payment that's cancelled or refunded stops counting as money
+    # received (see `paid` above), but cost here comes purely from
+    # attendance — independent of any specific payment — so without this,
+    # voiding it would leave the student looking like they now owe back
+    # whatever that payment used to cover. Writing the same amount off
+    # `cost` instead means voiding it is a net no-op on the student's
     # balance rather than a new debt.
-    cancelled = {}
-    cancelled_payments = Payment.objects.filter(tenant_id=tenant_id, status='cancelled').values('student_id', 'amount', 'discount')
-    for p in cancelled_payments:
-        cancelled[p['student_id']] = cancelled.get(p['student_id'], 0.0) + float(p['amount']) - float(p['discount'])
+    #
+    # Gated on paid_at IS NOT NULL: paid_at is only ever stamped when a
+    # payment is (or becomes) 'paid'/'partial' — i.e. money was genuinely
+    # collected at some point — and is never cleared afterward. Without this
+    # gate, cancelling a 'pending' invoice that was never actually paid
+    # would wrongly forgive real debt that was never collected in the first
+    # place.
+    written_off = {}
+    written_off_payments = Payment.objects.filter(
+        tenant_id=tenant_id, status__in=('cancelled', 'refunded'), paid_at__isnull=False,
+    ).values('student_id', 'amount', 'discount')
+    for p in written_off_payments:
+        written_off[p['student_id']] = written_off.get(p['student_id'], 0.0) + float(p['amount']) - float(p['discount'])
 
     # A written-off debt (see DebtWaiver) works the same way — subtracted
     # from cost, never counted as paid, since it was never actually collected.
@@ -4809,7 +4861,7 @@ def compute_student_balances(tenant_id):
     balances = {}
     for student_id in set(cost) | set(paid):
         paid_amount = round(paid.get(student_id, 0.0), 2)
-        cost_amount = round(max(0.0, cost.get(student_id, 0.0) - cancelled.get(student_id, 0.0) - waived.get(student_id, 0.0)), 2)
+        cost_amount = round(max(0.0, cost.get(student_id, 0.0) - written_off.get(student_id, 0.0) - waived.get(student_id, 0.0)), 2)
         balance = round(paid_amount - cost_amount, 2)
         if balance > BALANCE_THRESHOLD:
             balance_status = 'overpaid'
@@ -4823,19 +4875,21 @@ def compute_student_balances(tenant_id):
 
 def compute_course_payment_status(tenant_id, course_id, student_ids=None):
     """Whether each student has paid enough for `course_id` to cover the
-    present/excused sessions they've actually attended in it — same
-    session-based cost model as compute_student_balances, but scoped to one
-    course and counting only the portion of a bill that's actually for that
-    course (via PaymentItem, since a bill can now cover a course, a trip,
-    and a book together — the trip/book portions shouldn't count toward
-    "did they pay for this course"). A bill-level discount is split across
-    its items in proportion to their own amount, so a discounted multi-item
-    bill still attributes a fair share of what was actually paid to each
-    item's course. This is what backs the "did they pay for this yet"
-    indicator next to each student on the attendance roster — a
-    course-specific answer, not the student's overall balance across
-    everything. Returns {student_id: bool}, present only for students with
-    at least one present/excused attendance in this course."""
+    present (or excused-but-not-yet-recovered) sessions they've actually
+    attended in it — same session-based cost model as
+    compute_student_balances (including the recovered-excused-absence
+    exclusion, see its docstring), but scoped to one course and counting
+    only the portion of a bill that's actually for that course (via
+    PaymentItem, since a bill can now cover a course, a trip, and a book
+    together — the trip/book portions shouldn't count toward "did they pay
+    for this course"). A bill-level discount is split across its items in
+    proportion to their own amount, so a discounted multi-item bill still
+    attributes a fair share of what was actually paid to each item's course.
+    This is what backs the "did they pay for this yet" indicator next to
+    each student on the attendance roster — a course-specific answer, not
+    the student's overall balance across everything. Returns
+    {student_id: bool}, present only for students with at least one
+    billable attendance in this course."""
     course = Course.objects.filter(id=course_id, tenant_id=tenant_id).values(
         'price', 'pricing_type', 'sessions_count'
     ).first()
@@ -4849,7 +4903,9 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
     }
 
     attendance_qs = Attendance.objects.filter(
-        tenant_id=tenant_id, status__in=['present', 'excused'], session_id__in=session_ids_for_course,
+        tenant_id=tenant_id, session_id__in=session_ids_for_course,
+    ).filter(
+        Q(status='present') | Q(status='excused', recovery_status__in=('not_applicable', 'needs_recovery'))
     )
     if student_ids is not None:
         attendance_qs = attendance_qs.filter(student_id__in=student_ids)
@@ -4861,9 +4917,10 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
             amount = min(amount, float(course['price'] or 0))
         cost[row['student_id']] = amount
 
+    # 'partial' counts the same as 'paid' here too — see compute_student_balances.
     paid = {}
     items_qs = PaymentItem.objects.filter(
-        payment__tenant_id=tenant_id, payment__status='paid', course_id=course_id,
+        payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial'), course_id=course_id,
     ).select_related('payment')
     if student_ids is not None:
         items_qs = items_qs.filter(payment__student_id__in=student_ids)
@@ -4873,22 +4930,24 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
         net_factor = (subtotal - float(bill.discount)) / subtotal if subtotal else 1.0
         paid[bill.student_id] = paid.get(bill.student_id, 0.0) + float(item.amount) * net_factor
 
-    # Same write-off as compute_student_balances: a cancelled bill's share of
-    # this course is forgiven from `cost` rather than left as an unpaid gap.
-    cancelled = {}
-    cancelled_items_qs = PaymentItem.objects.filter(
-        payment__tenant_id=tenant_id, payment__status='cancelled', course_id=course_id,
+    # Same write-off as compute_student_balances — cancelled/refunded, but
+    # only for a bill that had genuinely collected money at some point
+    # (paid_at set); see that function's docstring for why.
+    written_off = {}
+    written_off_items_qs = PaymentItem.objects.filter(
+        payment__tenant_id=tenant_id, payment__status__in=('cancelled', 'refunded'),
+        payment__paid_at__isnull=False, course_id=course_id,
     ).select_related('payment')
     if student_ids is not None:
-        cancelled_items_qs = cancelled_items_qs.filter(payment__student_id__in=student_ids)
-    for item in cancelled_items_qs:
+        written_off_items_qs = written_off_items_qs.filter(payment__student_id__in=student_ids)
+    for item in written_off_items_qs:
         bill = item.payment
         subtotal = float(bill.amount)
         net_factor = (subtotal - float(bill.discount)) / subtotal if subtotal else 1.0
-        cancelled[bill.student_id] = cancelled.get(bill.student_id, 0.0) + float(item.amount) * net_factor
+        written_off[bill.student_id] = written_off.get(bill.student_id, 0.0) + float(item.amount) * net_factor
 
     return {
-        student_id: paid.get(student_id, 0.0) + BALANCE_THRESHOLD >= (cost_amount - cancelled.get(student_id, 0.0))
+        student_id: paid.get(student_id, 0.0) + BALANCE_THRESHOLD >= (cost_amount - written_off.get(student_id, 0.0))
         for student_id, cost_amount in cost.items()
     }
 
@@ -5940,8 +5999,11 @@ def _compute_finance_report_data(tid, request):
     if teacher_id:
         payments = payments.filter(items__group__teacher_id=teacher_id).distinct()
 
-    paid = [p for p in payments if p.status == 'paid']
-    outstanding = [p for p in payments if p.status in ('pending', 'partial')]
+    # 'partial' counts as collected money (see compute_student_balances), so
+    # it belongs in `paid`; only a still-fully-unpaid 'pending' invoice is
+    # genuinely outstanding.
+    paid = [p for p in payments if p.status in ('paid', 'partial')]
+    outstanding = [p for p in payments if p.status == 'pending']
     collected = round(sum(float(p.amount) - float(p.discount or 0) for p in paid), 2)
     pending_amount = round(sum(float(p.amount) - float(p.discount or 0) for p in outstanding), 2)
 

@@ -1,6 +1,7 @@
 import uuid
 from datetime import time
 from django.db import models
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
 
 def generate_uuid():
@@ -599,7 +600,11 @@ class Payment(models.Model):
     ]
     kind = models.CharField(max_length=50, choices=KIND_CHOICES, default='monthly')
     amount = models.DecimalField(max_digits=10, decimal_places=2)
-    discount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    # Never negative — a negative discount would mean charging the family
+    # more than the bill's own subtotal. The frontend already clamps this,
+    # but this is the one place every caller (including a direct API call)
+    # actually goes through.
+    discount = models.DecimalField(max_digits=10, decimal_places=2, default=0, validators=[MinValueValidator(0)])
     # What share of this bill's subtotal actually goes to the teacher vs the
     # school — replaces a flat discount entry in the UI for the common case
     # of a family member getting one or both shares waived. Purely a record
@@ -608,8 +613,14 @@ class Payment(models.Model):
     # and the invoice all keep working unchanged. Null when not set via the
     # percentage UI (e.g. a bill with no course item, or written before this
     # field existed).
-    teacher_percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    school_percentage = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    teacher_percentage = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
+    school_percentage = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
     METHOD_CHOICES = [
         ('cash', 'cash'),
         ('card', 'card'),
