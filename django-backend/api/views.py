@@ -4666,33 +4666,42 @@ class PaymentViewSet(TenantScopedViewSet):
                 raise PermissionDenied('This workspace is not active yet — complete billing to continue.')
             payment = serializer.save(tenant_id=user.tenant_id, amount=bill_data['amount']) if user.tenant_id else serializer.save(amount=bill_data['amount'])
             self._log_model_action('create', payment)
-
-            for item_payload in items_payload:
-                item_serializer = PaymentItemSerializer(data=item_payload, context=self.get_serializer_context())
-                item_serializer.is_valid(raise_exception=True)
-                item = item_serializer.save(payment=payment)
-
-                # A book item doesn't let the caller pick which physical
-                # copy goes out — lock and grab the next available one
-                # atomically so two simultaneous sales of the last copy
-                # can't both succeed.
-                if item.book_id:
-                    copy = (
-                        BookCopy.objects.select_for_update()
-                        .filter(tenant_id=user.tenant_id, book_id=item.book_id, status='in_stock')
-                        .order_by('copy_code')
-                        .first()
-                    )
-                    if not copy:
-                        raise ValidationError({'items': f'"{item.book.title}" is out of stock.'})
-                    copy.status = 'sold'
-                    copy.sold_by = user
-                    copy.sold_at = timezone.now()
-                    copy.save(update_fields=['status', 'sold_by', 'sold_at'])
-                    item.book_copy = copy
-                    item.save(update_fields=['book_copy'])
+            self._create_items(payment, items_payload, user)
 
         return Response(self.get_serializer(payment).data, status=status.HTTP_200_OK)
+
+    def _create_items(self, payment, items_payload, user):
+        """Validates and saves each line item onto `payment` — shared by
+        create() and by update() when a caller replaces a bill's items to
+        correct one that was billed under an earlier (buggy) price/discount
+        rule. Callers are responsible for the item's own validation
+        (PaymentItemSerializer) and stock allocation happening together,
+        atomically, with whatever cleanup they need on the items being
+        replaced (see update())."""
+        for item_payload in items_payload:
+            item_serializer = PaymentItemSerializer(data=item_payload, context=self.get_serializer_context())
+            item_serializer.is_valid(raise_exception=True)
+            item = item_serializer.save(payment=payment)
+
+            # A book item doesn't let the caller pick which physical
+            # copy goes out — lock and grab the next available one
+            # atomically so two simultaneous sales of the last copy
+            # can't both succeed.
+            if item.book_id:
+                copy = (
+                    BookCopy.objects.select_for_update()
+                    .filter(tenant_id=user.tenant_id, book_id=item.book_id, status='in_stock')
+                    .order_by('copy_code')
+                    .first()
+                )
+                if not copy:
+                    raise ValidationError({'items': f'"{item.book.title}" is out of stock.'})
+                copy.status = 'sold'
+                copy.sold_by = user
+                copy.sold_at = timezone.now()
+                copy.save(update_fields=['status', 'sold_by', 'sold_at'])
+                item.book_copy = copy
+                item.save(update_fields=['book_copy'])
 
     def _restore_book_copies(self, payment):
         """Undoes the stock decrement from create() for every book item on
@@ -4708,18 +4717,32 @@ class PaymentViewSet(TenantScopedViewSet):
             copy.save(update_fields=['status', 'sold_by', 'sold_at'])
 
     def update(self, request, *args, **kwargs):
-        """Only bill-level fields (status/discount/method/due_date/reference/
-        notes) are editable after creation — items are set once at create()
-        and don't change afterward (see create()'s docstring and
-        PaymentSerializer.items being read-only), so there's no item-level
-        stock reconciliation to do here beyond the whole-bill cancel/refund
-        restore below."""
+        """Bill-level fields (status/method/due_date/notes) are always
+        editable. When the payload also includes `items`, this bill's whole
+        line-item list is replaced — same per-item validation and stock
+        allocation create() uses — and amount/discount are recomputed from
+        the new items server-side, same as create(). That's what lets a
+        bill that was billed under an earlier (buggy) price/percentage rule
+        get corrected in place rather than cancelled and re-billed."""
         self.check_module_modify()
         partial = kwargs.get('partial', False)
         instance = self.get_object()
         previous_status = instance.status
+        user = request.user
 
         data = request.data.copy()
+        items_payload = data.get('items')
+        replace_items = isinstance(items_payload, list) and len(items_payload) > 0
+        save_kwargs = {}
+        if replace_items:
+            try:
+                save_kwargs['amount'] = sum(float(item.get('amount') or 0) for item in items_payload)
+            except (TypeError, AttributeError, ValueError):
+                raise ValidationError({'items': 'Each item needs a numeric amount.'})
+            # Server-computed from each item's own percentages — never trust
+            # a client-sent discount (see _payment_item_discount's docstring).
+            data['discount'] = round(sum(_payment_item_discount(item) for item in items_payload), 2)
+
         # Same rule as create(): 'partial' also stamps paid_at, since it's
         # real money received — see compute_student_balances's docstring.
         if data.get('status') in ('paid', 'partial') and not data.get('paid_at'):
@@ -4729,13 +4752,31 @@ class PaymentViewSet(TenantScopedViewSet):
         serializer.is_valid(raise_exception=True)
 
         with transaction.atomic():
-            self.perform_update(serializer)
-            payment = serializer.instance
+            if replace_items:
+                # Release whatever book stock the old items held before
+                # deleting them — otherwise a swapped-out book item's copy
+                # would stay marked "sold" forever with nothing pointing at it.
+                self._restore_book_copies(instance)
+                instance.items.all().delete()
+
+            # amount is read_only on PaymentSerializer (never trusted from
+            # the client), same as create() — pass it as an explicit save()
+            # kwarg here instead of going through self.perform_update()'s
+            # normal validated_data-only save. tenant_id is re-pinned
+            # explicitly too, matching perform_update()'s own belt-and-braces
+            # guard against a payload ever moving a record cross-tenant.
+            original_tenant_id = instance.tenant_id
+            payment = serializer.save(tenant_id=original_tenant_id, **save_kwargs) if original_tenant_id else serializer.save(**save_kwargs)
+            self._log_model_action('update', payment)
+
+            if replace_items:
+                self._create_items(payment, items_payload, user)
+
             new_status = payment.status
             if previous_status not in ('cancelled', 'refunded') and new_status in ('cancelled', 'refunded'):
                 self._restore_book_copies(payment)
 
-        return Response(serializer.data)
+        return Response(self.get_serializer(payment).data)
 
     def partial_update(self, request, *args, **kwargs):
         kwargs['partial'] = True

@@ -76,6 +76,15 @@ function itemDiscount(item) {
   return Math.max(0, itemAmount(item) * (1 - (parseFloat(teacherPct) + parseFloat(schoolPct)) / 100));
 }
 
+/** An existing item off the API has no `item_type` (that's a frontend-only
+ * concept for which fields to show) — recover it from whichever FK is set,
+ * so an edited bill's items render with the same item cards create() uses. */
+function deriveItemType(item) {
+  if (item.book_id) return "book";
+  if (item.trip_id) return "trip";
+  return "course";
+}
+
 export default function PaymentsPage() {
   const { t } = useI18n();
   const { tenant } = useAuth();
@@ -172,25 +181,26 @@ export default function PaymentsPage() {
       canEdit={canModify}
       canDelete={canDelete}
       canCreate={canAdd}
-      // Items are set once at creation and aren't editable afterward (see
-      // PaymentViewSet.create's docstring) — editing a row just needs its
-      // items available to render read-only, not converted into the
-      // create-form's editing shape.
-      prepareEditForm={(row) => ({ ...row })}
+      // A saved item has no `item_type` (that's frontend-only bookkeeping
+      // for which fields to show) — recover it so an edited bill's items
+      // render with the same editable cards create() uses.
+      prepareEditForm={(row) => ({
+        ...row,
+        items: (row.items || []).map((it) => ({ ...it, item_type: deriveItemType(it) })),
+      })}
       // The item rows carry frontend-only bookkeeping (item_type) and, on
       // create, only the one FK relevant to their type — cleanPayload's
       // shallow strip doesn't reach inside the items array, so build the
       // exact wire shape here instead of leaving stray empty-string FKs
       // (e.g. trip_id: "" on a course item) that would fail validation.
+      // `discount` is never sent — the server derives it from each item's
+      // own teacher_percentage/school_percentage (see PaymentViewSet's
+      // _payment_item_discount), the same math itemDiscount() previews here.
+      // Sending items on an edit replaces the bill's whole item list
+      // server-side (see PaymentViewSet.update) — how a bill billed under
+      // an earlier price/percentage rule gets corrected in place.
       preparePayload={(form) => {
         const { items: rawItems, ...rest } = form;
-        // Editing: items (and the discount derived from their percentages)
-        // are immutable after creation — nothing left to send for them, only
-        // the bill-level fields (status/method/due_date/reference/notes).
-        if (form.id) return rest;
-        // `discount` is never sent on create — the server derives it from
-        // each item's own teacher_percentage/school_percentage (see
-        // PaymentViewSet.create), the same math itemDiscount() previews here.
         const items = (rawItems || []).map((it) => {
           const out = { kind: it.item_type === "book" ? "book" : it.kind, amount: itemAmount(it) };
           if (it.item_type === "course" && it.course_id) {
@@ -344,28 +354,9 @@ export default function PaymentsPage() {
           <div>
             <Label className="text-xs font-medium mb-1.5 block">{t("payments.items")}</Label>
             <div className="space-y-2">
-              {isEditing ? (
-                // Immutable once billed — see preparePayload's comment.
-                // Show what's on the invoice, not an editable cart.
-                <div className="rounded-lg border border-border divide-y divide-border">
+              <>
                   {items.map((item, idx) => (
-                    <div key={item.id || idx} className="flex items-center justify-between px-3 py-2 text-sm">
-                      <div>
-                        <div>{paymentItemTitle(item)}</div>
-                        {item.teacher_percentage != null && item.school_percentage != null && (
-                          <div className="text-[11px] text-muted-foreground">
-                            {t("payments.teacher_percentage")} {item.teacher_percentage}% · {t("payments.school_percentage")} {item.school_percentage}%
-                          </div>
-                        )}
-                      </div>
-                      <span className="font-mono">{Math.round(itemAmount(item)).toLocaleString()} {currency}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <>
-                  {items.map((item, idx) => (
-                    <div key={idx} className="rounded-lg border border-border p-3 space-y-3">
+                    <div key={item.id || idx} className="rounded-lg border border-border p-3 space-y-3">
                       <div className="flex items-center justify-between gap-2">
                         <div className="inline-flex rounded-md border border-border overflow-hidden">
                           {["course", "trip", "book"].map((t2) => (
@@ -552,8 +543,7 @@ export default function PaymentsPage() {
                   <Button type="button" variant="outline" size="sm" onClick={addItem} data-testid="payments-add-item">
                     <Plus className="w-3.5 h-3.5 me-1.5" /> {t("payments.add_item")}
                   </Button>
-                </>
-              )}
+              </>
             </div>
           </div>
 
