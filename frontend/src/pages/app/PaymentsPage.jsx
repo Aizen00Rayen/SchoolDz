@@ -620,7 +620,11 @@ export default function PaymentsPage() {
           ) : detail ? (
             <div className="space-y-4">
               <div className="rounded-lg bg-muted/40 p-3 space-y-1">
-                <InfoRow label={t("payments.total_paid")} value={`${Math.round(detail.balance.paid).toLocaleString()} ${tenant?.currency || "DZD"}`} />
+                {/* Net of any teacher/school %-discount — the actual cash
+                   collected, not the gross bill total that discount waived
+                   (that gross figure is what settles the balance below,
+                   it just isn't "money paid"). */}
+                <InfoRow label={t("payments.total_paid")} value={`${Math.round(detail.balance.collected).toLocaleString()} ${tenant?.currency || "DZD"}`} />
                 <InfoRow label={t("payments.total_cost")} value={`${Math.round(detail.balance.cost).toLocaleString()} ${tenant?.currency || "DZD"}`} />
                 <div className={`flex justify-between text-sm font-semibold pt-1 border-t border-border ${BALANCE_CLS[detail.balance.status] || ""}`}>
                   <span>{t("payments.balance_label")} — {t(`payments.balance_${detail.balance.status}`)}</span>

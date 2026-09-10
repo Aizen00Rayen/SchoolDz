@@ -119,7 +119,11 @@ export default function DebtsPage() {
                         )}
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                        {Math.round(row.paid).toLocaleString()} {currency}
+                        {/* Net of any %-discount — actual cash received, not
+                           the gross credit used to compute the debt figure
+                           beside it (a discount settles cost without ever
+                           being cash in hand). */}
+                        {Math.round(row.collected).toLocaleString()} {currency}
                       </td>
                       <td className="px-4 py-3 font-mono font-semibold text-destructive">
                         {Math.round(Math.abs(row.balance)).toLocaleString()} {currency}

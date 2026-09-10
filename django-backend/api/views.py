@@ -4900,10 +4900,18 @@ def compute_student_balances(tenant_id):
     # permanently showing as unpaid debt. The discount still correctly
     # zeroes out revenue/earnings elsewhere (see _payment_item_discount and
     # compute_teacher_earnings) — it just isn't debt.
+    # `collected` is tracked alongside `paid` for the same bills — the real
+    # cash that came in (amount minus discount), for display ("how much has
+    # this student actually paid us") — a different question from `paid`
+    # above, which is deliberately gross for balance/debt math. A fully
+    # waived bill has paid == amount (settles the cost, no debt) but
+    # collected == 0 (nothing was actually received) — both true at once.
     paid = {}
-    payments = Payment.objects.filter(tenant_id=tenant_id, status__in=('paid', 'partial')).values('student_id', 'amount')
+    collected = {}
+    payments = Payment.objects.filter(tenant_id=tenant_id, status__in=('paid', 'partial')).values('student_id', 'amount', 'discount')
     for p in payments:
         paid[p['student_id']] = paid.get(p['student_id'], 0.0) + float(p['amount'])
+        collected[p['student_id']] = collected.get(p['student_id'], 0.0) + float(p['amount']) - float(p['discount'])
 
     # A payment that's cancelled or refunded stops counting as money
     # received (see `paid` above), but cost here comes purely from
@@ -4938,6 +4946,7 @@ def compute_student_balances(tenant_id):
     balances = {}
     for student_id in set(cost) | set(paid):
         paid_amount = round(paid.get(student_id, 0.0), 2)
+        collected_amount = round(collected.get(student_id, 0.0), 2)
         cost_amount = round(max(0.0, cost.get(student_id, 0.0) - written_off.get(student_id, 0.0) - waived.get(student_id, 0.0)), 2)
         balance = round(paid_amount - cost_amount, 2)
         if balance > BALANCE_THRESHOLD:
@@ -4946,7 +4955,10 @@ def compute_student_balances(tenant_id):
             balance_status = 'owes'
         else:
             balance_status = 'settled'
-        balances[student_id] = {'paid': paid_amount, 'cost': cost_amount, 'balance': balance, 'status': balance_status}
+        balances[student_id] = {
+            'paid': paid_amount, 'collected': collected_amount, 'cost': cost_amount,
+            'balance': balance, 'status': balance_status,
+        }
     return balances
 
 
@@ -5067,7 +5079,9 @@ def payments_student_summary(request):
     if not student:
         raise NotFound('Student not found')
 
-    balance = compute_student_balances(tid).get(student_id, {'paid': 0.0, 'cost': 0.0, 'balance': 0.0, 'status': 'settled'})
+    balance = compute_student_balances(tid).get(
+        student_id, {'paid': 0.0, 'collected': 0.0, 'cost': 0.0, 'balance': 0.0, 'status': 'settled'},
+    )
     groups = Group.objects.filter(tenant_id=tid, students__id=student_id).select_related('course')
     courses = [{'group_id': g.id, 'group_name': g.name, 'course_id': g.course_id, 'course_title': g.course.title} for g in groups]
 
