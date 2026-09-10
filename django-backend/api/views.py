@@ -4943,11 +4943,37 @@ def compute_student_balances(tenant_id):
     for w in DebtWaiver.objects.filter(tenant_id=tenant_id).values('student_id', 'amount'):
         waived[w['student_id']] = waived.get(w['student_id'], 0.0) + float(w['amount'])
 
+    # A still-pending bill hasn't collected anything, but a %-discount
+    # already set on one of its items is the school's decision about what
+    # that item actually costs — not "money not yet in hand" — so it
+    # reduces what shows as owed immediately, before the bill is ever
+    # marked paid, the same way a paid bill's discount does. Only the
+    # discount portion is credited here; the rest of a pending bill's
+    # amount is genuinely still due until it's collected. Scoped to
+    # status='pending' only (not filtered separately from `paid`/`written_off`
+    # by anything else) so this naturally drops out the moment the bill
+    # becomes 'paid'/'partial' (superseded by the full-amount credit in
+    # `paid`) or 'cancelled'/'refunded' (nothing to forgive from an invoice
+    # that's simply gone).
+    pending_discount = {}
+    pending_items = PaymentItem.objects.filter(
+        payment__tenant_id=tenant_id, payment__status='pending',
+    ).values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage')
+    for row in pending_items:
+        discount = _payment_item_discount(row)
+        if discount:
+            pending_discount[row['payment__student_id']] = pending_discount.get(row['payment__student_id'], 0.0) + discount
+
     balances = {}
     for student_id in set(cost) | set(paid):
         paid_amount = round(paid.get(student_id, 0.0), 2)
         collected_amount = round(collected.get(student_id, 0.0), 2)
-        cost_amount = round(max(0.0, cost.get(student_id, 0.0) - written_off.get(student_id, 0.0) - waived.get(student_id, 0.0)), 2)
+        cost_amount = round(max(0.0, (
+            cost.get(student_id, 0.0)
+            - written_off.get(student_id, 0.0)
+            - waived.get(student_id, 0.0)
+            - pending_discount.get(student_id, 0.0)
+        )), 2)
         balance = round(paid_amount - cost_amount, 2)
         if balance > BALANCE_THRESHOLD:
             balance_status = 'overpaid'
@@ -5031,8 +5057,26 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
     for row in written_off_items_qs.values('payment__student_id', 'amount'):
         written_off[row['payment__student_id']] = written_off.get(row['payment__student_id'], 0.0) + float(row['amount'])
 
+    # Same as compute_student_balances's pending_discount — a still-pending
+    # bill's %-discount is the school's decision about this item's real
+    # price, so it counts toward "paid enough" immediately, not only once
+    # the bill is marked paid.
+    pending_discount = {}
+    pending_items_qs = PaymentItem.objects.filter(
+        payment__tenant_id=tenant_id, payment__status='pending', course_id=course_id,
+    )
+    if student_ids is not None:
+        pending_items_qs = pending_items_qs.filter(payment__student_id__in=student_ids)
+    for row in pending_items_qs.values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage'):
+        discount = _payment_item_discount(row)
+        if discount:
+            pending_discount[row['payment__student_id']] = pending_discount.get(row['payment__student_id'], 0.0) + discount
+
     return {
-        student_id: paid.get(student_id, 0.0) + BALANCE_THRESHOLD >= (cost_amount - written_off.get(student_id, 0.0))
+        student_id: (
+            paid.get(student_id, 0.0) + pending_discount.get(student_id, 0.0) + BALANCE_THRESHOLD
+            >= (cost_amount - written_off.get(student_id, 0.0))
+        )
         for student_id, cost_amount in cost.items()
     }
 
