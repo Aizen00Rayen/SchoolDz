@@ -486,13 +486,7 @@ export default function PaymentsPage() {
                         <Field label={t("field.amount")} required>
                           <Input
                             type="number" value={item.amount || 0}
-                            // A course's price is fixed on the Courses page,
-                            // not typed per bill — the only way to charge less
-                            // is the teacher/school % split below. Trip/book
-                            // items still auto-fill from their own price but
-                            // stay editable, matching how those catalogs work.
                             onChange={(e) => updateItem(idx, { amount: parseFloat(e.target.value) || 0 })}
-                            disabled={item.item_type === "course"}
                             required
                             data-testid={`payments-item-${idx}-amount`}
                           />
