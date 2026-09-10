@@ -620,18 +620,13 @@ export default function PaymentsPage() {
           ) : detail ? (
             <div className="space-y-4">
               <div className="rounded-lg bg-muted/40 p-3 space-y-1">
-                {/* "Total paid" and "Real cost" are the two numbers the
-                   Balance row below is directly computed from (paid − cost)
-                   — kept as the gross/adjusted figures so the three numbers
-                   actually reconcile at a glance. "Cash collected" is a
-                   separate, honest answer to "how much money did we
-                   actually receive" — it's net of any %-discount and
-                   deliberately doesn't feed into the balance math (a
-                   discount settles cost without ever being cash in hand,
-                   see compute_student_balances). */}
+                {/* Both net of any teacher/school %-discount — the discount
+                   is forgiven straight off cost (see compute_student_balances),
+                   not treated as cash collected — so these two numbers are
+                   exactly what Balance below is computed from (paid − cost),
+                   and they reconcile with it at a glance. */}
                 <InfoRow label={t("payments.total_paid")} value={`${Math.round(detail.balance.paid).toLocaleString()} ${tenant?.currency || "DZD"}`} />
                 <InfoRow label={t("payments.total_cost")} value={`${Math.round(detail.balance.cost).toLocaleString()} ${tenant?.currency || "DZD"}`} />
-                <InfoRow label={t("payments.total_collected")} value={`${Math.round(detail.balance.collected).toLocaleString()} ${tenant?.currency || "DZD"}`} />
                 <div className={`flex justify-between text-sm font-semibold pt-1 border-t border-border ${BALANCE_CLS[detail.balance.status] || ""}`}>
                   <span>{t("payments.balance_label")} — {t(`payments.balance_${detail.balance.status}`)}</span>
                   <span className="font-mono">{Math.round(detail.balance.balance).toLocaleString()} {tenant?.currency || "DZD"}</span>

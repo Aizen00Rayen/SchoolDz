@@ -4822,13 +4822,15 @@ BALANCE_THRESHOLD = 1.0  # DZD-scale rounding noise shouldn't read as owing/over
 
 
 def compute_student_balances(tenant_id):
-    """Per-student running balance = each bill's full amount (paid or
-    partial Payment rows — see the note on `paid` below for why a
-    teacher/school % discount doesn't reduce this) minus the cost of every
-    session they've actually used (present, or excused-but-not-yet-recovered
-    attendance, priced via course_per_session_price) — collection status is
-    tracked by attendance, not by manually re-deriving what's "owed" from
-    enrollment alone.
+    """Per-student running balance = actual cash collected (paid/partial
+    Payment rows, net of any discount — see `paid` below) minus the cost of
+    every session they've actually used (present, or
+    excused-but-not-yet-recovered attendance, priced via
+    course_per_session_price), itself reduced by any teacher/school
+    %-discount already billed (see `active_discount` below — a discount is
+    never debt, whether or not it's been collected yet) — collection status
+    is tracked by attendance, not by manually re-deriving what's "owed"
+    from enrollment alone.
     Returns {student_id: {paid, cost, balance, status}}, status one of
     'owes' (they owe the school), 'overpaid' (the school owes them),
     'settled'.
@@ -4892,26 +4894,18 @@ def compute_student_balances(tenant_id):
     # money in hand." payments_overdue/dashboard 'outstanding' etc. already
     # stop treating a 'partial' bill as still-owed once it's counted here.
     #
-    # Counted at the bill's full amount, not amount-minus-discount: a
-    # teacher/school % split that doesn't sum to 100 means the school chose
-    # to waive that portion, not that the family still owes it — cost here
-    # comes from attendance and has no idea a discount was ever granted, so
-    # netting the discount out of `paid` would leave the waived amount
-    # permanently showing as unpaid debt. The discount still correctly
-    # zeroes out revenue/earnings elsewhere (see _payment_item_discount and
-    # compute_teacher_earnings) — it just isn't debt.
-    # `collected` is tracked alongside `paid` for the same bills — the real
-    # cash that came in (amount minus discount), for display ("how much has
-    # this student actually paid us") — a different question from `paid`
-    # above, which is deliberately gross for balance/debt math. A fully
-    # waived bill has paid == amount (settles the cost, no debt) but
-    # collected == 0 (nothing was actually received) — both true at once.
+    # `paid` is the real cash collected (amount minus discount) — what a
+    # human means by "how much has this student actually paid us", and what
+    # the Balance row below is literally computed from. A %-split discount
+    # is never debt (see `active_discount` below, which forgives it from
+    # `cost` instead) — but it's also genuinely not cash in hand, so it
+    # can't inflate `paid` either. Both of those together is what keeps a
+    # fully-waived bill settling to 0/0 rather than looking "paid in full"
+    # for money that was never collected.
     paid = {}
-    collected = {}
     payments = Payment.objects.filter(tenant_id=tenant_id, status__in=('paid', 'partial')).values('student_id', 'amount', 'discount')
     for p in payments:
-        paid[p['student_id']] = paid.get(p['student_id'], 0.0) + float(p['amount'])
-        collected[p['student_id']] = collected.get(p['student_id'], 0.0) + float(p['amount']) - float(p['discount'])
+        paid[p['student_id']] = paid.get(p['student_id'], 0.0) + float(p['amount']) - float(p['discount'])
 
     # A payment that's cancelled or refunded stops counting as money
     # received (see `paid` above), but cost here comes purely from
@@ -4927,9 +4921,13 @@ def compute_student_balances(tenant_id):
     # gate, cancelling a 'pending' invoice that was never actually paid
     # would wrongly forgive real debt that was never collected in the first
     # place.
-    # Same gross-not-net counting as `paid` above, and for the same reason:
-    # this only exists to cancel out what that payment contributed to `paid`
-    # while it was still active, so it has to use the same amount `paid` used.
+    #
+    # Deliberately the bill's full gross amount, not amount-minus-discount:
+    # while this bill was active it contributed both `paid` (net) AND its
+    # own share of `active_discount` (below) to the student's balance —
+    # together those two sum to exactly the gross amount, so undoing both
+    # at once on cancellation (a net no-op — see the comment above) takes
+    # exactly that much back off `cost`.
     written_off = {}
     written_off_payments = Payment.objects.filter(
         tenant_id=tenant_id, status__in=('cancelled', 'refunded'), paid_at__isnull=False,
@@ -4943,36 +4941,33 @@ def compute_student_balances(tenant_id):
     for w in DebtWaiver.objects.filter(tenant_id=tenant_id).values('student_id', 'amount'):
         waived[w['student_id']] = waived.get(w['student_id'], 0.0) + float(w['amount'])
 
-    # A still-pending bill hasn't collected anything, but a %-discount
-    # already set on one of its items is the school's decision about what
-    # that item actually costs — not "money not yet in hand" — so it
-    # reduces what shows as owed immediately, before the bill is ever
-    # marked paid, the same way a paid bill's discount does. Only the
-    # discount portion is credited here; the rest of a pending bill's
-    # amount is genuinely still due until it's collected. Scoped to
-    # status='pending' only (not filtered separately from `paid`/`written_off`
-    # by anything else) so this naturally drops out the moment the bill
-    # becomes 'paid'/'partial' (superseded by the full-amount credit in
-    # `paid`) or 'cancelled'/'refunded' (nothing to forgive from an invoice
-    # that's simply gone).
-    pending_discount = {}
-    pending_items = PaymentItem.objects.filter(
-        payment__tenant_id=tenant_id, payment__status='pending',
+    # A %-discount is the school's decision about what an item actually
+    # costs, not "money not yet in hand" — so it's forgiven from `cost`
+    # immediately, the moment it's billed, whether or not the bill has been
+    # collected yet ('paid'/'partial'/'pending' all count the same way
+    # here). Only the discount portion is credited; the rest of a bill's
+    # amount is genuinely still due until it's actually collected (that's
+    # what `paid` above is for). Naturally drops out the instant a bill is
+    # cancelled/refunded (no longer paid/partial/pending), which is exactly
+    # matched by `written_off` picking it back up as part of the bill's full
+    # gross amount — see that comment for why the two have to agree.
+    active_discount = {}
+    active_items = PaymentItem.objects.filter(
+        payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial', 'pending'),
     ).values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage')
-    for row in pending_items:
+    for row in active_items:
         discount = _payment_item_discount(row)
         if discount:
-            pending_discount[row['payment__student_id']] = pending_discount.get(row['payment__student_id'], 0.0) + discount
+            active_discount[row['payment__student_id']] = active_discount.get(row['payment__student_id'], 0.0) + discount
 
     balances = {}
     for student_id in set(cost) | set(paid):
         paid_amount = round(paid.get(student_id, 0.0), 2)
-        collected_amount = round(collected.get(student_id, 0.0), 2)
         cost_amount = round(max(0.0, (
             cost.get(student_id, 0.0)
             - written_off.get(student_id, 0.0)
             - waived.get(student_id, 0.0)
-            - pending_discount.get(student_id, 0.0)
+            - active_discount.get(student_id, 0.0)
         )), 2)
         balance = round(paid_amount - cost_amount, 2)
         if balance > BALANCE_THRESHOLD:
@@ -4981,10 +4976,7 @@ def compute_student_balances(tenant_id):
             balance_status = 'owes'
         else:
             balance_status = 'settled'
-        balances[student_id] = {
-            'paid': paid_amount, 'collected': collected_amount, 'cost': cost_amount,
-            'balance': balance, 'status': balance_status,
-        }
+        balances[student_id] = {'paid': paid_amount, 'cost': cost_amount, 'balance': balance, 'status': balance_status}
     return balances
 
 
@@ -5032,17 +5024,18 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
         cost[row['student_id']] = amount
 
     # 'partial' counts the same as 'paid' here too — see compute_student_balances.
-    # Counted at the item's own full amount, not amount-minus-its-discount —
-    # same reasoning as compute_student_balances's `paid`: a %-split discount
-    # is the school waiving that portion, not the family still owing it.
+    # Net of the item's own discount — see compute_student_balances's `paid`
+    # for why: real cash collected, with the discount forgiven separately
+    # via `active_discount` below rather than counted as if it were cash.
     paid = {}
     items_qs = PaymentItem.objects.filter(
         payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial'), course_id=course_id,
     )
     if student_ids is not None:
         items_qs = items_qs.filter(payment__student_id__in=student_ids)
-    for row in items_qs.values('payment__student_id', 'amount'):
-        paid[row['payment__student_id']] = paid.get(row['payment__student_id'], 0.0) + float(row['amount'])
+    for row in items_qs.values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage'):
+        net = float(row['amount']) - _payment_item_discount(row)
+        paid[row['payment__student_id']] = paid.get(row['payment__student_id'], 0.0) + net
 
     # Same write-off as compute_student_balances — cancelled/refunded, but
     # only for a bill that had genuinely collected money at some point
@@ -5057,24 +5050,23 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
     for row in written_off_items_qs.values('payment__student_id', 'amount'):
         written_off[row['payment__student_id']] = written_off.get(row['payment__student_id'], 0.0) + float(row['amount'])
 
-    # Same as compute_student_balances's pending_discount — a still-pending
-    # bill's %-discount is the school's decision about this item's real
-    # price, so it counts toward "paid enough" immediately, not only once
-    # the bill is marked paid.
-    pending_discount = {}
-    pending_items_qs = PaymentItem.objects.filter(
-        payment__tenant_id=tenant_id, payment__status='pending', course_id=course_id,
+    # Same as compute_student_balances's active_discount — a %-discount
+    # counts toward "paid enough" immediately once it's billed, whether the
+    # bill is 'paid', 'partial', or still 'pending'.
+    active_discount = {}
+    active_items_qs = PaymentItem.objects.filter(
+        payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial', 'pending'), course_id=course_id,
     )
     if student_ids is not None:
-        pending_items_qs = pending_items_qs.filter(payment__student_id__in=student_ids)
-    for row in pending_items_qs.values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage'):
+        active_items_qs = active_items_qs.filter(payment__student_id__in=student_ids)
+    for row in active_items_qs.values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage'):
         discount = _payment_item_discount(row)
         if discount:
-            pending_discount[row['payment__student_id']] = pending_discount.get(row['payment__student_id'], 0.0) + discount
+            active_discount[row['payment__student_id']] = active_discount.get(row['payment__student_id'], 0.0) + discount
 
     return {
         student_id: (
-            paid.get(student_id, 0.0) + pending_discount.get(student_id, 0.0) + BALANCE_THRESHOLD
+            paid.get(student_id, 0.0) + active_discount.get(student_id, 0.0) + BALANCE_THRESHOLD
             >= (cost_amount - written_off.get(student_id, 0.0))
         )
         for student_id, cost_amount in cost.items()
@@ -5124,7 +5116,7 @@ def payments_student_summary(request):
         raise NotFound('Student not found')
 
     balance = compute_student_balances(tid).get(
-        student_id, {'paid': 0.0, 'collected': 0.0, 'cost': 0.0, 'balance': 0.0, 'status': 'settled'},
+        student_id, {'paid': 0.0, 'cost': 0.0, 'balance': 0.0, 'status': 'settled'},
     )
     groups = Group.objects.filter(tenant_id=tid, students__id=student_id).select_related('course')
     courses = [{'group_id': g.id, 'group_name': g.name, 'course_id': g.course_id, 'course_title': g.course.title} for g in groups]

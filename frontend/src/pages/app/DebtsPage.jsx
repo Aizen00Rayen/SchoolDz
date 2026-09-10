@@ -119,10 +119,6 @@ export default function DebtsPage() {
                         )}
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                        {/* Same figure the "owed" column is derived from
-                           (cost − this), not the smaller net-of-discount cash
-                           total — keeping the two columns in this row
-                           arithmetically consistent with each other. */}
                         {Math.round(row.paid).toLocaleString()} {currency}
                       </td>
                       <td className="px-4 py-3 font-mono font-semibold text-destructive">
