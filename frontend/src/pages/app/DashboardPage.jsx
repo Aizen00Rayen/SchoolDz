@@ -297,7 +297,9 @@ export default function DashboardPage() {
                 </div>
                 <div className="text-end">
                   <div className="text-sm font-mono font-semibold">
-                    {Math.round(p.amount).toLocaleString()} {tenant?.currency || "DZD"}
+                    {/* Net of discount — see PaymentsPage's Amount column
+                       for why the raw amount alone is misleading. */}
+                    {Math.round(Math.max(0, p.amount - (p.discount || 0))).toLocaleString()} {tenant?.currency || "DZD"}
                   </div>
                   <StatusPill status={p.status} />
                 </div>

@@ -292,11 +292,28 @@ export default function PaymentsPage() {
         },
         {
           key: "amount", label: t("field.amount"),
-          render: (r) => (
-            <span className="font-mono font-semibold">
-              {Math.round(r.amount).toLocaleString()} {tenant?.currency || "DZD"}
-            </span>
-          ),
+          // Net of discount — same amount − discount every balance/revenue
+          // calculation in the app already treats as what this bill is
+          // actually worth (see compute_student_balances's `paid`). Showing
+          // the raw gross amount here made a fully (or partly) waived item
+          // look unchanged after editing its percentages — the discount was
+          // saved correctly, it just never showed up in this column.
+          render: (r) => {
+            const net = Math.max(0, parseFloat(r.amount) - parseFloat(r.discount || 0));
+            const hasDiscount = parseFloat(r.discount || 0) > 0;
+            return (
+              <div className="flex flex-col leading-tight">
+                <span className="font-mono font-semibold">
+                  {Math.round(net).toLocaleString()} {tenant?.currency || "DZD"}
+                </span>
+                {hasDiscount && (
+                  <span className="font-mono text-[11px] text-muted-foreground line-through">
+                    {Math.round(r.amount).toLocaleString()} {tenant?.currency || "DZD"}
+                  </span>
+                )}
+              </div>
+            );
+          },
         },
         { key: "method", label: t("field.method"), render: (r) => <span className="capitalize text-xs">{t(`method.${r.method}`)}</span> },
         { key: "status", label: t("field.status"), render: (r) => <StatusPill status={r.status} /> },
