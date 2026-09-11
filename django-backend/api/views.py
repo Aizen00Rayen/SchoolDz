@@ -1066,6 +1066,10 @@ def public_school_enroll(request, slug):
     total_amount = sum(g.course.price for g in groups)
 
     with transaction.atomic():
+        # Locks this tenant's row for the rest of the block so two
+        # concurrent enrollments can't compute the same student_code/
+        # invoice_number — see _next_sequence_code's docstring.
+        Tenant.objects.select_for_update().get(id=tenant.id)
         guardian_user = User.objects.create_user(
             email=guardian_email, password=password, name=guardian_name,
             tenant=tenant, role='parent', phone=guardian_phone or None, email_verified=False,
@@ -1077,7 +1081,7 @@ def public_school_enroll(request, slug):
             # GuardianViewSet.approve/reject.
             source='public', approval_status='pending',
         )
-        student_code = f"{tenant.student_prefix or 'STU-'}{str(existing_count + 1).zfill(5)}"
+        student_code = _next_sequence_code(tenant.id, Student, 'student_code', tenant.student_prefix or 'STU-', 5)
         student = Student.objects.create(
             tenant=tenant, parent=guardian, first_name=student_first, last_name=student_last,
             student_code=student_code, enrollment_date=timezone.now(), status='active',
@@ -1090,8 +1094,7 @@ def public_school_enroll(request, slug):
         log_activity(request, tenant.id, 'create', category='data', entity_type='students', entity_id=student.id,
                      description=f'Public enrollment: {student.first_name} {student.last_name} (pending approval)')
 
-        invoice_count = Payment.objects.filter(tenant_id=tenant.id).count()
-        invoice_number = f"{tenant.invoice_prefix or 'INV-'}{str(invoice_count + 1).zfill(6)}"
+        invoice_number = _next_sequence_code(tenant.id, Payment, 'invoice_number', tenant.invoice_prefix or 'INV-', 6)
         payment = Payment.objects.create(
             tenant=tenant, student=student, amount=total_amount,
             method='card' if payment_method == 'online' else 'cash',
@@ -4038,16 +4041,20 @@ class StudentViewSet(TenantScopedViewSet):
         count = Student.objects.filter(tenant_id=user.tenant_id).count()
         if tenant.max_students is not None and count >= tenant.max_students:
             raise PermissionDenied(f"Your {tenant.plan} plan allows up to {tenant.max_students} students. Upgrade your plan to add more.")
-            
-        student_code = f"{tenant.student_prefix or 'STU-'}{str(count + 1).zfill(5)}"
-        
+
         data = request.data.copy()
-        data['student_code'] = student_code
         data['enrollment_date'] = timezone.now().isoformat()
-        
+
         serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
+        with transaction.atomic():
+            # Locks this tenant's row so two concurrent creates can't
+            # compute the same student_code — see _next_sequence_code.
+            Tenant.objects.select_for_update().get(id=tenant.id)
+            serializer.validated_data['student_code'] = _next_sequence_code(
+                tenant.id, Student, 'student_code', tenant.student_prefix or 'STU-', 5,
+            )
+            self.perform_create(serializer)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'], url_path='import')
@@ -4115,6 +4122,9 @@ class StudentViewSet(TenantScopedViewSet):
 
             try:
                 with transaction.atomic():
+                    # Locks this tenant's row so a concurrent request can't
+                    # compute the same student_code — see _next_sequence_code.
+                    Tenant.objects.select_for_update().get(id=tenant.id)
                     guardian = None
                     parent_email = (row.get('parent_email') or '').strip().lower()
                     if parent_email:
@@ -4127,7 +4137,7 @@ class StudentViewSet(TenantScopedViewSet):
                             },
                         )
 
-                    student_code = f"{tenant.student_prefix or 'STU-'}{str(existing_count + created_count + 1).zfill(5)}"
+                    student_code = _next_sequence_code(tenant.id, Student, 'student_code', tenant.student_prefix or 'STU-', 5)
                     Student.objects.create(
                         tenant=tenant,
                         parent=guardian,
@@ -4542,12 +4552,21 @@ class BookViewSet(TenantScopedViewSet):
             raise ValidationError('quantity must be between 1 and 1000')
 
         # Tenant-wide sequential counter (not per-title), same convention as
-        # Student.student_code / Payment.invoice_number.
-        existing_count = BookCopy.objects.filter(tenant_id=book.tenant_id).count()
-        BookCopy.objects.bulk_create([
-            BookCopy(tenant_id=book.tenant_id, book=book, copy_code=f"BK-{str(existing_count + i + 1).zfill(6)}")
-            for i in range(quantity)
-        ])
+        # Student.student_code / Payment.invoice_number — derived from the
+        # MAX numeric suffix among copy_codes that still exist, not a live
+        # row count, so a previously-deleted/sold-then-removed copy never
+        # causes a later restock to reuse its code (see
+        # _next_sequence_code's docstring).
+        with transaction.atomic():
+            Tenant.objects.select_for_update().get(id=book.tenant_id)
+            max_n = 0
+            for code in BookCopy.objects.filter(tenant_id=book.tenant_id).values_list('copy_code', flat=True):
+                if code and code.startswith('BK-') and code[3:].isdigit():
+                    max_n = max(max_n, int(code[3:]))
+            BookCopy.objects.bulk_create([
+                BookCopy(tenant_id=book.tenant_id, book=book, copy_code=f"BK-{str(max_n + i + 1).zfill(6)}")
+                for i in range(quantity)
+            ])
         log_activity(request, book.tenant_id, 'update', entity_type='books', entity_id=book.id,
                      description=f'Restocked {quantity} cop{"y" if quantity == 1 else "ies"} of "{book.title}"')
         # `book` carries a prefetched (now-stale) `copies` cache from
@@ -4702,6 +4721,30 @@ class ClassSessionViewSet(TenantScopedViewSet):
         return Response({'items': ClassSessionSerializer(created, many=True).data, 'series_id': series_id})
 
 
+def _next_sequence_code(tenant_id, model, field, prefix, width):
+    """Race-reduced, deletion-proof next sequential code (invoice_number,
+    student_code, copy_code) for a tenant. Previously derived from a live
+    row COUNT, which silently reuses an already-issued number as soon as
+    any earlier row is deleted (Payment/Student/BookCopy can all be
+    hard-deleted) — several payments in production ended up sharing one
+    invoice_number this way. Deriving it from the MAX numeric suffix among
+    codes that still exist is immune to deletions: a deleted row's number
+    is never picked again unless it happened to be the single highest one,
+    in which case reusing it is correct (nothing else holds it). Callers
+    must run this inside the same transaction.atomic() block as the row's
+    own creation, right after locking the tenant row with
+    select_for_update(), so two concurrent requests can't both compute the
+    same number before either commits."""
+    max_n = 0
+    for code in model.objects.filter(tenant_id=tenant_id).values_list(field, flat=True):
+        if not code or not code.startswith(prefix):
+            continue
+        suffix = code[len(prefix):]
+        if suffix.isdigit():
+            max_n = max(max_n, int(suffix))
+    return f"{prefix}{str(max_n + 1).zfill(width)}"
+
+
 def _payment_item_discount(item_payload):
     """How much of one item's own amount is waived, from its own
     teacher_percentage/school_percentage — 0 when either is missing (a
@@ -4746,6 +4789,8 @@ class PaymentViewSet(TenantScopedViewSet):
         if q:
             queryset = queryset.filter(
                 Q(invoice_number__icontains=q) | Q(reference__icontains=q) | Q(notes__icontains=q)
+                | Q(student__first_name__icontains=q) | Q(student__last_name__icontains=q)
+                | Q(student__first_name_latin__icontains=q) | Q(student__last_name_latin__icontains=q)
             )
         balance_status = request.GET.get('balance_status')
         if balance_status in ('owes', 'overpaid', 'settled'):
@@ -4773,11 +4818,7 @@ class PaymentViewSet(TenantScopedViewSet):
         if not isinstance(items_payload, list) or not items_payload:
             raise ValidationError({'items': 'At least one item is required.'})
 
-        count = Payment.objects.filter(tenant_id=user.tenant_id).count()
-        invoice_number = f"{tenant.invoice_prefix or 'INV-'}{str(count + 1).zfill(6)}"
-
         bill_data = {k: v for k, v in request.data.items() if k != 'items'}
-        bill_data['invoice_number'] = invoice_number
         try:
             bill_data['amount'] = sum(float(item.get('amount') or 0) for item in items_payload)
         except (TypeError, AttributeError, ValueError):
@@ -4805,7 +4846,11 @@ class PaymentViewSet(TenantScopedViewSet):
             # self.perform_create()'s normal validated_data-only save.
             if user.tenant_id and not user.is_super_admin() and user.tenant.status != 'active':
                 raise PermissionDenied(_inactive_tenant_message(user.tenant))
-            payment = serializer.save(tenant_id=user.tenant_id, amount=bill_data['amount']) if user.tenant_id else serializer.save(amount=bill_data['amount'])
+            # Locks this tenant's row so two concurrent bill creations can't
+            # compute the same invoice_number — see _next_sequence_code.
+            Tenant.objects.select_for_update().get(id=tenant.id)
+            invoice_number = _next_sequence_code(tenant.id, Payment, 'invoice_number', tenant.invoice_prefix or 'INV-', 6)
+            payment = serializer.save(tenant_id=user.tenant_id, amount=bill_data['amount'], invoice_number=invoice_number) if user.tenant_id else serializer.save(amount=bill_data['amount'], invoice_number=invoice_number)
             self._log_model_action('create', payment)
             self._create_items(payment, items_payload, user)
 
