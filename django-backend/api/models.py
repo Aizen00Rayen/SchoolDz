@@ -1,7 +1,7 @@
 import uuid
 from datetime import time
 from django.db import models
-from django.core.validators import MinValueValidator, MaxValueValidator
+from django.core.validators import MinValueValidator, MaxValueValidator, MaxLengthValidator
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
 
 def generate_uuid():
@@ -107,6 +107,13 @@ class Tenant(models.Model):
     # 08:00 (fixed, not configurable) and runs until this time, 22:00 by
     # default, until the tenant narrows/widens it in Settings.
     timetable_end_time = models.TimeField(default=time(22, 0))
+    # Set once, the first time this tenant's Expenses page is ever loaded
+    # (see ensure_default_expense_categories) — re-checking "which default
+    # keys does this tenant currently have" on every load couldn't tell a
+    # key the tenant never saw yet apart from one they deliberately
+    # deleted, so a deleted default category just came right back on the
+    # next page load. This flag means seeding only ever happens once.
+    default_expense_categories_seeded_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -434,7 +441,7 @@ class Course(models.Model):
     # Meaning depends on pricing_type — see choices above. Unused (null) for
     # per_session, since there's nothing to divide by there.
     sessions_count = models.IntegerField(null=True, blank=True)
-    price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    price = models.DecimalField(max_digits=10, decimal_places=2, default=0, validators=[MinValueValidator(0)])
     max_students = models.IntegerField(default=20)
     color = models.CharField(max_length=16, default='#E53935')
     image_url = models.CharField(max_length=255, null=True, blank=True)
@@ -463,7 +470,7 @@ class Room(models.Model):
     id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='rooms')
     name = models.CharField(max_length=255)
-    capacity = models.IntegerField(null=True, blank=True)
+    capacity = models.IntegerField(null=True, blank=True, validators=[MinValueValidator(0)])
     notes = models.CharField(max_length=255, null=True, blank=True)
     STATUS_CHOICES = [
         ('active', 'active'),
@@ -487,7 +494,7 @@ class Group(models.Model):
     # groups should set room_ref instead, which is what rooms_occupancy uses.
     room = models.CharField(max_length=255, null=True, blank=True)
     room_ref = models.ForeignKey(Room, on_delete=models.SET_NULL, null=True, blank=True, db_column='room_id', related_name='groups')
-    capacity = models.IntegerField(default=20)
+    capacity = models.IntegerField(default=20, validators=[MinValueValidator(0)])
     schedule = models.CharField(max_length=255, null=True, blank=True)
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
@@ -599,7 +606,7 @@ class Payment(models.Model):
         ('other', 'other'),
     ]
     kind = models.CharField(max_length=50, choices=KIND_CHOICES, default='monthly')
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
     # Never negative — a negative discount would mean charging the family
     # more than the bill's own subtotal. The frontend already clamps this,
     # but this is the one place every caller (including a direct API call)
@@ -678,7 +685,7 @@ class PaymentItem(models.Model):
     # Same server-side atomic assignment as Payment.book_copy used to do —
     # see PaymentViewSet.create.
     book_copy = models.ForeignKey('BookCopy', on_delete=models.SET_NULL, null=True, blank=True, db_column='book_copy_id', related_name='sale_items')
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0.01)])
     # What share of THIS item's own amount goes to the teacher vs the
     # school — only ever meaningfully set on a 'course' item (auto-filled in
     # the UI from that item's own group's teacher, per Teacher.payment_percentage,
@@ -785,6 +792,14 @@ class Grade(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='grades')
     student = models.ForeignKey(Student, on_delete=models.CASCADE, db_column='student_id', related_name='grades')
     course = models.ForeignKey(Course, on_delete=models.SET_NULL, null=True, blank=True, db_column='course_id', related_name='grades')
+    # Null for a grade entered directly (not via quiz grading). When a quiz
+    # submission is graded, this ties the Grade row to that SPECIFIC
+    # attempt — previously the upsert was keyed only on
+    # (tenant, student, title), so grading two different attempts from the
+    # same student for the same quiz (e.g. an accidental resubmission)
+    # silently overwrote whichever score was entered first with whichever
+    # was entered last, no matter which attempt the teacher meant to grade.
+    quiz_attempt = models.OneToOneField('QuizAttempt', on_delete=models.SET_NULL, null=True, blank=True, db_column='quiz_attempt_id', related_name='grade')
     title = models.CharField(max_length=255)
     score = models.DecimalField(max_digits=6, decimal_places=2)
     max_score = models.DecimalField(max_digits=6, decimal_places=2, default=100)
@@ -860,13 +875,36 @@ class Conversation(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='conversations')
     guardian = models.OneToOneField(Guardian, on_delete=models.CASCADE, db_column='guardian_id', related_name='conversation')
     last_message_at = models.DateTimeField(null=True, blank=True)
+    # A conversation has exactly one guardian (OneToOneField above), so this
+    # one column is already correctly "per guardian" — no conflation issue
+    # on this side.
     last_read_by_guardian_at = models.DateTimeField(null=True, blank=True)
+    # Deliberately NOT "per staff member" — see ConversationStaffRead below,
+    # which is what actually tracks that. Kept only so `last_message_at >
+    # last_read_by_staff_at` still gives a cheap tenant-wide "has ANYONE on
+    # staff seen the latest message" signal without a join, updated
+    # whenever a message is sent or any staff member reads the thread.
     last_read_by_staff_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = 'conversations'
+
+
+class ConversationStaffRead(models.Model):
+    """One staff member's own read position in one conversation — separate
+    from Conversation.last_read_by_staff_at (which is shared across every
+    staff member in the tenant), so one person opening a thread doesn't
+    silently mark it "read" for everyone else who hasn't actually seen it."""
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, db_column='conversation_id', related_name='staff_reads')
+    user = models.ForeignKey(User, on_delete=models.CASCADE, db_column='user_id', related_name='conversation_reads')
+    last_read_at = models.DateTimeField()
+
+    class Meta:
+        db_table = 'conversation_staff_reads'
+        unique_together = [('conversation', 'user')]
 
 
 class Message(models.Model):
@@ -879,7 +917,10 @@ class Message(models.Model):
         ('parent', 'parent'),
     ]
     sender_role = models.CharField(max_length=20, choices=SENDER_ROLE_CHOICES)
-    body = models.TextField()
+    # Capped so one message can't grow into a multi-megabyte blob that gets
+    # re-transmitted on every fetch of the conversation (a 5,000,000-char
+    # message was previously accepted with no error).
+    body = models.TextField(validators=[MaxLengthValidator(10000)])
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -1029,7 +1070,7 @@ class Expense(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='expenses')
     category = models.ForeignKey(ExpenseCategory, on_delete=models.SET_NULL, null=True, blank=True, db_column='category_id', related_name='expenses')
     title = models.CharField(max_length=255)
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0.01)])
     spent_at = models.DateField()
     METHOD_CHOICES = [
         ('cash', 'cash'),
@@ -1057,7 +1098,7 @@ class TeacherPayout(models.Model):
     id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='teacher_payouts')
     teacher = models.ForeignKey(Teacher, on_delete=models.CASCADE, db_column='teacher_id', related_name='payouts')
-    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0.01)])
     paid_at = models.DateField()
     period_start = models.DateField(null=True, blank=True)
     period_end = models.DateField(null=True, blank=True)

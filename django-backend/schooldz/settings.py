@@ -257,12 +257,22 @@ REST_FRAMEWORK = {
 # accepted forever. 0 disables the check.
 AUTH_TOKEN_MAX_AGE_DAYS = int(os.environ.get('AUTH_TOKEN_MAX_AGE_DAYS', '30'))
 
+# The first entry here is what every NEW password gets hashed with — the
+# Laravel hashers used to be first, meaning every new signup (not just a
+# legacy-migrated account) got a Laravel-style bcrypt hash instead of
+# Django's own default. bcrypt itself isn't weak, this was just an
+# accidental deviation from the intended default. PBKDF2PasswordHasher
+# (Django's actual historical default, no extra dependency needed) is used
+# here rather than Argon2 specifically to avoid adding a new package
+# dependency; the Laravel hashers stay listed after it purely so a
+# legacy-imported password still verifies correctly — Django re-hashes with
+# the first hasher automatically the next time that user logs in.
 PASSWORD_HASHERS = [
+    'django.contrib.auth.hashers.PBKDF2PasswordHasher',
     'api.hashers.LaravelBCryptPasswordHasher',
     'api.hashers.Laravel2aPasswordHasher',
     'django.contrib.auth.hashers.BCryptPasswordHasher',
     'django.contrib.auth.hashers.BCryptSHA256PasswordHasher',
-    'django.contrib.auth.hashers.PBKDF2PasswordHasher',
 ]
 
 

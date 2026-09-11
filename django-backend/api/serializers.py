@@ -7,7 +7,7 @@ from rest_framework import serializers
 # student list out into a tenant they registered themselves. Nothing
 # legitimate needs it writable: creation sets the tenant server-side via
 # perform_create()'s save(tenant_id=...) kwarg, which bypasses this field.
-from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, PaymentItem, Trip, Book, BookCopy, Grade, ChargilyCheckout, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry
+from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, PaymentItem, Trip, Book, BookCopy, Grade, ChargilyCheckout, Conversation, ConversationStaffRead, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry
 
 
 class TenantScopedPKField(serializers.PrimaryKeyRelatedField):
@@ -93,6 +93,13 @@ class StudentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Student
         exclude = ['tenant', 'parent']
+        extra_kwargs = {
+            # No validated upload path exists for a student photo (unlike
+            # Teacher's upload_photo/upload_cv) — read-only until one does,
+            # rather than trusting an arbitrary string here that the QR
+            # verify endpoint then displays as if it were a real photo.
+            'photo_url': {'read_only': True},
+        }
 
 
 class CourseSerializer(serializers.ModelSerializer):
@@ -101,6 +108,20 @@ class CourseSerializer(serializers.ModelSerializer):
     class Meta:
         model = Course
         exclude = ['tenant']
+
+    def validate(self, attrs):
+        # Merge onto the existing instance so a PATCH that only touches an
+        # unrelated field doesn't false-positive on a sessions_count it
+        # never sent — course_per_session_price() divides by this whenever
+        # pricing_type isn't per_session, and silently falls back to
+        # charging the full price per session if it's ever left unset.
+        pricing_type = attrs.get('pricing_type', getattr(self.instance, 'pricing_type', None))
+        sessions_count = attrs.get('sessions_count', getattr(self.instance, 'sessions_count', None))
+        if pricing_type in ('per_month', 'fixed_sessions') and not sessions_count:
+            raise serializers.ValidationError({
+                'sessions_count': f'Required when pricing_type is "{pricing_type}".',
+            })
+        return attrs
 
 
 class GroupSerializer(serializers.ModelSerializer):
@@ -155,6 +176,13 @@ class ClassSessionSerializer(serializers.ModelSerializer):
     def get_teacher_name(self, obj):
         return f"{obj.teacher.first_name} {obj.teacher.last_name}" if obj.teacher else None
 
+    def validate(self, attrs):
+        start_at = attrs.get('start_at', getattr(self.instance, 'start_at', None))
+        end_at = attrs.get('end_at', getattr(self.instance, 'end_at', None))
+        if start_at and end_at and end_at <= start_at:
+            raise serializers.ValidationError({'end_at': 'Must be after start_at.'})
+        return attrs
+
 
 class AttendanceSerializer(serializers.ModelSerializer):
     tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)
@@ -203,6 +231,23 @@ class PaymentItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = PaymentItem
         exclude = ['payment', 'course', 'group', 'trip', 'book', 'book_copy']
+
+    def validate(self, attrs):
+        teacher_pct = attrs.get('teacher_percentage')
+        school_pct = attrs.get('school_percentage')
+        # A %-split only ever means something on a course item (see the
+        # model docstring — a book's royalty is the separate
+        # Teacher.book_percentage mechanism) — reject it elsewhere instead
+        # of silently computing a discount nothing in the UI ever offers.
+        if (teacher_pct is not None or school_pct is not None) and not attrs.get('course'):
+            raise serializers.ValidationError(
+                'teacher_percentage/school_percentage only apply to a course item.'
+            )
+        if teacher_pct is not None and school_pct is not None and (teacher_pct + school_pct) > 100:
+            raise serializers.ValidationError(
+                'teacher_percentage + school_percentage cannot exceed 100.'
+            )
+        return attrs
 
 
 class PaymentSerializer(serializers.ModelSerializer):
@@ -280,12 +325,16 @@ class BookCopySerializer(serializers.ModelSerializer):
         exclude = ['tenant', 'book', 'sold_by']
 
     def _latest_sale(self, obj):
-        # obj.sale_payment is prefetched (ordered newest-first, with
-        # 'student' select_related) by the view — .all() hits that cache;
-        # calling .select_related()/.first() here instead would silently
-        # discard the prefetch and re-query per row.
-        payments = list(obj.sale_payment.all())
-        return payments[0] if payments else None
+        # obj.sale_items is the PaymentItem side of this copy's sale (the
+        # relation actually written by PaymentViewSet._create_items — the
+        # legacy obj.sale_payment relation is never populated by current
+        # code, see PaymentItem.book_copy's related_name). Prefetched
+        # (ordered newest-first, with 'payment__student' select_related) by
+        # the view — .all() hits that cache; calling .select_related()/
+        # .first() here instead would silently discard the prefetch and
+        # re-query per row.
+        items = list(obj.sale_items.all())
+        return items[0].payment if items and items[0].payment else None
 
     def get_buyer_name(self, obj):
         payment = self._latest_sale(obj)
@@ -342,7 +391,19 @@ class ConversationSerializer(serializers.ModelSerializer):
         exclude = ['tenant']
 
     def get_unread_by_staff(self, obj):
-        return bool(obj.last_message_at and (not obj.last_read_by_staff_at or obj.last_message_at > obj.last_read_by_staff_at))
+        # Per the CURRENT requesting staff member's own read position
+        # (ConversationStaffRead), not the conversation-wide
+        # last_read_by_staff_at — that field is shared across every staff
+        # member in the tenant, so one person opening a thread used to
+        # silently mark it read for everyone else too.
+        if not obj.last_message_at:
+            return False
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if not user or not getattr(user, 'is_authenticated', False):
+            return bool(not obj.last_read_by_staff_at or obj.last_message_at > obj.last_read_by_staff_at)
+        read = ConversationStaffRead.objects.filter(conversation=obj, user=user).first()
+        return bool(not read or obj.last_message_at > read.last_read_at)
 
     def get_unread_by_guardian(self, obj):
         return bool(obj.last_message_at and (not obj.last_read_by_guardian_at or obj.last_message_at > obj.last_read_by_guardian_at))
@@ -383,6 +444,14 @@ class QuizSerializer(serializers.ModelSerializer):
     class Meta:
         model = Quiz
         exclude = ['tenant', 'course', 'group']
+        # Only QuizViewSet.publish() may take a quiz live — it's the one
+        # place that enforces "has a group, has an exercise file" and
+        # generates an unguessable token. Leaving these writable let a
+        # plain create/update skip all of that.
+        extra_kwargs = {
+            'status': {'read_only': True},
+            'public_token': {'read_only': True},
+        }
 
     def get_attempts_total(self, obj):
         return obj.attempts.count()

@@ -116,7 +116,14 @@ class ChargilyClient:
     def verifyWebhookSignature(self, raw_body_bytes, signature_header):
         if not signature_header or not self.secret:
             return False
-        payload_str = raw_body_bytes.decode('utf-8') if isinstance(raw_body_bytes, bytes) else raw_body_bytes
+        try:
+            payload_str = raw_body_bytes.decode('utf-8') if isinstance(raw_body_bytes, bytes) else raw_body_bytes
+        except UnicodeDecodeError:
+            # A genuine Chargily payload is always UTF-8 JSON — a body that
+            # isn't decodable at all can't possibly carry a valid signature,
+            # so this is just another way to fail verification, not a
+            # reason to 500.
+            return False
         return self.sdk_client.validate_signature(signature_header, payload_str)
 
 

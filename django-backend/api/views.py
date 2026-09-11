@@ -135,6 +135,16 @@ def require_staff_tenant(user):
     return tenant_id
 
 
+def _inactive_tenant_message(tenant):
+    """`suspended` is a moderation decision (only a super-admin can lift it)
+    — telling that user to "complete billing" is actively misleading, since
+    paying wouldn't fix anything. `pending_payment`/`expired` genuinely are
+    billing issues, so they keep the original message."""
+    if tenant and tenant.status == 'suspended':
+        return 'This workspace has been suspended. Contact support to resolve this.'
+    return 'This workspace is not active yet — complete billing to continue.'
+
+
 def course_per_session_price(price, pricing_type, sessions_count):
     """A course's price means different things depending on pricing_type:
     already-per-session, a recurring monthly rate split across the sessions
@@ -484,13 +494,28 @@ class TenantScopedViewSet(viewsets.ModelViewSet):
             raise PermissionDenied('User has no tenant')
 
         if user.tenant.status != 'active':
-            raise PermissionDenied('This workspace is not active yet — complete billing to continue.')
+            raise PermissionDenied(_inactive_tenant_message(user.tenant))
 
         return queryset.filter(tenant_id=user.tenant_id)
 
     def _entity_label(self, instance):
         """Best-effort human-readable name for the activity log line — most
-        models here have one of these fields."""
+        models here have one of these fields. Payment/ClassSession/
+        TeacherPayout have none of them, so without a model-specific
+        fallback they fell through to a raw, meaningless UUID (the log line
+        literally said "Added payments: e5bcebec-70f4-...")."""
+        if isinstance(instance, Payment):
+            who = f"{instance.student.first_name} {instance.student.last_name}" if instance.student_id else None
+            return instance.invoice_number or who or str(instance.pk)
+        if isinstance(instance, ClassSession):
+            if instance.topic:
+                return instance.topic
+            group_name = instance.group.name if instance.group_id else None
+            when = instance.start_at.strftime('%Y-%m-%d %H:%M') if instance.start_at else ''
+            return f"{group_name or 'session'} {when}".strip()
+        if isinstance(instance, TeacherPayout):
+            teacher_name = f"{instance.teacher.first_name} {instance.teacher.last_name}" if instance.teacher_id else 'teacher'
+            return f"{teacher_name} ({instance.amount})"
         for field in ('title', 'name'):
             if hasattr(instance, field) and getattr(instance, field):
                 return getattr(instance, field)
@@ -514,7 +539,7 @@ class TenantScopedViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if user.tenant_id:
             if not user.is_super_admin() and user.tenant.status != 'active':
-                raise PermissionDenied('This workspace is not active yet — complete billing to continue.')
+                raise PermissionDenied(_inactive_tenant_message(user.tenant))
             instance = serializer.save(tenant_id=user.tenant_id)
         else:
             instance = serializer.save()
@@ -615,7 +640,7 @@ def auth_register(request):
             
     slug = request.data['tenant_slug'].strip().lower()
     import re
-    if not re.match(r'^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$', slug):
+    if not re.match(r'^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])$', slug):
         return Response({'error': 'Invalid slug (a-z, 0-9, hyphens, 3-32 chars)'}, status=status.HTTP_400_BAD_REQUEST)
         
     if Tenant.objects.filter(slug=slug).exists():
@@ -666,13 +691,30 @@ def auth_login(request):
         return Response({'error': 'Email and password are required'}, status=status.HTTP_400_BAD_REQUEST)
         
     query = User.objects.filter(email=email.strip().lower())
-    
+    switch_to_tenant = None
+
     if tenant_slug:
         tenant = Tenant.objects.filter(slug=tenant_slug.strip().lower()).first()
         if not tenant:
             return Response({'error': 'Workspace not found'}, status=status.HTTP_404_NOT_FOUND)
-        query = query.filter(tenant=tenant)
-        
+        # A user's `tenant` FK only ever points at whichever workspace is
+        # currently their *active* one (see auth_switch_tenant) — an owner
+        # logging directly into a second school they hold a
+        # TenantMembership for, but that isn't their active one right now,
+        # would otherwise get a misleading "Invalid credentials" here even
+        # with the correct password. Fall back to membership, matching the
+        # access boundary auth_switch_tenant already uses.
+        scoped_query = query.filter(tenant=tenant)
+        if scoped_query.exists():
+            query = scoped_query
+        else:
+            member_query = query.filter(tenant_memberships__tenant=tenant)
+            if member_query.exists():
+                query = member_query
+                switch_to_tenant = tenant
+            else:
+                query = scoped_query  # no match either way — fall through to the normal 401 below
+
     user = query.first()
     if not user or not user.check_password(password):
         # Logged against the tenant the address belongs to (when it resolves
@@ -687,6 +729,10 @@ def auth_login(request):
         log_activity(request, user.tenant_id, 'login_blocked', category='security', user=user,
                      description='Login attempt on a disabled account')
         return Response({'error': 'Account disabled'}, status=status.HTTP_403_FORBIDDEN)
+
+    if switch_to_tenant is not None:
+        user.tenant = switch_to_tenant
+        user.save(update_fields=['tenant_id'])
 
     token, _ = Token.objects.get_or_create(user=user)
     log_activity(request, user.tenant_id, 'login', category='auth', user=user,
@@ -786,11 +832,36 @@ def public_quiz_attempt_submit(request, token):
 
     matched_student = _match_student_by_name(quiz.group, solver_name)
 
+    # A page refresh/double-tap on submit used to silently create a second
+    # attempt with no warning — harmless until someone grades both (see
+    # Grade.quiz_attempt), at which point whichever got graded second wins
+    # with no indication the first's score was ever there. Once this
+    # solver's most recent attempt has actually been graded, a further
+    # submission is a legitimate new attempt (a real retry/correction), not
+    # an accidental duplicate, so only the ungraded case is blocked.
+    pending = QuizAttempt.objects.filter(
+        quiz=quiz, solver_name__iexact=solver_name, graded_at__isnull=True,
+    ).exists()
+    if pending:
+        return Response(
+            {'error': 'You already submitted this quiz — wait for it to be graded before submitting again.'},
+            status=status.HTTP_409_CONFLICT,
+        )
+
     # Validate/convert every upload before writing any DB row, so a bad file
-    # halfway through doesn't leave a half-submitted attempt behind.
+    # halfway through doesn't leave a half-submitted attempt behind. Files
+    # are still written to disk one at a time as each is validated — if a
+    # later file in the batch fails, clean up whatever earlier ones already
+    # made it to disk rather than leaving them permanently orphaned (no DB
+    # row will ever point at them, since the whole request is rejected).
     saved = []
-    for f in files:
-        saved.append((save_uploaded_document(f, 'submissions', quiz.id), f.name))
+    try:
+        for f in files:
+            saved.append((save_uploaded_document(f, 'submissions', quiz.id), f.name))
+    except ValidationError:
+        for url, _name in saved:
+            delete_uploaded_image(url, 'submissions')
+        raise
 
     with transaction.atomic():
         attempt = QuizAttempt.objects.create(
@@ -1317,7 +1388,7 @@ def owner_create_school(request):
         return Response({'error': 'tenant_name and tenant_slug are required'}, status=status.HTTP_400_BAD_REQUEST)
 
     import re
-    if not re.match(r'^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$', tenant_slug):
+    if not re.match(r'^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])$', tenant_slug):
         return Response({'error': 'Invalid slug (a-z, 0-9, hyphens, 3-32 chars)'}, status=status.HTTP_400_BAD_REQUEST)
     if Tenant.objects.filter(slug=tenant_slug).exists():
         return Response({'error': 'This workspace URL is already taken'}, status=status.HTTP_409_CONFLICT)
@@ -1333,6 +1404,17 @@ def owner_create_school(request):
             max_users=basic_tier['max_users'],
         )
         TenantMembership.objects.create(user=user, tenant=tenant, role='owner')
+        # Backfill a membership for whatever tenant was active before this
+        # call, if the caller doesn't already have one — a director added
+        # through the normal staff-add flow never gets one (only
+        # auth_register/this function/admin_set_tenant_ownership create
+        # them), so without this, switching to the new school here would
+        # leave them with zero membership in their original one: switching
+        # back would 403, and even a fresh login scoped to that slug would
+        # 401 "Invalid credentials" since the active tenant FK just moved.
+        original_tenant_id = user.tenant_id
+        if original_tenant_id and not TenantMembership.objects.filter(user=user, tenant_id=original_tenant_id).exists():
+            TenantMembership.objects.create(user=user, tenant_id=original_tenant_id, role=user.role)
         user.tenant = tenant
         user.save(update_fields=['tenant_id'])
 
@@ -1486,7 +1568,7 @@ def google_start(request):
             
         slug = tenant_slug.strip().lower()
         import re
-        if not re.match(r'^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$', slug):
+        if not re.match(r'^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])$', slug):
             return Response({'error': 'Invalid slug (a-z, 0-9, hyphens, 3-32 chars)'}, status=status.HTTP_400_BAD_REQUEST)
             
         state_data['tenant_name'] = tenant_name.strip()[:120]
@@ -2942,7 +3024,14 @@ def _portal_guardian(request):
         raise PermissionDenied('Forbidden')
 
     tenant = Tenant.objects.filter(id=user.tenant_id).first()
-    parent_portal = bool(tenant and tenant.plan and PLANS_CONFIG['tiers'][tenant.plan].get('parent_portal', False))
+    # Staff access is fully locked out the moment a tenant stops being
+    # 'active' (TenantScopedViewSet.get_queryset) — a parent's existing
+    # session used to keep full portal access indefinitely through a
+    # suspension/expiry/unpaid period, since only the plan's feature flag
+    # was ever checked here.
+    if not tenant or tenant.status != 'active':
+        raise PermissionDenied(_inactive_tenant_message(tenant))
+    parent_portal = bool(tenant.plan and PLANS_CONFIG['tiers'][tenant.plan].get('parent_portal', False))
     if not parent_portal:
         raise PermissionDenied('The parent portal is not available on this workspace\'s current plan')
 
@@ -3018,7 +3107,7 @@ def portal_child_teachers(request, student_id):
 def portal_conversation(request):
     guardian = _portal_guardian(request)
     convo, _ = Conversation.objects.get_or_create(tenant_id=request.user.tenant_id, guardian=guardian)
-    return Response(ConversationSerializer(convo).data)
+    return Response(ConversationSerializer(convo, context={'request': request}).data)
 
 
 @api_view(['GET', 'POST'])
@@ -3031,6 +3120,8 @@ def portal_conversation_messages(request):
         body = (request.data.get('body') or '').strip()
         if not body:
             return Response({'error': 'Message body is required'}, status=status.HTTP_400_BAD_REQUEST)
+        if len(body) > 10000:
+            return Response({'error': 'Message is too long (10,000 characters max).'}, status=status.HTTP_400_BAD_REQUEST)
         now = timezone.now()
         Message.objects.create(
             tenant_id=request.user.tenant_id, conversation=convo,
@@ -3043,7 +3134,10 @@ def portal_conversation_messages(request):
         convo.last_read_by_guardian_at = timezone.now()
         convo.save(update_fields=['last_read_by_guardian_at', 'updated_at'])
 
-    items = convo.messages.select_related('sender_user').order_by('created_at')[:500]
+    # Newest 500, oldest-first for display — see the staff-side messages
+    # action's identical comment for why this isn't just order_by('created_at').
+    items = list(convo.messages.select_related('sender_user').order_by('-created_at')[:500])
+    items.reverse()
     return Response({'items': MessageSerializer(items, many=True).data, 'total': len(items)})
 
 
@@ -3052,7 +3146,15 @@ def portal_conversation_messages(request):
 def portal_child_payments(request, student_id):
     student = _portal_child(request, student_id)
     items = Payment.objects.filter(tenant_id=request.user.tenant_id, student_id=student.id).order_by('-created_at')[:200]
-    return Response({'items': PaymentSerializer(items, many=True).data, 'total': len(items)})
+    # The raw invoice list alone can look deceptively clean — a student can
+    # have zero Payment rows and still owe real, attendance-accrued debt.
+    # Surface the same balance figure staff see for this student
+    # (payments_student_summary) so a parent isn't left with a false "all
+    # clear" impression.
+    balance = compute_student_balances(request.user.tenant_id).get(
+        student.id, {'paid': 0.0, 'cost': 0.0, 'balance': 0.0, 'status': 'settled'},
+    )
+    return Response({'items': PaymentSerializer(items, many=True).data, 'total': len(items), 'balance': balance})
 
 
 @api_view(['GET'])
@@ -3072,6 +3174,8 @@ class TenantViewSet(viewsets.ModelViewSet):
         user = request.user
         tenant_id = kwargs.get('pk')
         if not user.is_super_admin() and tenant_id != user.tenant_id:
+            raise PermissionDenied('Forbidden')
+        if not user.is_super_admin() and not user.can_view('settings'):
             raise PermissionDenied('Forbidden')
         tenant = Tenant.objects.filter(id=tenant_id).first()
         if not tenant:
@@ -3131,7 +3235,7 @@ class TenantViewSet(viewsets.ModelViewSet):
 
         slug = request.data['slug'].strip().lower()
         import re
-        if not re.match(r'^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$', slug):
+        if not re.match(r'^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])$', slug):
             return Response({'error': 'Invalid slug'}, status=status.HTTP_400_BAD_REQUEST)
 
         if Tenant.objects.filter(slug=slug).exists():
@@ -3253,6 +3357,16 @@ class TenantViewSet(viewsets.ModelViewSet):
 
         if website_fields & updates.keys():
             check_website_builder(user, tenant)
+
+        # logo_url sat in owner_editable with no equivalent check at all —
+        # a plain PATCH here bypassed both the plan gate AND the Pillow
+        # decode/size/EXIF validation the real /logo upload action
+        # enforces, accepting any string (including a non-image URL) on a
+        # plan that shouldn't have custom branding at all.
+        if 'logo_url' in updates and not user.is_super_admin():
+            custom_branding = bool(tenant.plan) and PLANS_CONFIG['tiers'][tenant.plan].get('custom_branding', False)
+            if not custom_branding:
+                raise PermissionDenied('Custom branding (logo upload) is available on the Standard and Premium plans. Upgrade your plan to use it.')
 
         for key, val in updates.items():
             setattr(tenant, key, val)
@@ -3416,6 +3530,11 @@ class CouponViewSet(viewsets.ModelViewSet):
 class UserViewSet(TenantScopedViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
+    # Without this, check_module_view() is a no-op for every action on this
+    # ViewSet (it only fires when module_key is set) — list()/retrieve() were
+    # reachable by any authenticated staff member regardless of role or
+    # granted permissions, leaking every user's email/role/permissions JSON.
+    module_key = 'users'
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -4378,6 +4497,17 @@ class TripViewSet(TenantScopedViewSet):
 
         return Response(self.get_serializer(instance).data, status=status.HTTP_200_OK)
 
+    def destroy(self, request, *args, **kwargs):
+        self.check_module_delete()
+        instance = self.get_object()
+        # PaymentItem.trip is SET_NULL — deleting a trip that's already been
+        # sold would silently null out a paid invoice's link to what was
+        # actually sold, with the money collected left untraceable.
+        if PaymentItem.objects.filter(trip=instance).exists():
+            raise ValidationError('This trip has payments recorded against it and can’t be deleted.')
+        self.perform_destroy(instance)
+        return Response({'message': 'Deleted successfully'}, status=status.HTTP_200_OK)
+
 
 class BookViewSet(TenantScopedViewSet):
     queryset = Book.objects.all()
@@ -4433,7 +4563,7 @@ class BookViewSet(TenantScopedViewSet):
         get_queryset()."""
         book = self.get_object()
         queryset = book.copies.select_related('sold_by').prefetch_related(
-            Prefetch('sale_payment', queryset=Payment.objects.select_related('student').order_by('-created_at'))
+            Prefetch('sale_items', queryset=PaymentItem.objects.select_related('payment__student').order_by('-created_at'))
         )
         q = request.GET.get('q')
         if q:
@@ -4444,6 +4574,17 @@ class BookViewSet(TenantScopedViewSet):
         queryset = queryset.order_by('-created_at')[:500]
         serializer = BookCopySerializer(queryset, many=True)
         return Response({'items': serializer.data, 'total': len(serializer.data)})
+
+    def destroy(self, request, *args, **kwargs):
+        self.check_module_delete()
+        instance = self.get_object()
+        # PaymentItem.book is SET_NULL — deleting a book that's already been
+        # sold would silently null out a paid invoice's link to what was
+        # actually sold, with the money collected left untraceable.
+        if PaymentItem.objects.filter(book=instance).exists():
+            raise ValidationError('This book has sales recorded against it and can’t be deleted.')
+        self.perform_destroy(instance)
+        return Response({'message': 'Deleted successfully'}, status=status.HTTP_200_OK)
 
 
 class ClassSessionViewSet(TenantScopedViewSet):
@@ -4663,7 +4804,7 @@ class PaymentViewSet(TenantScopedViewSet):
             # explicit save() kwarg here rather than through
             # self.perform_create()'s normal validated_data-only save.
             if user.tenant_id and not user.is_super_admin() and user.tenant.status != 'active':
-                raise PermissionDenied('This workspace is not active yet — complete billing to continue.')
+                raise PermissionDenied(_inactive_tenant_message(user.tenant))
             payment = serializer.save(tenant_id=user.tenant_id, amount=bill_data['amount']) if user.tenant_id else serializer.save(amount=bill_data['amount'])
             self._log_model_action('create', payment)
             self._create_items(payment, items_payload, user)
@@ -4733,6 +4874,39 @@ class PaymentViewSet(TenantScopedViewSet):
         data = request.data.copy()
         items_payload = data.get('items')
         replace_items = isinstance(items_payload, list) and len(items_payload) > 0
+
+        # Reactivating a cancelled/refunded bill (paid/partial/pending again)
+        # without an explicit items payload used to leave its book items'
+        # `book_copy` pointing at whatever copy they held before — which
+        # _restore_book_copies had already freed back to in_stock when the
+        # bill was first cancelled, so that same copy could easily have been
+        # sold to someone else in the meantime. Route this case through the
+        # same replace-items path create()/an explicit edit already uses, so
+        # book stock gets re-validated/re-allocated instead of silently
+        # trusting stale copy references.
+        new_status_requested = data.get('status')
+        reactivating = (
+            not replace_items
+            and instance.status in ('cancelled', 'refunded')
+            and new_status_requested is not None
+            and new_status_requested not in ('cancelled', 'refunded')
+        )
+        if reactivating:
+            items_payload = [{
+                'kind': item.kind,
+                'course_id': item.course_id,
+                'group_id': item.group_id,
+                'trip_id': item.trip_id,
+                'book_id': item.book_id,
+                'amount': str(item.amount),
+                'teacher_percentage': item.teacher_percentage,
+                'school_percentage': item.school_percentage,
+            } for item in instance.items.all()]
+            if not items_payload:
+                raise ValidationError({'items': 'This bill has no items to reactivate.'})
+            data['items'] = items_payload
+            replace_items = True
+
         save_kwargs = {}
         if replace_items:
             try:
@@ -4822,8 +4996,10 @@ BALANCE_THRESHOLD = 1.0  # DZD-scale rounding noise shouldn't read as owing/over
 
 
 def compute_student_balances(tenant_id):
-    """Per-student running balance = actual cash collected (paid/partial
-    Payment rows, net of any discount — see `paid` below) minus the cost of
+    """Per-student running balance = actual cash collected from COURSE items
+    only (paid/partial PaymentItem rows with a course set, net of any
+    discount — see `paid` below; a book/trip item never counts here, since
+    `cost` is entirely course-attendance-driven) minus the cost of
     every session they've actually used (present, or
     excused-but-not-yet-recovered attendance, priced via
     course_per_session_price), itself reduced by any teacher/school
@@ -4902,10 +5078,20 @@ def compute_student_balances(tenant_id):
     # can't inflate `paid` either. Both of those together is what keeps a
     # fully-waived bill settling to 0/0 rather than looking "paid in full"
     # for money that was never collected.
+    #
+    # Scoped to course items only (course__isnull=False), same as
+    # `active_discount` below and `compute_course_payment_status` — `cost`
+    # is 100% attendance/course-driven, so crediting a bill's book/trip
+    # portion here would let an unrelated purchase mask real course debt
+    # (a student who never paid toward their course but bought a book
+    # would otherwise show as settled/overpaid).
     paid = {}
-    payments = Payment.objects.filter(tenant_id=tenant_id, status__in=('paid', 'partial')).values('student_id', 'amount', 'discount')
-    for p in payments:
-        paid[p['student_id']] = paid.get(p['student_id'], 0.0) + float(p['amount']) - float(p['discount'])
+    course_items = PaymentItem.objects.filter(
+        payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial'), course__isnull=False,
+    ).values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage')
+    for row in course_items:
+        net = float(row['amount']) - _payment_item_discount(row)
+        paid[row['payment__student_id']] = paid.get(row['payment__student_id'], 0.0) + net
 
     # A payment that's cancelled or refunded stops counting as money
     # received (see `paid` above), but cost here comes purely from
@@ -4928,12 +5114,16 @@ def compute_student_balances(tenant_id):
     # together those two sum to exactly the gross amount, so undoing both
     # at once on cancellation (a net no-op — see the comment above) takes
     # exactly that much back off `cost`.
+    # Scoped to course items only, for the same reason `paid` above is —
+    # a cancelled book/trip item never contributed to `paid` in the first
+    # place, so it has nothing to write off here either.
     written_off = {}
-    written_off_payments = Payment.objects.filter(
-        tenant_id=tenant_id, status__in=('cancelled', 'refunded'), paid_at__isnull=False,
-    ).values('student_id', 'amount')
-    for p in written_off_payments:
-        written_off[p['student_id']] = written_off.get(p['student_id'], 0.0) + float(p['amount'])
+    written_off_items = PaymentItem.objects.filter(
+        payment__tenant_id=tenant_id, payment__status__in=('cancelled', 'refunded'),
+        payment__paid_at__isnull=False, course__isnull=False,
+    ).values('payment__student_id', 'amount')
+    for row in written_off_items:
+        written_off[row['payment__student_id']] = written_off.get(row['payment__student_id'], 0.0) + float(row['amount'])
 
     # A written-off debt (see DebtWaiver) works the same way — subtracted
     # from cost, never counted as paid, since it was never actually collected.
@@ -5272,11 +5462,17 @@ class QuizViewSet(TenantScopedViewSet):
             attempt.save(update_fields=['score', 'max_score', 'feedback', 'graded_at'])
 
             if attempt.student_id:
+                # Keyed on this specific attempt, not just (student, title)
+                # — two different attempts from the same student for the
+                # same quiz (e.g. a resubmission) now each get their own
+                # Grade row instead of the second grading silently
+                # overwriting the first's score with no warning.
                 Grade.objects.update_or_create(
                     tenant_id=quiz.tenant_id,
-                    student_id=attempt.student_id,
-                    title=quiz.title,
+                    quiz_attempt=attempt,
                     defaults={
+                        'student_id': attempt.student_id,
+                        'title': quiz.title,
                         'course': quiz.course,
                         'score': score,
                         'max_score': max_score,
@@ -5351,6 +5547,8 @@ class ConversationViewSet(TenantScopedViewSet):
             body = (request.data.get('body') or '').strip()
             if not body:
                 return Response({'error': 'Message body is required'}, status=status.HTTP_400_BAD_REQUEST)
+            if len(body) > 10000:
+                return Response({'error': 'Message is too long (10,000 characters max).'}, status=status.HTTP_400_BAD_REQUEST)
             now = timezone.now()
             Message.objects.create(
                 tenant_id=request.user.tenant_id, conversation=convo,
@@ -5360,10 +5558,22 @@ class ConversationViewSet(TenantScopedViewSet):
             convo.last_read_by_staff_at = now
             convo.save(update_fields=['last_message_at', 'last_read_by_staff_at', 'updated_at'])
         else:
-            convo.last_read_by_staff_at = timezone.now()
+            now = timezone.now()
+            convo.last_read_by_staff_at = now
             convo.save(update_fields=['last_read_by_staff_at', 'updated_at'])
 
-        items = convo.messages.select_related('sender_user').order_by('created_at')[:500]
+        # Per-user read position — see ConversationStaffRead's docstring for
+        # why this can't just be the conversation-wide field above (that one
+        # stays too, as a cheap "has ANY staff member seen this" signal).
+        ConversationStaffRead.objects.update_or_create(
+            conversation=convo, user=request.user, defaults={'last_read_at': now},
+        )
+
+        # Newest 500, oldest-first for display — taking the first 500
+        # chronologically instead used to silently hide the newest messages
+        # once a thread passed 500 total, with no pagination to reach them.
+        items = list(convo.messages.select_related('sender_user').order_by('-created_at')[:500])
+        items.reverse()
         return Response({'items': MessageSerializer(items, many=True).data, 'total': len(items)})
 
 
@@ -5392,8 +5602,18 @@ def admin_platform_summary(request):
     membership_by_tenant = {}
     schools_per_owner = {}
     for m in memberships:
-        membership_by_tenant.setdefault(m.tenant_id, m)  # first (earliest) wins if a tenant has 2+ owners
         schools_per_owner[m.user_id] = schools_per_owner.get(m.user_id, 0) + 1
+        current = membership_by_tenant.get(m.tenant_id)
+        # Prefer whichever membership is flagged primary for this tenant;
+        # otherwise prefer the most recently linked one (iterating
+        # oldest→newest, so a later membership overwrites an earlier
+        # non-primary one, but never overwrites an already-primary one).
+        # Previously this always kept whichever was linked FIRST, so
+        # re-linking a tenant to a different/primary owner via the
+        # Ownership dialog never showed up here even though the write
+        # itself succeeded.
+        if current is None or m.is_primary or not current.is_primary:
+            membership_by_tenant[m.tenant_id] = m
 
     tenants_list = []
     for t in tenants:
@@ -5765,12 +5985,20 @@ def serve_frontend(request, path=''):
 # ---------------------------------------------------------------- Expenses
 
 def ensure_default_expense_categories(tenant_id):
-    """Seed DEFAULT_EXPENSE_CATEGORIES the first time a tenant touches
-    expenses, and backfill any keys added to that list later (e.g. 'trip')
-    that this tenant never had. Only ever adds keys the tenant has literally
-    never seen — it can't resurrect one a tenant deliberately deleted, since
-    that would require the key to have existed in DEFAULT_EXPENSE_CATEGORIES
-    at some point before this tenant was seeded, then been removed here."""
+    """Seed every DEFAULT_EXPENSE_CATEGORIES key the very first time a
+    tenant's Expenses page is loaded — and only that once (see
+    Tenant.default_expense_categories_seeded_at). Re-deriving "which keys
+    are missing" from what currently exists on every load couldn't tell a
+    key the tenant never saw apart from one they'd deliberately deleted, so
+    a deleted default category always silently came back on the next load;
+    seeding exactly once means a delete actually sticks. The one accepted
+    trade-off: a key added to DEFAULT_EXPENSE_CATEGORIES later won't
+    retroactively appear for tenants already seeded before that."""
+    updated = Tenant.objects.filter(
+        id=tenant_id, default_expense_categories_seeded_at__isnull=True,
+    ).update(default_expense_categories_seeded_at=timezone.now())
+    if not updated:
+        return
     existing_keys = set(
         ExpenseCategory.objects.filter(tenant_id=tenant_id, key__isnull=False).values_list('key', flat=True)
     )
@@ -5828,14 +6056,6 @@ class ExpenseViewSet(TenantScopedViewSet):
         serializer = self.get_serializer(queryset, many=True)
         total = sum(float(e.amount) for e in queryset)
         return Response({'items': serializer.data, 'total': len(serializer.data), 'total_amount': total})
-
-    def create(self, request, *args, **kwargs):
-        self.check_module_add()
-        response = super().create(request, *args, **kwargs)
-        log_activity(request, request.user.tenant_id, 'create', entity_type='expense',
-                     entity_id=response.data.get('id'),
-                     description=f"Recorded expense {response.data.get('title')} ({response.data.get('amount')})")
-        return response
 
     @action(detail=False, methods=['get'])
     def export(self, request):
@@ -5916,6 +6136,30 @@ def compute_teacher_earned_total(tenant_id, date_from=None, date_to=None, _conte
             continue
         pct = float(teacher_pct.get(info['teacher_id']) or 0)
         total += price_per_session.get(info['course_id'], 0.0) * pct / 100
+
+    # Book royalties — same second income stream compute_teacher_earnings
+    # includes (see its docstring). Without this, "teacher share" here was
+    # course-teaching-only, disagreeing with the Teacher Payments page's
+    # total for any teacher who also authors books, and net_profit was
+    # correspondingly overstated (the royalty is money owed to the teacher,
+    # not money the school keeps).
+    book_items = PaymentItem.objects.filter(
+        payment__tenant_id=tenant_id, payment__status='paid', kind='book',
+        book__author_teacher_id__isnull=False,
+    ).select_related('book')
+    if date_from:
+        book_items = book_items.filter(payment__paid_at__date__gte=date_from)
+    if date_to:
+        book_items = book_items.filter(payment__paid_at__date__lte=date_to)
+    book_revenue = {}
+    for item in book_items:
+        author_id = item.book.author_teacher_id
+        book_revenue[author_id] = book_revenue.get(author_id, 0.0) + float(item.amount)
+    book_pct_by_teacher = dict(Teacher.objects.filter(tenant_id=tenant_id).values_list('id', 'book_percentage'))
+    for teacher_id, revenue in book_revenue.items():
+        book_pct = float(book_pct_by_teacher.get(teacher_id) or 0)
+        total += revenue * book_pct / 100
+
     return round(total, 2)
 
 
@@ -6056,11 +6300,23 @@ class TeacherPayoutViewSet(TenantScopedViewSet):
 
     def create(self, request, *args, **kwargs):
         self.check_module_add()
-        response = super().create(request, *args, **kwargs)
-        log_activity(request, request.user.tenant_id, 'create', entity_type='teacher_payout',
-                     entity_id=response.data.get('id'),
-                     description=f"Paid teacher {response.data.get('teacher_name')} {response.data.get('amount')}")
-        return response
+        teacher_id = request.data.get('teacher_id')
+        try:
+            amount = float(request.data.get('amount') or 0)
+        except (TypeError, ValueError):
+            raise ValidationError({'amount': 'Must be a number.'})
+        # Unlike debts_waive (which validates a write-off against the
+        # student's actual owed amount server-side), this previously
+        # trusted any amount outright — a negative or wildly excessive
+        # payout was accepted and corrupted the reported balance.
+        if teacher_id and amount > 0:
+            rows = compute_teacher_earnings(request.user.tenant_id, request)
+            row = next((r for r in rows if r['teacher_id'] == teacher_id), None)
+            if row and amount > row['balance'] + BALANCE_THRESHOLD:
+                raise ValidationError({
+                    'amount': f"Exceeds this teacher's current balance ({row['balance']}).",
+                })
+        return super().create(request, *args, **kwargs)
 
 
 # ------------------------------------------------------------ Activity log
@@ -6112,24 +6368,41 @@ def _compute_finance_report_data(tid, request):
     Excel) and finance_report_print (the monthly PDF). Reads from/to/
     group_id/teacher_id off request.GET, same as filter_by_date_range and
     compute_teacher_earnings already do."""
-    payments = Payment.objects.filter(tenant_id=tid).select_related('student').prefetch_related('items')
-    payments = filter_by_date_range(payments, request, 'due_date')
+    payments_base = Payment.objects.filter(tenant_id=tid).select_related('student').prefetch_related('items')
     group_id = request.GET.get('group_id')
     if group_id:
         # A bill matches (and counts in full — see the docstring above,
         # this doesn't try to split a bill's total across its items) if
         # ANY of its items belong to the group/teacher, since a bill can
         # now cover several groups/courses at once via PaymentItem.
-        payments = payments.filter(items__group_id=group_id).distinct()
+        payments_base = payments_base.filter(items__group_id=group_id).distinct()
     teacher_id = request.GET.get('teacher_id')
     if teacher_id:
-        payments = payments.filter(items__group__teacher_id=teacher_id).distinct()
+        payments_base = payments_base.filter(items__group__teacher_id=teacher_id).distinct()
 
     # 'partial' counts as collected money (see compute_student_balances), so
     # it belongs in `paid`; only a still-fully-unpaid 'pending' invoice is
     # genuinely outstanding.
-    paid = [p for p in payments if p.status in ('paid', 'partial')]
-    outstanding = [p for p in payments if p.status == 'pending']
+    #
+    # Each status group is scoped by whichever date actually means "this
+    # transaction happened in the requested window" for it: a paid/partial
+    # bill by paid_at (the same field dashboard_summary's revenue figures
+    # use, so "this month's collected" means the same thing on both pages —
+    # due_date is never set by the real payment form, so filtering paid
+    # bills by it silently excluded every real invoice); a still-unpaid
+    # pending bill has no paid_at at all, so due_date (matching
+    # payments_overdue elsewhere) is the only date that means anything for it.
+    paid = list(filter_by_date_range(payments_base.filter(status__in=('paid', 'partial')), request, 'paid_at'))
+    outstanding = list(filter_by_date_range(payments_base.filter(status='pending'), request, 'due_date'))
+    # Cancelled/refunded bills don't count toward collected/outstanding
+    # (see compute_student_balances's write-off comment), but still belong
+    # in the "every money movement" transactions list below if they were
+    # genuinely collected at some point — scoped by paid_at for the same
+    # reason a written-off debt is gated on paid_at IS NOT NULL elsewhere.
+    voided = list(filter_by_date_range(
+        payments_base.filter(status__in=('cancelled', 'refunded'), paid_at__isnull=False), request, 'paid_at',
+    ))
+    payments = paid + outstanding + voided
     collected = round(sum(float(p.amount) - float(p.discount or 0) for p in paid), 2)
     pending_amount = round(sum(float(p.amount) - float(p.discount or 0) for p in outstanding), 2)
 
