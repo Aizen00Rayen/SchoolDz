@@ -5022,6 +5022,12 @@ def compute_student_balances(tenant_id):
     recurring, so cost is meant to keep pace with however much was actually
     attended.
 
+    A 'fixed_sessions' course's cost is additionally floored at what's
+    actually been billed for it (see the fixed_billed_items block below) -
+    its price is due as a lump sum at enrollment, not earned session by
+    session, so a student with a real pending/paid/partial bill for one but
+    no attendance yet still owes it, rather than showing as settled.
+
     An 'excused' absence stops being charged once staff mark it recovered
     (Attendance.recovery_status) — the make-up session itself bills normally
     through the ordinary 'present' path, so nothing is charged twice for one
@@ -5056,11 +5062,36 @@ def compute_student_balances(tenant_id):
         key = (a['student_id'], course_id)
         cost_by_student_course[key] = cost_by_student_course.get(key, 0.0) + price_per_session.get(course_id, 0.0)
 
+    # A 'fixed_sessions' course's full price is due the moment it's billed —
+    # unlike per_session/per_month, it isn't earned session-by-session — so a
+    # student who hasn't attended yet but already has a real (paid/partial/
+    # pending) bill for one must not show zero cost just because attendance
+    # hasn't started (this used to make a real pending debt look "settled").
+    # Floors the attendance-derived figure at what's actually been billed
+    # (net of discount); `max`, not addition, keeps this a floor rather than
+    # double-counting once attendance for that course does start accruing.
+    fixed_billed_items = PaymentItem.objects.filter(
+        payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial', 'pending'),
+        course__pricing_type='fixed_sessions',
+    ).values('payment__student_id', 'course_id', 'course__price', 'amount', 'teacher_percentage', 'school_percentage')
+    billed_fixed = {}
+    fixed_course_prices = {}
+    for row in fixed_billed_items:
+        net = float(row['amount']) - _payment_item_discount(row)
+        key = (row['payment__student_id'], row['course_id'])
+        billed_fixed[key] = billed_fixed.get(key, 0.0) + net
+        fixed_course_prices[row['course_id']] = float(row['course__price'] or 0)
+    for key, billed_amount in billed_fixed.items():
+        capped = min(billed_amount, fixed_course_prices.get(key[1], 0.0))
+        cost_by_student_course[key] = max(cost_by_student_course.get(key, 0.0), capped)
+
     cost = {}
     for (student_id, course_id), amount in cost_by_student_course.items():
         course = courses.get(course_id)
         if course and course['pricing_type'] == 'fixed_sessions':
             amount = min(amount, float(course['price'] or 0))
+        elif course_id in fixed_course_prices:
+            amount = min(amount, fixed_course_prices[course_id])
         cost[student_id] = cost.get(student_id, 0.0) + amount
 
     # 'partial' counts as real money received, same as 'paid' — a Payment's
@@ -5212,6 +5243,24 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
         if course['pricing_type'] == 'fixed_sessions':
             amount = min(amount, float(course['price'] or 0))
         cost[row['student_id']] = amount
+
+    # Same floor as compute_student_balances: a fixed_sessions course's
+    # price is due as soon as it's billed, not earned per attended session,
+    # so a student with a real bill for it but no attendance yet still owes
+    # it rather than showing as "nothing due".
+    if course['pricing_type'] == 'fixed_sessions':
+        billed_qs = PaymentItem.objects.filter(
+            payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial', 'pending'), course_id=course_id,
+        )
+        if student_ids is not None:
+            billed_qs = billed_qs.filter(payment__student_id__in=student_ids)
+        billed = {}
+        for row in billed_qs.values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage'):
+            net = float(row['amount']) - _payment_item_discount(row)
+            sid = row['payment__student_id']
+            billed[sid] = billed.get(sid, 0.0) + net
+        for sid, amount in billed.items():
+            cost[sid] = max(cost.get(sid, 0.0), min(amount, float(course['price'] or 0)))
 
     # 'partial' counts the same as 'paid' here too — see compute_student_balances.
     # Net of the item's own discount — see compute_student_balances's `paid`
