@@ -5062,36 +5062,43 @@ def compute_student_balances(tenant_id):
         key = (a['student_id'], course_id)
         cost_by_student_course[key] = cost_by_student_course.get(key, 0.0) + price_per_session.get(course_id, 0.0)
 
+    # Cap attendance-derived cost at the course price for fixed_sessions
+    # courses (overrun protection, see docstring above) — applied only to
+    # the attendance-derived figure, before the billed floor below, so it
+    # never clamps down a genuinely billed amount (see that block's comment
+    # for why the two must stay separate).
+    for key in list(cost_by_student_course.keys()):
+        course = courses.get(key[1])
+        if course and course['pricing_type'] == 'fixed_sessions':
+            cost_by_student_course[key] = min(cost_by_student_course[key], float(course['price'] or 0))
+
     # A 'fixed_sessions' course's full price is due the moment it's billed —
     # unlike per_session/per_month, it isn't earned session-by-session — so a
     # student who hasn't attended yet but already has a real (paid/partial/
     # pending) bill for one must not show zero cost just because attendance
     # hasn't started (this used to make a real pending debt look "settled").
     # Floors the attendance-derived figure at what's actually been billed
-    # (net of discount); `max`, not addition, keeps this a floor rather than
-    # double-counting once attendance for that course does start accruing.
+    # (net of discount), deliberately NOT re-capped at the course's current
+    # price — a bill's amount is ground truth for what was actually charged
+    # (staff may bill a custom amount, or the course's price may have since
+    # changed), unlike the attendance-derived figure above, which has to be
+    # capped since it accrues per session and could otherwise overrun.
+    # `max`, not addition, keeps this a floor rather than double-counting
+    # once attendance for that course does start accruing.
     fixed_billed_items = PaymentItem.objects.filter(
         payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial', 'pending'),
         course__pricing_type='fixed_sessions',
-    ).values('payment__student_id', 'course_id', 'course__price', 'amount', 'teacher_percentage', 'school_percentage')
+    ).values('payment__student_id', 'course_id', 'amount', 'teacher_percentage', 'school_percentage')
     billed_fixed = {}
-    fixed_course_prices = {}
     for row in fixed_billed_items:
         net = float(row['amount']) - _payment_item_discount(row)
         key = (row['payment__student_id'], row['course_id'])
         billed_fixed[key] = billed_fixed.get(key, 0.0) + net
-        fixed_course_prices[row['course_id']] = float(row['course__price'] or 0)
     for key, billed_amount in billed_fixed.items():
-        capped = min(billed_amount, fixed_course_prices.get(key[1], 0.0))
-        cost_by_student_course[key] = max(cost_by_student_course.get(key, 0.0), capped)
+        cost_by_student_course[key] = max(cost_by_student_course.get(key, 0.0), billed_amount)
 
     cost = {}
     for (student_id, course_id), amount in cost_by_student_course.items():
-        course = courses.get(course_id)
-        if course and course['pricing_type'] == 'fixed_sessions':
-            amount = min(amount, float(course['price'] or 0))
-        elif course_id in fixed_course_prices:
-            amount = min(amount, fixed_course_prices[course_id])
         cost[student_id] = cost.get(student_id, 0.0) + amount
 
     # 'partial' counts as real money received, same as 'paid' — a Payment's
@@ -5260,7 +5267,7 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
             sid = row['payment__student_id']
             billed[sid] = billed.get(sid, 0.0) + net
         for sid, amount in billed.items():
-            cost[sid] = max(cost.get(sid, 0.0), min(amount, float(course['price'] or 0)))
+            cost[sid] = max(cost.get(sid, 0.0), amount)
 
     # 'partial' counts the same as 'paid' here too — see compute_student_balances.
     # Net of the item's own discount — see compute_student_balances's `paid`
