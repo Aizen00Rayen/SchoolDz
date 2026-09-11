@@ -5122,23 +5122,32 @@ def compute_student_balances(tenant_id):
     # student who hasn't attended yet but already has a real (paid/partial/
     # pending) bill for one must not show zero cost just because attendance
     # hasn't started (this used to make a real pending debt look "settled").
-    # Floors the attendance-derived figure at what's actually been billed
-    # (net of discount), deliberately NOT re-capped at the course's current
-    # price — a bill's amount is ground truth for what was actually charged
-    # (staff may bill a custom amount, or the course's price may have since
-    # changed), unlike the attendance-derived figure above, which has to be
-    # capped since it accrues per session and could otherwise overrun.
-    # `max`, not addition, keeps this a floor rather than double-counting
-    # once attendance for that course does start accruing.
+    # Floors the attendance-derived figure at what's actually been billed,
+    # deliberately NOT re-capped at the course's current price — a bill's
+    # amount is ground truth for what was actually charged (staff may bill a
+    # custom amount, or the course's price may have since changed), unlike
+    # the attendance-derived figure above, which has to be capped since it
+    # accrues per session and could otherwise overrun. `max`, not addition,
+    # keeps this a floor rather than double-counting once attendance for
+    # that course does start accruing.
+    #
+    # Uses the item's GROSS amount, not net of its own teacher/school
+    # discount — same convention as the attendance-derived figure above
+    # (itself gross, priced via course_per_session_price with no discount
+    # applied). The discount is forgiven exactly once, for every course
+    # item regardless of pricing_type, by `active_discount` further below;
+    # netting it out here too would double-subtract it (a 1500 DZD bill
+    # with a 630 DZD discount floors cost at 870 here, active_discount
+    # forgives another 630, and cost ends up 240 instead of the correct
+    # 870).
     fixed_billed_items = PaymentItem.objects.filter(
         payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial', 'pending'),
         course__pricing_type='fixed_sessions',
-    ).values('payment__student_id', 'course_id', 'amount', 'teacher_percentage', 'school_percentage')
+    ).values('payment__student_id', 'course_id', 'amount')
     billed_fixed = {}
     for row in fixed_billed_items:
-        net = float(row['amount']) - _payment_item_discount(row)
         key = (row['payment__student_id'], row['course_id'])
-        billed_fixed[key] = billed_fixed.get(key, 0.0) + net
+        billed_fixed[key] = billed_fixed.get(key, 0.0) + float(row['amount'])
     for key, billed_amount in billed_fixed.items():
         cost_by_student_course[key] = max(cost_by_student_course.get(key, 0.0), billed_amount)
 
@@ -5299,7 +5308,10 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
     # Same floor as compute_student_balances: a fixed_sessions course's
     # price is due as soon as it's billed, not earned per attended session,
     # so a student with a real bill for it but no attendance yet still owes
-    # it rather than showing as "nothing due".
+    # it rather than showing as "nothing due". Gross amount, not net of the
+    # item's own discount — active_discount below already forgives that
+    # once; netting it here too would double-subtract it (see
+    # compute_student_balances's identical block for the worked example).
     if course['pricing_type'] == 'fixed_sessions':
         billed_qs = PaymentItem.objects.filter(
             payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial', 'pending'), course_id=course_id,
@@ -5307,10 +5319,9 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
         if student_ids is not None:
             billed_qs = billed_qs.filter(payment__student_id__in=student_ids)
         billed = {}
-        for row in billed_qs.values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage'):
-            net = float(row['amount']) - _payment_item_discount(row)
+        for row in billed_qs.values('payment__student_id', 'amount'):
             sid = row['payment__student_id']
-            billed[sid] = billed.get(sid, 0.0) + net
+            billed[sid] = billed.get(sid, 0.0) + float(row['amount'])
         for sid, amount in billed.items():
             cost[sid] = max(cost.get(sid, 0.0), amount)
 
