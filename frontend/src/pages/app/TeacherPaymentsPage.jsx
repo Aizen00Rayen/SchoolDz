@@ -251,10 +251,10 @@ export default function TeacherPaymentsPage() {
                     onClick={() => setSelectedHistoryTeacher(r)}
                     className="border-b border-border last:border-0 hover:bg-muted/50 transition-colors cursor-pointer group"
                   >
-                    <td className="px-4 py-3 font-medium">
-                      <div className="flex items-center gap-1.5 text-start font-semibold text-primary">
-                        <span>{r.teacher_name}</span>
-                        <History className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 transition-opacity" />
+                    <td className="px-4 py-3 font-medium text-foreground">
+                      <div className="flex items-center gap-2 text-start font-semibold text-foreground">
+                        <span className="text-foreground">{r.teacher_name}</span>
+                        <History className="w-3.5 h-3.5 text-muted-foreground opacity-60 group-hover:opacity-100 transition-opacity" />
                       </div>
                     </td>
                     <td className="px-4 py-3 font-mono text-xs" onClick={(e) => e.stopPropagation()}>
@@ -531,7 +531,7 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pe-6">
             <div>
               <DialogTitle className="font-display text-xl flex items-center gap-2">
-                <History className="w-5 h-5 text-primary" />
+                <History className="w-5 h-5 text-muted-foreground" />
                 <span>{history?.teacher?.name || teacher?.teacher_name}</span>
                 <Badge variant="secondary" className="font-mono text-xs font-normal">
                   {history?.teacher?.payment_percentage ?? teacher?.percentage}%
@@ -600,7 +600,7 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
               {t("tp.earned")}
             </div>
-            <div className="font-mono font-bold text-base text-primary mt-1">
+            <div className="font-mono font-bold text-base text-foreground mt-1">
               {money(totals.total_earned)}
             </div>
             <div className="text-[11px] text-muted-foreground">
@@ -667,7 +667,7 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
                       <td className="px-3 py-2.5 font-mono font-semibold">{s.present_count}</td>
                       <td className="px-3 py-2.5 font-mono text-muted-foreground">{money(s.price_per_session)}</td>
                       <td className="px-3 py-2.5 font-mono">{s.teacher_percentage}%</td>
-                      <td className="px-3 py-2.5 font-mono font-semibold text-primary">{money(s.earned)}</td>
+                      <td className="px-3 py-2.5 font-mono font-semibold text-foreground">{money(s.earned)}</td>
                       {canRemove && (
                         <td className="px-3 py-2.5 text-end">
                           <Button
@@ -734,7 +734,7 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
                       </td>
                       <td className="px-3 py-2.5 font-mono text-muted-foreground">{money(p.amount)}</td>
                       <td className="px-3 py-2.5 font-mono">{p.teacher_percentage}%</td>
-                      <td className="px-3 py-2.5 font-mono font-semibold text-primary">{money(p.earned)}</td>
+                      <td className="px-3 py-2.5 font-mono font-semibold text-foreground">{money(p.earned)}</td>
                       {canRemove && (
                         <td className="px-3 py-2.5 text-end">
                           <Button
