@@ -6228,7 +6228,22 @@ def _teacher_earnings_context(tenant_id):
     standalone_course_ids = set(
         Course.objects.filter(tenant_id=tenant_id, kind='standalone').values_list('id', flat=True)
     )
-    return session_info, price_per_session, teacher_pct, standalone_course_ids
+    # A standalone course's own PaymentItems essentially never carry a
+    # group_id in practice (staff bill the course amount directly, without
+    # picking a specific group) — even though the item's teacher_percentage
+    # is correctly set. Falling back to "which teacher teaches this course"
+    # only works when every group teaching it agrees on the teacher; a
+    # course split across groups with different teachers is left unmapped
+    # (contributes nothing, same as before) rather than guessing wrong.
+    standalone_course_teacher = {}
+    if standalone_course_ids:
+        by_course = {}
+        for course_id, teacher_id in Group.objects.filter(
+            tenant_id=tenant_id, course_id__in=standalone_course_ids, teacher_id__isnull=False,
+        ).values_list('course_id', 'teacher_id'):
+            by_course.setdefault(course_id, set()).add(teacher_id)
+        standalone_course_teacher = {cid: next(iter(tids)) for cid, tids in by_course.items() if len(tids) == 1}
+    return session_info, price_per_session, teacher_pct, standalone_course_ids, standalone_course_teacher
 
 
 def compute_teacher_earned_total(tenant_id, date_from=None, date_to=None, _context=None):
@@ -6248,7 +6263,7 @@ def compute_teacher_earned_total(tenant_id, date_from=None, date_to=None, _conte
     if date_to:
         attendance = attendance.filter(session__start_at__date__lte=date_to)
 
-    session_info, price_per_session, teacher_pct, standalone_course_ids = _context or _teacher_earnings_context(tenant_id)
+    session_info, price_per_session, teacher_pct, standalone_course_ids, standalone_course_teacher = _context or _teacher_earnings_context(tenant_id)
 
     total = 0.0
     for a in attendance.values('session_id'):
@@ -6289,7 +6304,11 @@ def compute_teacher_earned_total(tenant_id, date_from=None, date_to=None, _conte
     # fully-paid bills rather than attendance (see Course.kind's docstring).
     # Uses each PaymentItem's own teacher_percentage (auto-filled from the
     # item's group's teacher, overridable per family) against that item's
-    # own amount, credited to that group's teacher.
+    # own amount. The item itself almost never carries a group_id in
+    # practice (staff bill the course amount directly, without picking a
+    # specific group) — fall back to the course's own teacher when the
+    # course teaches through exactly one (see standalone_course_teacher's
+    # docstring in _teacher_earnings_context).
     standalone_items = PaymentItem.objects.filter(
         payment__tenant_id=tenant_id, payment__status='paid', kind='course',
         course_id__in=standalone_course_ids, teacher_percentage__isnull=False,
@@ -6299,7 +6318,8 @@ def compute_teacher_earned_total(tenant_id, date_from=None, date_to=None, _conte
     if date_to:
         standalone_items = standalone_items.filter(payment__paid_at__date__lte=date_to)
     for item in standalone_items:
-        if not item.group or not item.group.teacher_id:
+        tid = item.group.teacher_id if item.group_id else standalone_course_teacher.get(item.course_id)
+        if not tid:
             continue
         pct = float(item.teacher_percentage or 0)
         total += float(item.amount) * pct / 100
@@ -6336,7 +6356,7 @@ def compute_teacher_earnings(tenant_id, request, _context=None):
     # attendance row. Teacher falls back to the session's own teacher_id when
     # set (a substitute covering someone else's group), else the group's
     # regular teacher; course similarly falls back to the group's course.
-    session_info, price_per_session, _, standalone_course_ids = _context or _teacher_earnings_context(tenant_id)
+    session_info, price_per_session, _, standalone_course_ids, standalone_course_teacher = _context or _teacher_earnings_context(tenant_id)
 
     present_count = {}
     base_value = {}
@@ -6386,19 +6406,24 @@ def compute_teacher_earnings(tenant_id, request, _context=None):
     # group's teacher, overridable per family) against that item's own
     # amount, credited to that group's teacher — not the tenant-wide
     # `t.payment_percentage` used for the attendance stream above, since a
-    # specific bill's split may have been overridden for that family.
+    # specific bill's split may have been overridden for that family. The
+    # item itself almost never carries a group_id in practice (staff bill
+    # the course amount directly, without picking a specific group) — fall
+    # back to the course's own teacher when the course teaches through
+    # exactly one (see standalone_course_teacher's docstring in
+    # _teacher_earnings_context). teacher_id filtering happens after
+    # resolving tid, not in the query, since a null-group item's real
+    # teacher is only known via that fallback.
     standalone_items = PaymentItem.objects.filter(
         payment__tenant_id=tenant_id, payment__status='paid', kind='course',
         course_id__in=standalone_course_ids, teacher_percentage__isnull=False,
     ).select_related('group')
     standalone_items = filter_by_date_range(standalone_items, request, 'payment__paid_at__date')
-    if teacher_id:
-        standalone_items = standalone_items.filter(group__teacher_id=teacher_id)
     standalone_revenue = {}
     for item in standalone_items:
-        if not item.group or not item.group.teacher_id:
+        tid = item.group.teacher_id if item.group_id else standalone_course_teacher.get(item.course_id)
+        if not tid or (teacher_id and tid != teacher_id):
             continue
-        tid = item.group.teacher_id
         pct = float(item.teacher_percentage or 0)
         standalone_revenue[tid] = standalone_revenue.get(tid, 0.0) + float(item.amount) * pct / 100
 
