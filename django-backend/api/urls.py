@@ -31,6 +31,7 @@ router.register('coupons', views.CouponViewSet, basename='coupon')
 router.register('expenses', views.ExpenseViewSet, basename='expense')
 router.register('expense-categories', views.ExpenseCategoryViewSet, basename='expense-category')
 router.register('teacher-payouts', views.TeacherPayoutViewSet, basename='teacher-payout')
+router.register('insurances', views.StudentInsuranceViewSet, basename='insurance')
 
 def _both(route, view, name):
     """Return URL patterns for route both with and without trailing slash."""

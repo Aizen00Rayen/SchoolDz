@@ -45,6 +45,7 @@ import TakeQuizPage from "@/pages/quiz/TakeQuizPage";
 import WebsitePage from "@/pages/app/WebsitePage";
 import ReportsPage from "@/pages/app/ReportsPage";
 import ExpensesPage from "@/pages/app/ExpensesPage";
+import InsurancesPage from "@/pages/app/InsurancesPage";
 import TeacherPaymentsPage from "@/pages/app/TeacherPaymentsPage";
 import LogsPage from "@/pages/app/LogsPage";
 import SettingsPage from "@/pages/app/SettingsPage";
@@ -188,6 +189,7 @@ function App() {
                     <Route path="website" element={<WebsitePage />} />
                     <Route path="reports" element={<ReportsPage />} />
                     <Route path="expenses" element={<ExpensesPage />} />
+                    <Route path="insurances" element={<InsurancesPage />} />
                     <Route path="teacher-payments" element={<TeacherPaymentsPage />} />
                     <Route path="logs" element={<LogsPage />} />
                     <Route path="messages" element={<MessagesPage />} />

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  Download, FileDown, TrendingUp, TrendingDown, Receipt, Wallet, TriangleAlert, HandCoins, Loader2,
+  Download, FileDown, TrendingUp, TrendingDown, Receipt, Wallet, TriangleAlert, HandCoins, Loader2, ShieldCheck,
 } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
 import { api, downloadFrom, extractError, openFinanceReportPdf } from "@/lib/api";
@@ -131,7 +131,7 @@ export default function ReportsPage() {
 
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4 mb-6">
         <Card icon={Wallet} label={t("reports.collected")} value={money(finance?.collected)} />
-        <Card icon={TrendingDown} label={t("reports.outstanding")} value={money(finance?.outstanding)} />
+        <Card icon={ShieldCheck} label={t("reports.insurances_entered")} value={money(finance?.insurances)} />
         <Card icon={Receipt} label={t("reports.expenses")} value={money(finance?.expenses)} />
         <Card icon={HandCoins} label={t("reports.teacher_earnings")} value={money(finance?.teacher_earnings)} />
         <Card icon={TrendingUp} label={t("reports.net")} value={money(finance?.net)} />
@@ -171,7 +171,7 @@ export default function ReportsPage() {
                       {tx.reference && <div className="text-[11px] font-mono text-muted-foreground">{tx.reference}</div>}
                     </td>
                     <td className="px-3 py-2 text-xs capitalize">
-                      {tx.type === "expense" ? categoryLabel(tx.kind, t) : t(`kind.${tx.kind}`)}
+                      {tx.type === "expense" ? categoryLabel(tx.kind, t) : tx.type === "insurance" ? t("menu.insurances") : t(`kind.${tx.kind}`)}
                     </td>
                     <td className="px-3 py-2">
                       {tx.status ? <StatusPill status={tx.status} /> : <span className="text-xs text-muted-foreground">—</span>}

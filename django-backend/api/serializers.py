@@ -7,7 +7,7 @@ from rest_framework import serializers
 # student list out into a tenant they registered themselves. Nothing
 # legitimate needs it writable: creation sets the tenant server-side via
 # perform_create()'s save(tenant_id=...) kwarg, which bypasses this field.
-from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, PaymentItem, Trip, Book, BookCopy, Grade, ChargilyCheckout, Conversation, ConversationStaffRead, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry
+from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, PaymentItem, Trip, Book, BookCopy, Grade, ChargilyCheckout, Conversation, ConversationStaffRead, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry, StudentInsurance
 
 
 class TenantScopedPKField(serializers.PrimaryKeyRelatedField):
@@ -539,3 +539,30 @@ class TimetableEntrySerializer(serializers.ModelSerializer):
     class Meta:
         model = TimetableEntry
         exclude = ['tenant', 'room']
+
+
+class StudentInsuranceSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)
+    student_id = TenantScopedPKField(Student, source='student')
+    student_name = serializers.SerializerMethodField()
+    parent_name = serializers.SerializerMethodField()
+    parent_phone = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StudentInsurance
+        exclude = ['tenant', 'student', 'created_by']
+
+    def get_student_name(self, obj):
+        return f"{obj.student.first_name} {obj.student.last_name}" if obj.student else None
+
+    def get_parent_name(self, obj):
+        if obj.student and obj.student.parent:
+            p = obj.student.parent
+            return f"{p.first_name} {p.last_name}".strip()
+        return None
+
+    def get_parent_phone(self, obj):
+        if obj.student and obj.student.parent:
+            return obj.student.parent.phone
+        return None
+

@@ -28,8 +28,8 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, PermissionDenied, NotFound, APIException, NotAuthenticated
 from rest_framework.authtoken.models import Token
 
-from .models import Tenant, User, TenantMembership, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, PaymentItem, Trip, Book, BookCopy, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, DebtWaiver, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_FLAGS, STAFF_ROLES
-from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, RoomSerializer, AttendanceSerializer, PaymentSerializer, PaymentItemSerializer, TripSerializer, BookSerializer, BookCopySerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer, TimetableEntrySerializer
+from .models import Tenant, User, TenantMembership, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, PaymentItem, Trip, Book, BookCopy, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, DebtWaiver, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_FLAGS, STAFF_ROLES, StudentInsurance
+from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, RoomSerializer, AttendanceSerializer, PaymentSerializer, PaymentItemSerializer, TripSerializer, BookSerializer, BookCopySerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer, TimetableEntrySerializer, StudentInsuranceSerializer
 from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle, EnrollmentRateThrottle, StudentLookupRateThrottle, RegisterRateThrottle, QuizSubmitRateThrottle, log_activity
 
 # Single source of truth for pricing:
@@ -6745,6 +6745,115 @@ class TeacherPayoutViewSet(TenantScopedViewSet):
         return super().create(request, *args, **kwargs)
 
 
+class StudentInsuranceViewSet(TenantScopedViewSet):
+    queryset = StudentInsurance.objects.all()
+    serializer_class = StudentInsuranceSerializer
+    module_key = 'insurances'
+
+    def check_module_view(self):
+        user = self.request.user
+        if not (user.can_view('insurances') or user.can_view('payments') or user.role in ('owner', 'director', 'accountant')):
+            raise PermissionDenied('Forbidden')
+
+    def check_module_add(self):
+        user = self.request.user
+        if not (user.can_add('insurances') or user.can_add('payments') or user.role in ('owner', 'director', 'accountant')):
+            raise PermissionDenied('Forbidden')
+
+    def check_module_modify(self):
+        user = self.request.user
+        if not (user.can_modify('insurances') or user.can_modify('payments') or user.role in ('owner', 'director', 'accountant')):
+            raise PermissionDenied('Forbidden')
+
+    def check_module_delete(self):
+        user = self.request.user
+        if not (user.can_delete('insurances') or user.can_delete('payments') or user.role in ('owner', 'director', 'accountant')):
+            raise PermissionDenied('Forbidden')
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset()).select_related('student', 'student__parent')
+        queryset = filter_by_date_range(queryset, request, 'paid_at')
+        student_id = request.GET.get('student_id')
+        if student_id:
+            queryset = queryset.filter(student_id=student_id)
+        q = request.GET.get('q', '').strip()
+        if q:
+            queryset = queryset.filter(
+                Q(student__first_name__icontains=q) |
+                Q(student__last_name__icontains=q) |
+                Q(student__parent__first_name__icontains=q) |
+                Q(student__parent__last_name__icontains=q) |
+                Q(academic_year__icontains=q) |
+                Q(notes__icontains=q)
+            )
+
+        if request.GET.get('type') in ('csv', 'xlsx'):
+            headers = ['Date', 'Student', 'Parent', 'Phone', 'Amount', 'Academic Year', 'Notes']
+            rows = []
+            for ins in queryset.order_by('-paid_at'):
+                st = ins.student
+                p = st.parent if st else None
+                rows.append([
+                    ins.paid_at.isoformat() if ins.paid_at else '',
+                    f"{st.first_name} {st.last_name}" if st else '',
+                    f"{p.first_name} {p.last_name}" if p else '',
+                    p.phone if p else '',
+                    float(ins.amount),
+                    ins.academic_year or '',
+                    ins.notes or '',
+                ])
+            return export_rows(headers, rows, 'insurances', request.GET.get('type'))
+
+        total_amount = round(sum(float(ins.amount or 0) for ins in queryset), 2)
+        queryset = queryset.order_by('-paid_at', '-created_at')[:1000]
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({
+            'items': serializer.data,
+            'total_count': len(serializer.data),
+            'total_amount': total_amount,
+        })
+
+    @action(detail=False, methods=['get'])
+    def export(self, request):
+        queryset = self.filter_queryset(self.get_queryset()).select_related('student', 'student__parent')
+        queryset = filter_by_date_range(queryset, request, 'paid_at')
+        student_id = request.GET.get('student_id')
+        if student_id:
+            queryset = queryset.filter(student_id=student_id)
+        q = request.GET.get('q', '').strip()
+        if q:
+            queryset = queryset.filter(
+                Q(student__first_name__icontains=q) |
+                Q(student__last_name__icontains=q) |
+                Q(student__parent__first_name__icontains=q) |
+                Q(student__parent__last_name__icontains=q) |
+                Q(academic_year__icontains=q) |
+                Q(notes__icontains=q)
+            )
+        headers = ['Date', 'Student', 'Parent', 'Phone', 'Amount', 'Academic Year', 'Notes']
+        rows = []
+        for ins in queryset.order_by('-paid_at'):
+            st = ins.student
+            p = st.parent if st else None
+            rows.append([
+                ins.paid_at.isoformat() if ins.paid_at else '',
+                f"{st.first_name} {st.last_name}" if st else '',
+                f"{p.first_name} {p.last_name}" if p else '',
+                p.phone if p else '',
+                float(ins.amount),
+                ins.academic_year or '',
+                ins.notes or '',
+            ])
+        return export_rows(headers, rows, 'insurances', request.GET.get('type'))
+
+    def perform_create(self, serializer):
+        insurance = serializer.save(created_by=self.request.user)
+        if insurance.student and insurance.student.insurance_status != 'insured':
+            insurance.student.insurance_status = 'insured'
+            insurance.student.save(update_fields=['insurance_status'])
+
+
+
 # ------------------------------------------------------------ Activity log
 
 @api_view(['GET'])
@@ -6849,6 +6958,17 @@ def _compute_finance_report_data(tid, request):
     teacher_rows = compute_teacher_earnings(tid, request)
     teacher_total = round(sum(r['earned'] for r in teacher_rows), 2)
 
+    # Insurances collected in window (tracked separately from tuition revenue,
+    # excluded from net profit calculations).
+    insurances_qs = StudentInsurance.objects.filter(tenant_id=tid).select_related('student')
+    insurances_qs = filter_by_date_range(insurances_qs, request, 'paid_at')
+    if group_id:
+        insurances_qs = insurances_qs.filter(student__group_memberships__group_id=group_id)
+    if teacher_id:
+        insurances_qs = insurances_qs.filter(student__group_memberships__group__teacher_id=teacher_id)
+    insurance_list = list(insurances_qs)
+    insurance_total = round(sum(float(ins.amount or 0) for ins in insurance_list), 2)
+
     # Every individual money movement in the window — every payment
     # (whatever its status) plus every expense — so the tenant can see
     # exactly what happened, not just the totals. Expenses are left out
@@ -6868,6 +6988,17 @@ def _compute_finance_report_data(tid, request):
             'reference': p.invoice_number,
             'amount': round(float(p.amount) - float(p.discount or 0), 2),
         })
+    for ins in insurance_list:
+        st = ins.student
+        transactions.append({
+            'date': ins.paid_at.isoformat() if ins.paid_at else None,
+            'type': 'insurance',
+            'kind': 'insurance',
+            'status': 'paid',
+            'description': f'{st.first_name} {st.last_name}' if st else 'Insurance',
+            'reference': ins.academic_year or 'Insurance',
+            'amount': round(float(ins.amount or 0), 2),
+        })
     if not scoped_to_subset:
         for e in expenses:
             transactions.append({
@@ -6884,6 +7015,7 @@ def _compute_finance_report_data(tid, request):
     return {
         'collected': collected,
         'outstanding': pending_amount,
+        'insurances': insurance_total,
         'expenses': expense_total,
         'expenses_by_category': by_category,
         'teacher_earnings': teacher_total,
@@ -6911,6 +7043,7 @@ def finance_report(request):
         headers = ['Metric', 'Amount', 'Kind', 'Status', 'Description', 'Reference']
         rows = [
             ['Collected', result['collected'], '', '', '', ''],
+            ['Insurances entered', result['insurances'], '', '', '', ''],
             ['Outstanding', result['outstanding'], '', '', '', ''],
             ['Expenses', result['expenses'], '', '', '', ''],
             ['Teacher earnings', result['teacher_earnings'], '', '', '', ''],
@@ -7004,6 +7137,7 @@ def finance_report_print(request):
         'currency_label': currency_label,
         'collected': fmt(result['collected']),
         'outstanding': fmt(result['outstanding']),
+        'insurances': fmt(result['insurances']),
         'expenses': fmt(result['expenses']),
         'teacher_earnings': fmt(result['teacher_earnings']),
         'net': fmt(result['net']),

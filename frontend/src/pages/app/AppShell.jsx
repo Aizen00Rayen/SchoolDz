@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import {
   Award, BarChart3, BookOpen, Building2, CalendarClock, CalendarDays, Check, ChevronDown, ChevronsUpDown, ChevronRight, CircleDollarSign, ClipboardCheck,
   DoorOpen, FileBarChart2, FileQuestion, GaugeCircle, GraduationCap, Globe, HandCoins, Languages, LayoutGrid, Library, LogOut, Menu, MessageSquare, Moon,
-  PanelLeft, PanelLeftClose, Plane, Plus, Receipt, ScrollText, Search, Settings, Sun, Users, UserRound, Wallet, Layers, Table2, X,
+  PanelLeft, PanelLeftClose, Plane, Plus, Receipt, ScrollText, Search, Settings, ShieldCheck, Sun, Users, UserRound, Wallet, Layers, Table2, X,
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth";
@@ -75,6 +75,7 @@ const NAV_GROUPS = [
     key: "finance",
     items: [
       { key: "payments", to: "/app/payments", icon: Wallet, module: "payments" },
+      { key: "insurances", to: "/app/insurances", icon: ShieldCheck, module: "insurances" },
       { key: "debts", to: "/app/debts", icon: CircleDollarSign, module: "debts" },
       { key: "expenses", to: "/app/expenses", icon: Receipt, module: "expenses" },
       { key: "teacher_payments", to: "/app/teacher-payments", icon: HandCoins, module: "teacher_payments" },

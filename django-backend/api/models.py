@@ -20,7 +20,7 @@ PERMISSION_MODULES = [
     'dashboard', 'students', 'teachers', 'parents', 'courses', 'groups',
     'sessions', 'calendar', 'timetable', 'rooms', 'payments', 'debts', 'expenses', 'teacher_payments',
     'grades', 'attendance', 'messages', 'quizzes', 'website', 'reports',
-    'logs', 'users', 'settings', 'trips', 'books',
+    'logs', 'users', 'settings', 'trips', 'books', 'insurances',
 ]
 # Each module's stored permission is now a flag object rather than a single
 # level string, so "can edit" can be granted as any independent combination
@@ -1208,3 +1208,24 @@ class TimetableEntry(models.Model):
     class Meta:
         db_table = 'timetable_entries'
         ordering = ['day_of_week', 'start_time']
+
+
+class StudentInsurance(models.Model):
+    """Annual / periodic insurance fees collected from students/parents.
+    Kept separate from tuition revenue and net profit calculations, but tracked
+    as cash entering the school."""
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='insurances')
+    student = models.ForeignKey(Student, on_delete=models.CASCADE, db_column='student_id', related_name='insurances')
+    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0.01)])
+    paid_at = models.DateField()
+    academic_year = models.CharField(max_length=50, null=True, blank=True)
+    notes = models.TextField(null=True, blank=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'student_insurances'
+        ordering = ['-paid_at', '-created_at']
+
