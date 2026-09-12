@@ -246,19 +246,18 @@ export default function TeacherPaymentsPage() {
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.teacher_id} className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors">
+                  <tr
+                    key={r.teacher_id}
+                    onClick={() => setSelectedHistoryTeacher(r)}
+                    className="border-b border-border last:border-0 hover:bg-muted/50 transition-colors cursor-pointer group"
+                  >
                     <td className="px-4 py-3 font-medium">
-                      <button
-                        type="button"
-                        onClick={() => setSelectedHistoryTeacher(r)}
-                        className="hover:text-primary hover:underline flex items-center gap-1.5 text-start font-semibold group cursor-pointer"
-                        title={t("tp.view_history")}
-                      >
+                      <div className="flex items-center gap-1.5 text-start font-semibold text-primary">
                         <span>{r.teacher_name}</span>
-                        <History className="w-3.5 h-3.5 opacity-40 group-hover:opacity-100 transition-opacity text-primary" />
-                      </button>
+                        <History className="w-3.5 h-3.5 opacity-60 group-hover:opacity-100 transition-opacity" />
+                      </div>
                     </td>
-                    <td className="px-4 py-3 font-mono text-xs">
+                    <td className="px-4 py-3 font-mono text-xs" onClick={(e) => e.stopPropagation()}>
                       {!canEditPercentage ? (
                         `${r.percentage}%`
                       ) : (
@@ -279,7 +278,7 @@ export default function TeacherPaymentsPage() {
                       )}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs">{r.present_count}</td>
-                    <td className="px-4 py-3 font-mono text-xs">
+                    <td className="px-4 py-3 font-mono text-xs" onClick={(e) => e.stopPropagation()}>
                       {!canEditPercentage ? (
                         `${r.book_percentage}%`
                       ) : (
@@ -306,7 +305,7 @@ export default function TeacherPaymentsPage() {
                     <td className={`px-4 py-3 font-mono font-semibold ${r.balance > 0 ? "text-destructive" : ""}`}>
                       {money(r.balance)}
                     </td>
-                    <td className="px-4 py-3 text-end">
+                    <td className="px-4 py-3 text-end" onClick={(e) => e.stopPropagation()}>
                       <Button
                         variant="outline"
                         size="sm"
@@ -423,7 +422,11 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
   const qc = useQueryClient();
   const confirm = useConfirm();
   const { canModify, canDelete } = usePermission("teacher_payments");
-  const canRemove = canModify || canDelete;
+  const { canDelete: canDeleteSessions, canModify: canModifySessions } = usePermission("sessions");
+  const { canDelete: canDeletePayments, canModify: canModifyPayments } = usePermission("payments");
+  const canRemove = canModify || canDelete || canDeleteSessions || canModifySessions || canDeletePayments || canModifyPayments;
+
+  const teacherId = teacher?.teacher_id || teacher?.id;
 
   const [dateFilters, setDateFilters] = useState({
     from: initialFilters?.from || "",
@@ -434,13 +437,13 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
     Object.entries(dateFilters).filter(([, v]) => v)
   ).toString();
 
-  const { data: history, isLoading } = useQuery({
-    queryKey: ["teacher-history", teacher?.teacher_id, dateFilters],
+  const { data: history, isLoading, isError, error } = useQuery({
+    queryKey: ["teacher-history", teacherId, dateFilters],
     queryFn: () =>
       api
-        .get(`/teacher-payments/${teacher.teacher_id}/history${query ? `?${query}` : ""}`)
+        .get(`/teacher-payments/${teacherId}/history${query ? `?${query}` : ""}`)
         .then((r) => r.data),
-    enabled: !!teacher?.teacher_id,
+    enabled: !!teacherId,
   });
 
   const removeSessionMut = useMutation({
@@ -448,7 +451,7 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
       api.delete(`/teacher-payments/sessions/${sessionId}`).then((r) => r.data),
     onSuccess: () => {
       toast.success(t("tp.session_removed"));
-      qc.invalidateQueries({ queryKey: ["teacher-history", teacher?.teacher_id] });
+      qc.invalidateQueries({ queryKey: ["teacher-history", teacherId] });
       qc.invalidateQueries({ queryKey: ["teacher-payments"] });
       qc.invalidateQueries({ queryKey: ["sessions"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
@@ -461,7 +464,7 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
       api.delete(`/teacher-payments/package-items/${itemId}`).then((r) => r.data),
     onSuccess: () => {
       toast.success(t("tp.package_removed"));
-      qc.invalidateQueries({ queryKey: ["teacher-history", teacher?.teacher_id] });
+      qc.invalidateQueries({ queryKey: ["teacher-history", teacherId] });
       qc.invalidateQueries({ queryKey: ["teacher-payments"] });
       qc.invalidateQueries({ queryKey: ["payments"] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
@@ -494,6 +497,28 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
   };
 
   const money = (v) => `${Number(v || 0).toLocaleString()} ${currency}`;
+
+  const formatDateTime = (iso) => {
+    if (!iso) return "—";
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return iso;
+      return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    } catch {
+      return iso;
+    }
+  };
+
+  const formatDate = (iso) => {
+    if (!iso) return "—";
+    try {
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return iso;
+      return d.toLocaleDateString();
+    } catch {
+      return iso;
+    }
+  };
 
   const totals = history?.totals || {};
   const sessions = history?.sessions || [];
@@ -607,7 +632,11 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
           </TabsList>
 
           <TabsContent value="sessions" className="flex-1 min-h-0 overflow-y-auto border rounded-lg p-0">
-            {isLoading ? (
+            {isError ? (
+              <div className="p-8 text-center text-sm text-destructive font-medium">
+                {extractError(error)}
+              </div>
+            ) : isLoading ? (
               <div className="p-4"><LoadingRows /></div>
             ) : sessions.length === 0 ? (
               <div className="p-8 text-center text-sm text-muted-foreground">
@@ -631,7 +660,7 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
                   {sessions.map((s) => (
                     <tr key={s.id} className="hover:bg-muted/30 transition-colors">
                       <td className="px-3 py-2.5 font-mono whitespace-nowrap">
-                        {s.start_at ? new Date(s.start_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" }) : "—"}
+                        {formatDateTime(s.start_at)}
                       </td>
                       <td className="px-3 py-2.5 font-medium">{s.course_title}</td>
                       <td className="px-3 py-2.5 text-muted-foreground">{s.group_name}</td>
@@ -661,7 +690,11 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
           </TabsContent>
 
           <TabsContent value="packages" className="flex-1 min-h-0 overflow-y-auto border rounded-lg p-0">
-            {isLoading ? (
+            {isError ? (
+              <div className="p-8 text-center text-sm text-destructive font-medium">
+                {extractError(error)}
+              </div>
+            ) : isLoading ? (
               <div className="p-4"><LoadingRows /></div>
             ) : packages.length === 0 ? (
               <div className="p-8 text-center text-sm text-muted-foreground">
@@ -686,7 +719,7 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
                   {packages.map((p) => (
                     <tr key={p.id} className="hover:bg-muted/30 transition-colors">
                       <td className="px-3 py-2.5 font-mono whitespace-nowrap">
-                        {p.date ? new Date(p.date).toLocaleDateString() : "—"}
+                        {formatDate(p.date)}
                       </td>
                       <td className="px-3 py-2.5 font-medium">{p.course_title}</td>
                       <td className="px-3 py-2.5 text-muted-foreground">{p.student_name}</td>
