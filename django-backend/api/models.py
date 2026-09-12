@@ -443,12 +443,12 @@ class Course(models.Model):
         # (compute_teacher_earnings) accrues per present-student session,
         # independent of whether the bill is fully paid yet.
         ('regular', 'regular'),
-        # A one-off training/formation sold as a single package: the
-        # teacher's cut is earned the moment a student's bill for it is
-        # fully paid (see compute_teacher_earned_total/compute_teacher_earnings),
-        # using that PaymentItem's own teacher_percentage — attendance never
-        # factors in, since there's no ongoing per-session relationship to
-        # track.
+        # A package or standalone training/formation: the teacher's cut is
+        # earned from the beginning when billed (even while student payment is
+        # pending, unless cancelled), using that PaymentItem's own
+        # teacher_percentage (or the teacher's default cut) — attendance never
+        # factors in.
+        ('package', 'package'),
         ('standalone', 'standalone'),
     ]
     kind = models.CharField(max_length=20, choices=KIND_CHOICES, default='regular')

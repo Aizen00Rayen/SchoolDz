@@ -48,8 +48,8 @@ export default function CoursesPage() {
               <div>
                 <div className="font-medium flex items-center gap-1.5">
                   {r.title}
-                  {r.kind === "standalone" && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">{t("course.kind_standalone_badge")}</span>
+                  {(r.kind === "package" || r.kind === "standalone") && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">{t("course.kind_package_badge")}</span>
                   )}
                 </div>
                 <div className="text-[11px] text-muted-foreground">{r.category || "—"}</div>
@@ -99,17 +99,17 @@ export default function CoursesPage() {
           <SchoolLevelFields form={form} setForm={setForm} />
           <Field label={t("field.course_kind")}>
             <Select
-              value={form.kind || "regular"}
+              value={form.kind === "standalone" ? "package" : (form.kind || "regular")}
               onValueChange={(v) => setForm({ ...form, kind: v })}
             >
               <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
               <SelectContent className="bg-popover">
                 <SelectItem value="regular">{t("course.kind_regular")}</SelectItem>
-                <SelectItem value="standalone">{t("course.kind_standalone")}</SelectItem>
+                <SelectItem value="package">{t("course.kind_package")}</SelectItem>
               </SelectContent>
             </Select>
-            {form.kind === "standalone" && (
-              <p className="text-[11px] text-muted-foreground mt-1.5">{t("course.kind_standalone_hint")}</p>
+            {(form.kind === "package" || form.kind === "standalone") && (
+              <p className="text-[11px] text-muted-foreground mt-1.5">{t("course.kind_package_hint")}</p>
             )}
           </Field>
           <Field label={t("field.pricing_type")}>

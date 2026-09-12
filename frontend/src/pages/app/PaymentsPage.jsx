@@ -153,6 +153,22 @@ export default function PaymentsPage() {
     return { teacher_percentage: pct, school_percentage: Math.max(0, 100 - pct) };
   };
 
+  const pctFromCourse = (courseId) => {
+    const candidates = groupsForCourse(courseId);
+    if (candidates.length === 1) return pctFromGroup(candidates[0]);
+    if (candidates.length > 1) {
+      const teacherIds = new Set(candidates.map((g) => g.teacher_id).filter(Boolean));
+      if (teacherIds.size === 1) {
+        const teacher = teacherMap[[...teacherIds][0]];
+        if (teacher) {
+          const pct = parseFloat(teacher.payment_percentage) || 0;
+          return { teacher_percentage: pct, school_percentage: Math.max(0, 100 - pct) };
+        }
+      }
+    }
+    return { teacher_percentage: null, school_percentage: null };
+  };
+
   return (
     <div>
       {overdue?.total > 0 && (
@@ -460,8 +476,8 @@ export default function PaymentsPage() {
                                 };
                                 if (candidates.length === 1) {
                                   patch.group_id = candidates[0].id;
-                                  Object.assign(patch, pctFromGroup(candidates[0]));
                                 }
+                                Object.assign(patch, pctFromCourse(v));
                                 updateItem(idx, patch);
                               }}
                             >
