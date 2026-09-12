@@ -1,15 +1,18 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Download, Plus, Wallet } from "lucide-react";
+import { Calendar, Download, History, Package, Plus, Trash2, Wallet } from "lucide-react";
 
 import { api, extractError, downloadFrom } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/permissions";
+import { useConfirm } from "@/lib/confirm";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -31,6 +34,7 @@ export default function TeacherPaymentsPage() {
 
   const [filters, setFilters] = useState({ from: "", to: "", teacher_id: "", group_id: "" });
   const [open, setOpen] = useState(false);
+  const [selectedHistoryTeacher, setSelectedHistoryTeacher] = useState(null);
   const [form, setForm] = useState(EMPTY_PAYOUT);
   // Draft values for the always-visible percentage inputs, keyed by teacher
   // id — only holds an entry while a field has been touched and not yet
@@ -235,12 +239,25 @@ export default function TeacherPaymentsPage() {
                       {t(k)}
                     </th>
                   ))}
+                  <th className="text-end px-4 py-2.5 font-medium text-xs uppercase tracking-widest text-muted-foreground">
+                    {t("tp.history")}
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
                   <tr key={r.teacher_id} className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors">
-                    <td className="px-4 py-3 font-medium">{r.teacher_name}</td>
+                    <td className="px-4 py-3 font-medium">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedHistoryTeacher(r)}
+                        className="hover:text-primary hover:underline flex items-center gap-1.5 text-start font-semibold group cursor-pointer"
+                        title={t("tp.view_history")}
+                      >
+                        <span>{r.teacher_name}</span>
+                        <History className="w-3.5 h-3.5 opacity-40 group-hover:opacity-100 transition-opacity text-primary" />
+                      </button>
+                    </td>
                     <td className="px-4 py-3 font-mono text-xs">
                       {!canEditPercentage ? (
                         `${r.percentage}%`
@@ -288,6 +305,18 @@ export default function TeacherPaymentsPage() {
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{money(r.paid_out)}</td>
                     <td className={`px-4 py-3 font-mono font-semibold ${r.balance > 0 ? "text-destructive" : ""}`}>
                       {money(r.balance)}
+                    </td>
+                    <td className="px-4 py-3 text-end">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSelectedHistoryTeacher(r)}
+                        className="h-7 px-2.5 text-xs inline-flex items-center gap-1"
+                        title={t("tp.view_history")}
+                      >
+                        <History className="w-3.5 h-3.5 text-muted-foreground" />
+                        <span>{t("tp.history")}</span>
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -376,6 +405,325 @@ export default function TeacherPaymentsPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {selectedHistoryTeacher && (
+        <TeacherHistoryDialog
+          teacher={selectedHistoryTeacher}
+          initialFilters={filters}
+          onClose={() => setSelectedHistoryTeacher(null)}
+          currency={currency}
+        />
+      )}
     </div>
+  );
+}
+
+function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
+  const { t } = useI18n();
+  const qc = useQueryClient();
+  const confirm = useConfirm();
+  const { canModify, canDelete } = usePermission("teacher_payments");
+  const canRemove = canModify || canDelete;
+
+  const [dateFilters, setDateFilters] = useState({
+    from: initialFilters?.from || "",
+    to: initialFilters?.to || "",
+  });
+
+  const query = new URLSearchParams(
+    Object.entries(dateFilters).filter(([, v]) => v)
+  ).toString();
+
+  const { data: history, isLoading } = useQuery({
+    queryKey: ["teacher-history", teacher?.teacher_id, dateFilters],
+    queryFn: () =>
+      api
+        .get(`/teacher-payments/${teacher.teacher_id}/history${query ? `?${query}` : ""}`)
+        .then((r) => r.data),
+    enabled: !!teacher?.teacher_id,
+  });
+
+  const removeSessionMut = useMutation({
+    mutationFn: (sessionId) =>
+      api.delete(`/teacher-payments/sessions/${sessionId}`).then((r) => r.data),
+    onSuccess: () => {
+      toast.success(t("tp.session_removed"));
+      qc.invalidateQueries({ queryKey: ["teacher-history", teacher?.teacher_id] });
+      qc.invalidateQueries({ queryKey: ["teacher-payments"] });
+      qc.invalidateQueries({ queryKey: ["sessions"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
+  const removePackageMut = useMutation({
+    mutationFn: (itemId) =>
+      api.delete(`/teacher-payments/package-items/${itemId}`).then((r) => r.data),
+    onSuccess: () => {
+      toast.success(t("tp.package_removed"));
+      qc.invalidateQueries({ queryKey: ["teacher-history", teacher?.teacher_id] });
+      qc.invalidateQueries({ queryKey: ["teacher-payments"] });
+      qc.invalidateQueries({ queryKey: ["payments"] });
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+    onError: (e) => toast.error(extractError(e)),
+  });
+
+  const handleRemoveSession = async (session) => {
+    const ok = await confirm({
+      title: t("actions.delete"),
+      description: t("tp.remove_session_confirm"),
+      destructive: true,
+      confirmLabel: t("actions.delete"),
+      cancelLabel: t("actions.cancel"),
+    });
+    if (!ok) return;
+    removeSessionMut.mutate(session.id);
+  };
+
+  const handleRemovePackage = async (item) => {
+    const ok = await confirm({
+      title: t("actions.delete"),
+      description: t("tp.remove_package_confirm"),
+      destructive: true,
+      confirmLabel: t("actions.delete"),
+      cancelLabel: t("actions.cancel"),
+    });
+    if (!ok) return;
+    removePackageMut.mutate(item.id);
+  };
+
+  const money = (v) => `${Number(v || 0).toLocaleString()} ${currency}`;
+
+  const totals = history?.totals || {};
+  const sessions = history?.sessions || [];
+  const packages = history?.packages || [];
+
+  return (
+    <Dialog open={!!teacher} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="bg-card max-w-5xl max-h-[90vh] flex flex-col p-6 overflow-hidden">
+        <DialogHeader>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pe-6">
+            <div>
+              <DialogTitle className="font-display text-xl flex items-center gap-2">
+                <History className="w-5 h-5 text-primary" />
+                <span>{history?.teacher?.name || teacher?.teacher_name}</span>
+                <Badge variant="secondary" className="font-mono text-xs font-normal">
+                  {history?.teacher?.payment_percentage ?? teacher?.percentage}%
+                </Badge>
+              </DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground mt-1">
+                {t("tp.teacher_history_desc")}
+              </DialogDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                type="date"
+                value={dateFilters.from}
+                onChange={(e) => setDateFilters((prev) => ({ ...prev, from: e.target.value }))}
+                className="h-8 text-xs w-32"
+              />
+              <span className="text-xs text-muted-foreground">→</span>
+              <Input
+                type="date"
+                value={dateFilters.to}
+                onChange={(e) => setDateFilters((prev) => ({ ...prev, to: e.target.value }))}
+                className="h-8 text-xs w-32"
+              />
+              {(dateFilters.from || dateFilters.to) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setDateFilters({ from: "", to: "" })}
+                  className="h-8 px-2 text-xs"
+                >
+                  ✕
+                </Button>
+              )}
+            </div>
+          </div>
+        </DialogHeader>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 my-3">
+          <div className="bg-muted/30 border rounded-lg p-3">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold flex items-center gap-1">
+              <Calendar className="w-3.5 h-3.5" />
+              {t("tp.sessions_tab")}
+            </div>
+            <div className="font-mono font-bold text-base mt-1">
+              {money(totals.sessions_earned)}
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              {totals.sessions_count ?? 0} {t("tp.sessions_tab").toLowerCase()}
+            </div>
+          </div>
+
+          <div className="bg-muted/30 border rounded-lg p-3">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold flex items-center gap-1">
+              <Package className="w-3.5 h-3.5" />
+              {t("tp.packages_tab")}
+            </div>
+            <div className="font-mono font-bold text-base mt-1">
+              {money(totals.packages_earned)}
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              {totals.packages_count ?? 0} {t("course.kind_package_badge").toLowerCase()}
+            </div>
+          </div>
+
+          <div className="bg-muted/30 border rounded-lg p-3">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+              {t("tp.earned")}
+            </div>
+            <div className="font-mono font-bold text-base text-primary mt-1">
+              {money(totals.total_earned)}
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              {t("tp.paid_out")}: {money(totals.paid_out)}
+            </div>
+          </div>
+
+          <div className="bg-muted/30 border rounded-lg p-3">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold">
+              {t("tp.balance")}
+            </div>
+            <div className={`font-mono font-bold text-base mt-1 ${totals.balance > 0 ? "text-destructive" : ""}`}>
+              {money(totals.balance)}
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              {totals.balance > 0 ? t("reports.outstanding") : t("reports.collected")}
+            </div>
+          </div>
+        </div>
+
+        <Tabs defaultValue="sessions" className="flex-1 flex flex-col min-h-0 overflow-hidden">
+          <TabsList className="grid grid-cols-2 w-full max-w-xs mb-2">
+            <TabsTrigger value="sessions" className="text-xs">
+              {t("tp.sessions_tab")} ({sessions.length})
+            </TabsTrigger>
+            <TabsTrigger value="packages" className="text-xs">
+              {t("tp.packages_tab")} ({packages.length})
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="sessions" className="flex-1 min-h-0 overflow-y-auto border rounded-lg p-0">
+            {isLoading ? (
+              <div className="p-4"><LoadingRows /></div>
+            ) : sessions.length === 0 ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">
+                {t("tp.no_sessions")}
+              </div>
+            ) : (
+              <table className="w-full text-xs">
+                <thead className="bg-muted/50 sticky top-0 border-b z-10">
+                  <tr>
+                    <th className="text-start px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground">{t("field.date")}</th>
+                    <th className="text-start px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground">{t("menu.courses")}</th>
+                    <th className="text-start px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground">{t("menu.groups")}</th>
+                    <th className="text-start px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground">{t("tp.present_count")}</th>
+                    <th className="text-start px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground">{t("field.price")}</th>
+                    <th className="text-start px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground">{t("tp.percentage")}</th>
+                    <th className="text-start px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground">{t("tp.earned")}</th>
+                    {canRemove && <th className="text-end px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground"></th>}
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {sessions.map((s) => (
+                    <tr key={s.id} className="hover:bg-muted/30 transition-colors">
+                      <td className="px-3 py-2.5 font-mono whitespace-nowrap">
+                        {s.start_at ? new Date(s.start_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" }) : "—"}
+                      </td>
+                      <td className="px-3 py-2.5 font-medium">{s.course_title}</td>
+                      <td className="px-3 py-2.5 text-muted-foreground">{s.group_name}</td>
+                      <td className="px-3 py-2.5 font-mono font-semibold">{s.present_count}</td>
+                      <td className="px-3 py-2.5 font-mono text-muted-foreground">{money(s.price_per_session)}</td>
+                      <td className="px-3 py-2.5 font-mono">{s.teacher_percentage}%</td>
+                      <td className="px-3 py-2.5 font-mono font-semibold text-primary">{money(s.earned)}</td>
+                      {canRemove && (
+                        <td className="px-3 py-2.5 text-end">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => handleRemoveSession(s)}
+                            disabled={removeSessionMut.isPending}
+                            title={t("actions.delete")}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </TabsContent>
+
+          <TabsContent value="packages" className="flex-1 min-h-0 overflow-y-auto border rounded-lg p-0">
+            {isLoading ? (
+              <div className="p-4"><LoadingRows /></div>
+            ) : packages.length === 0 ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">
+                {t("tp.no_packages")}
+              </div>
+            ) : (
+              <table className="w-full text-xs">
+                <thead className="bg-muted/50 sticky top-0 border-b z-10">
+                  <tr>
+                    <th className="text-start px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground">{t("field.date")}</th>
+                    <th className="text-start px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground">{t("menu.courses")}</th>
+                    <th className="text-start px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground">{t("menu.students")}</th>
+                    <th className="text-start px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground">{t("field.invoice")}</th>
+                    <th className="text-start px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground">{t("field.status")}</th>
+                    <th className="text-start px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground">{t("field.amount")}</th>
+                    <th className="text-start px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground">{t("tp.percentage")}</th>
+                    <th className="text-start px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground">{t("tp.earned")}</th>
+                    {canRemove && <th className="text-end px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground"></th>}
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {packages.map((p) => (
+                    <tr key={p.id} className="hover:bg-muted/30 transition-colors">
+                      <td className="px-3 py-2.5 font-mono whitespace-nowrap">
+                        {p.date ? new Date(p.date).toLocaleDateString() : "—"}
+                      </td>
+                      <td className="px-3 py-2.5 font-medium">{p.course_title}</td>
+                      <td className="px-3 py-2.5 text-muted-foreground">{p.student_name}</td>
+                      <td className="px-3 py-2.5 font-mono text-muted-foreground">{p.invoice_number}</td>
+                      <td className="px-3 py-2.5">
+                        <Badge
+                          variant={p.status === "paid" ? "secondary" : "outline"}
+                          className="text-[10px] uppercase font-mono"
+                        >
+                          {p.status}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-2.5 font-mono text-muted-foreground">{money(p.amount)}</td>
+                      <td className="px-3 py-2.5 font-mono">{p.teacher_percentage}%</td>
+                      <td className="px-3 py-2.5 font-mono font-semibold text-primary">{money(p.earned)}</td>
+                      {canRemove && (
+                        <td className="px-3 py-2.5 text-end">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => handleRemovePackage(p)}
+                            disabled={removePackageMut.isPending}
+                            title={t("actions.delete")}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </TabsContent>
+        </Tabs>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -6487,6 +6487,228 @@ def teacher_payments_summary(request):
     })
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def teacher_payments_history(request, teacher_id):
+    """Teaching and earnings history for a teacher:
+    1. All sessions taught (date, course, group, room, present count, rate, earned)
+    2. All package courses taught/billed (date, course, student, invoice, status, amount, teacher cut)
+    Plus summary totals for each stream. Supports optional ?from=YYYY-MM-DD&to=YYYY-MM-DD."""
+    user = request.user
+    tid = require_staff_tenant(user)
+    if not user.can_view('teacher_payments') and not user.can_view('teachers'):
+        raise PermissionDenied('Forbidden')
+
+    teacher = Teacher.objects.filter(id=teacher_id, tenant_id=tid).first()
+    if not teacher:
+        raise NotFound('Teacher not found')
+
+    package_course_ids = set(
+        Course.objects.filter(tenant_id=tid, kind__in=['package', 'standalone']).values_list('id', flat=True)
+    )
+
+    date_from = request.GET.get('from')
+    date_to = request.GET.get('to')
+
+    # 1. SESSIONS
+    sessions_qs = ClassSession.objects.filter(tenant_id=tid).filter(
+        Q(teacher_id=teacher_id) | (Q(teacher__isnull=True) & Q(group__teacher_id=teacher_id))
+    ).exclude(
+        status='cancelled'
+    ).exclude(
+        course_id__in=package_course_ids
+    ).exclude(
+        group__course_id__in=package_course_ids
+    ).select_related('course', 'group', 'group__course', 'room_ref').order_by('-start_at')
+
+    if date_from:
+        sessions_qs = sessions_qs.filter(start_at__date__gte=date_from)
+    if date_to:
+        sessions_qs = sessions_qs.filter(start_at__date__lte=date_to)
+
+    session_rows = list(sessions_qs[:1000])
+    session_ids = [s.id for s in session_rows]
+    attendance_counts = {}
+    if session_ids:
+        for row in Attendance.objects.filter(
+            session_id__in=session_ids, status='present'
+        ).values('session_id').annotate(c=Count('id')):
+            attendance_counts[row['session_id']] = row['c']
+
+    teacher_pct = float(teacher.payment_percentage or 0)
+    sessions_list = []
+    sessions_earned_total = 0.0
+
+    for s in session_rows:
+        course = s.course or (s.group.course if s.group else None)
+        price_per_session = course_per_session_price(course.price, course.pricing_type, course.sessions_count) if course else 0.0
+        present_count = attendance_counts.get(s.id, 0)
+        earned = round(present_count * price_per_session * teacher_pct / 100, 2)
+        sessions_earned_total += earned
+
+        sessions_list.append({
+            'id': s.id,
+            'start_at': s.start_at.isoformat() if s.start_at else None,
+            'end_at': s.end_at.isoformat() if s.end_at else None,
+            'course_title': course.title if course else '—',
+            'course_id': course.id if course else None,
+            'group_name': s.group.name if s.group else '—',
+            'group_id': s.group_id,
+            'room': s.room or (s.room_ref.name if s.room_ref else '—'),
+            'topic': s.topic or '',
+            'status': s.status,
+            'present_count': present_count,
+            'price_per_session': price_per_session,
+            'teacher_percentage': teacher_pct,
+            'earned': earned,
+        })
+
+    # 2. PACKAGES / FORMATIONS
+    by_course = {}
+    if package_course_ids:
+        for course_id, t_id in Group.objects.filter(
+            tenant_id=tid, course_id__in=package_course_ids, teacher_id__isnull=False,
+        ).values_list('course_id', 'teacher_id'):
+            by_course.setdefault(course_id, set()).add(t_id)
+    standalone_course_teacher = {cid: next(iter(tids)) for cid, tids in by_course.items() if len(tids) == 1}
+
+    package_items_qs = PaymentItem.objects.filter(
+        payment__tenant_id=tid,
+        kind='course',
+        course_id__in=package_course_ids,
+    ).exclude(
+        payment__status='cancelled'
+    ).select_related('group', 'course', 'payment', 'payment__student')
+
+    if date_from:
+        package_items_qs = package_items_qs.filter(
+            Q(payment__paid_at__date__gte=date_from) | (Q(payment__paid_at__isnull=True) & Q(payment__created_at__date__gte=date_from))
+        )
+    if date_to:
+        package_items_qs = package_items_qs.filter(
+            Q(payment__paid_at__date__lte=date_to) | (Q(payment__paid_at__isnull=True) & Q(payment__created_at__date__lte=date_to))
+        )
+
+    packages_list = []
+    packages_earned_total = 0.0
+
+    for item in package_items_qs:
+        t_id = item.group.teacher_id if item.group_id else standalone_course_teacher.get(item.course_id)
+        if t_id != teacher.id:
+            continue
+
+        pct = float(item.teacher_percentage) if item.teacher_percentage is not None else teacher_pct
+        amount = float(item.amount or 0)
+        earned = round(amount * pct / 100, 2)
+        packages_earned_total += earned
+
+        dt = item.payment.paid_at or item.payment.created_at
+        student = item.payment.student
+        packages_list.append({
+            'id': item.id,
+            'payment_id': item.payment.id,
+            'date': dt.isoformat() if dt else None,
+            'course_title': item.course.title if item.course else '—',
+            'course_id': item.course_id,
+            'student_name': f"{student.first_name} {student.last_name}" if student else '—',
+            'student_id': item.payment.student_id,
+            'invoice_number': item.payment.invoice_number or '—',
+            'status': item.payment.status,
+            'amount': amount,
+            'teacher_percentage': pct,
+            'earned': earned,
+        })
+
+    packages_list.sort(key=lambda x: x['date'] or '', reverse=True)
+
+    # 3. BOOK ROYALTIES
+    book_items = PaymentItem.objects.filter(
+        payment__tenant_id=tid, payment__status='paid', kind='book',
+        book__author_teacher_id=teacher.id,
+    )
+    if date_from:
+        book_items = book_items.filter(payment__paid_at__date__gte=date_from)
+    if date_to:
+        book_items = book_items.filter(payment__paid_at__date__lte=date_to)
+    book_rev = sum(float(it.amount or 0) for it in book_items)
+    book_pct = float(teacher.book_percentage or 0)
+    books_earned_total = round(book_rev * book_pct / 100, 2)
+
+    total_earned = round(sessions_earned_total + packages_earned_total + books_earned_total, 2)
+    payouts_total = TeacherPayout.objects.filter(tenant_id=tid, teacher_id=teacher.id).aggregate(t=Sum('amount'))['t'] or 0
+    payouts_total = round(float(payouts_total), 2)
+
+    return Response({
+        'teacher': {
+            'id': teacher.id,
+            'name': f"{teacher.first_name} {teacher.last_name}",
+            'payment_percentage': teacher_pct,
+            'book_percentage': book_pct,
+        },
+        'totals': {
+            'sessions_count': len(sessions_list),
+            'sessions_earned': round(sessions_earned_total, 2),
+            'packages_count': len(packages_list),
+            'packages_earned': round(packages_earned_total, 2),
+            'books_earned': books_earned_total,
+            'total_earned': total_earned,
+            'paid_out': payouts_total,
+            'balance': round(total_earned - payouts_total, 2),
+        },
+        'sessions': sessions_list,
+        'packages': packages_list,
+    })
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def teacher_payment_remove_package_item(request, item_id):
+    """Removes a package course PaymentItem. If the parent payment has no remaining
+    items, the payment itself is deleted. Otherwise, payment amount and discount are recalculated."""
+    user = request.user
+    tid = require_staff_tenant(user)
+    if not (user.can_modify('teacher_payments') or user.can_delete('teacher_payments') or user.can_modify('payments') or user.can_delete('payments')):
+        raise PermissionDenied('Forbidden')
+
+    item = PaymentItem.objects.filter(id=item_id, payment__tenant_id=tid).select_related('payment').first()
+    if not item:
+        raise NotFound('Payment item not found')
+
+    payment = item.payment
+    with transaction.atomic():
+        item.delete()
+        remaining_items = list(payment.items.all())
+        if not remaining_items:
+            payment.delete()
+        else:
+            payment.amount = sum(it.amount for it in remaining_items)
+            payment.discount = sum(_payment_item_discount({
+                'amount': it.amount,
+                'teacher_percentage': it.teacher_percentage,
+                'school_percentage': it.school_percentage,
+            }) for it in remaining_items)
+            payment.save()
+
+    return Response({'message': 'Package item removed successfully'})
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def teacher_payment_remove_session(request, session_id):
+    """Deletes a session from teacher history."""
+    user = request.user
+    tid = require_staff_tenant(user)
+    if not (user.can_modify('teacher_payments') or user.can_delete('teacher_payments') or user.can_delete('sessions')):
+        raise PermissionDenied('Forbidden')
+
+    session = ClassSession.objects.filter(id=session_id, tenant_id=tid).first()
+    if not session:
+        raise NotFound('Session not found')
+
+    session.delete()
+    return Response({'message': 'Session removed successfully'})
+
+
 class TeacherPayoutViewSet(TenantScopedViewSet):
     queryset = TeacherPayout.objects.all()
     serializer_class = TeacherPayoutSerializer

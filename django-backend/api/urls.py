@@ -134,6 +134,12 @@ urlpatterns = [
 
     # Expenses, teacher payments, reports & audit log
     *_both('teacher-payments/summary', views.teacher_payments_summary, 'teacher_payments_summary'),
+    path('teacher-payments/<str:teacher_id>/history/', views.teacher_payments_history, name='teacher_payments_history'),
+    path('teacher-payments/<str:teacher_id>/history', views.teacher_payments_history, name='teacher_payments_history_noslash'),
+    path('teacher-payments/package-items/<str:item_id>/', views.teacher_payment_remove_package_item, name='teacher_payment_remove_package_item'),
+    path('teacher-payments/package-items/<str:item_id>', views.teacher_payment_remove_package_item, name='teacher_payment_remove_package_item_noslash'),
+    path('teacher-payments/sessions/<str:session_id>/', views.teacher_payment_remove_session, name='teacher_payment_remove_session'),
+    path('teacher-payments/sessions/<str:session_id>', views.teacher_payment_remove_session, name='teacher_payment_remove_session_noslash'),
     *_both('logs', views.activity_logs, 'activity_logs'),
     *_both('reports/finance', views.finance_report, 'finance_report'),
     *_both('reports/finance/print', views.finance_report_print, 'finance_report_print'),
