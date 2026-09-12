@@ -6796,8 +6796,8 @@ class StudentInsuranceViewSet(TenantScopedViewSet):
                 queryset = queryset.filter(
                     Q(student__first_name__icontains=q) |
                     Q(student__last_name__icontains=q) |
-                    Q(student__parent__first_name__icontains=q) |
-                    Q(student__parent__last_name__icontains=q) |
+                    Q(student__parent__name__icontains=q) |
+                    Q(student__parent__name_latin__icontains=q) |
                     Q(academic_year__icontains=q) |
                     Q(notes__icontains=q)
                 )
@@ -6811,7 +6811,7 @@ class StudentInsuranceViewSet(TenantScopedViewSet):
                     rows.append([
                         ins.paid_at.isoformat() if ins.paid_at else '',
                         f"{st.first_name} {st.last_name}" if st else '',
-                        f"{p.first_name} {p.last_name}" if p else '',
+                        (p.name or p.name_latin) if p else '',
                         p.phone if p else '',
                         float(ins.amount),
                         ins.academic_year or '',
@@ -6852,8 +6852,8 @@ class StudentInsuranceViewSet(TenantScopedViewSet):
             queryset = queryset.filter(
                 Q(student__first_name__icontains=q) |
                 Q(student__last_name__icontains=q) |
-                Q(student__parent__first_name__icontains=q) |
-                Q(student__parent__last_name__icontains=q) |
+                Q(student__parent__name__icontains=q) |
+                Q(student__parent__name_latin__icontains=q) |
                 Q(academic_year__icontains=q) |
                 Q(notes__icontains=q)
             )
@@ -6865,7 +6865,7 @@ class StudentInsuranceViewSet(TenantScopedViewSet):
             rows.append([
                 ins.paid_at.isoformat() if ins.paid_at else '',
                 f"{st.first_name} {st.last_name}" if st else '',
-                f"{p.first_name} {p.last_name}" if p else '',
+                (p.name or p.name_latin) if p else '',
                 p.phone if p else '',
                 float(ins.amount),
                 ins.academic_year or '',

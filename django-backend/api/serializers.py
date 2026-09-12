@@ -558,7 +558,7 @@ class StudentInsuranceSerializer(serializers.ModelSerializer):
     def get_parent_name(self, obj):
         if obj.student and obj.student.parent:
             p = obj.student.parent
-            return f"{p.first_name} {p.last_name}".strip()
+            return p.name or p.name_latin or None
         return None
 
     def get_parent_phone(self, obj):
