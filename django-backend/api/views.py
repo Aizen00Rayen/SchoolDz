@@ -28,6 +28,11 @@ from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError, PermissionDenied, NotFound, APIException, NotAuthenticated
 from rest_framework.authtoken.models import Token
 
+import logging
+import traceback
+
+logger = logging.getLogger(__name__)
+
 from .models import Tenant, User, TenantMembership, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, PaymentItem, Trip, Book, BookCopy, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, DebtWaiver, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_FLAGS, STAFF_ROLES, StudentInsurance
 from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, RoomSerializer, AttendanceSerializer, PaymentSerializer, PaymentItemSerializer, TripSerializer, BookSerializer, BookCopySerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer, TimetableEntrySerializer, StudentInsuranceSerializer
 from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle, EnrollmentRateThrottle, StudentLookupRateThrottle, RegisterRateThrottle, QuizSubmitRateThrottle, log_activity
@@ -6780,49 +6785,60 @@ class StudentInsuranceViewSet(TenantScopedViewSet):
         raise PermissionDenied('Forbidden')
 
     def list(self, request, *args, **kwargs):
-        queryset = self.filter_queryset(self.get_queryset()).select_related('student', 'student__parent')
-        queryset = filter_by_date_range(queryset, request, 'paid_at')
-        student_id = request.GET.get('student_id')
-        if student_id:
-            queryset = queryset.filter(student_id=student_id)
-        q = request.GET.get('q', '').strip()
-        if q:
-            queryset = queryset.filter(
-                Q(student__first_name__icontains=q) |
-                Q(student__last_name__icontains=q) |
-                Q(student__parent__first_name__icontains=q) |
-                Q(student__parent__last_name__icontains=q) |
-                Q(academic_year__icontains=q) |
-                Q(notes__icontains=q)
-            )
+        try:
+            queryset = self.filter_queryset(self.get_queryset()).select_related('student', 'student__parent')
+            queryset = filter_by_date_range(queryset, request, 'paid_at')
+            student_id = request.GET.get('student_id')
+            if student_id:
+                queryset = queryset.filter(student_id=student_id)
+            q = request.GET.get('q', '').strip()
+            if q:
+                queryset = queryset.filter(
+                    Q(student__first_name__icontains=q) |
+                    Q(student__last_name__icontains=q) |
+                    Q(student__parent__first_name__icontains=q) |
+                    Q(student__parent__last_name__icontains=q) |
+                    Q(academic_year__icontains=q) |
+                    Q(notes__icontains=q)
+                )
 
-        if request.GET.get('type') in ('csv', 'xlsx'):
-            headers = ['Date', 'Student', 'Parent', 'Phone', 'Amount', 'Academic Year', 'Notes']
-            rows = []
-            for ins in queryset.order_by('-paid_at'):
-                st = ins.student
-                p = st.parent if st else None
-                rows.append([
-                    ins.paid_at.isoformat() if ins.paid_at else '',
-                    f"{st.first_name} {st.last_name}" if st else '',
-                    f"{p.first_name} {p.last_name}" if p else '',
-                    p.phone if p else '',
-                    float(ins.amount),
-                    ins.academic_year or '',
-                    ins.notes or '',
-                ])
-            return export_rows(headers, rows, 'insurances', request.GET.get('type'))
+            if request.GET.get('type') in ('csv', 'xlsx'):
+                headers = ['Date', 'Student', 'Parent', 'Phone', 'Amount', 'Academic Year', 'Notes']
+                rows = []
+                for ins in queryset.order_by('-paid_at'):
+                    st = ins.student
+                    p = st.parent if st else None
+                    rows.append([
+                        ins.paid_at.isoformat() if ins.paid_at else '',
+                        f"{st.first_name} {st.last_name}" if st else '',
+                        f"{p.first_name} {p.last_name}" if p else '',
+                        p.phone if p else '',
+                        float(ins.amount),
+                        ins.academic_year or '',
+                        ins.notes or '',
+                    ])
+                return export_rows(headers, rows, 'insurances', request.GET.get('type'))
 
-        agg = queryset.aggregate(total_amount=Sum('amount'), total_count=Count('id'))
-        total_amount = round(float(agg['total_amount'] or 0), 2)
-        total_count = agg['total_count'] or 0
-        queryset = queryset.order_by('-paid_at', '-created_at')[:1000]
-        serializer = self.get_serializer(queryset, many=True)
-        return Response({
-            'items': serializer.data,
-            'total_count': total_count,
-            'total_amount': total_amount,
-        })
+            agg = queryset.aggregate(total_amount=Sum('amount'), total_count=Count('id'))
+            total_amount = round(float(agg['total_amount'] or 0), 2)
+            total_count = agg['total_count'] or 0
+            queryset = queryset.order_by('-paid_at', '-created_at')[:1000]
+            serializer = self.get_serializer(queryset, many=True)
+            return Response({
+                'items': serializer.data,
+                'total_count': total_count,
+                'total_amount': total_amount,
+            })
+        except Exception as e:
+            logger.error("StudentInsuranceViewSet.list failed: %s", traceback.format_exc())
+            return Response({'error': str(e), 'detail': str(e), 'items': [], 'total_count': 0, 'total_amount': 0}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def create(self, request, *args, **kwargs):
+        try:
+            return super().create(request, *args, **kwargs)
+        except Exception as e:
+            logger.error("StudentInsuranceViewSet.create failed: %s", traceback.format_exc())
+            return Response({'error': str(e), 'detail': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=False, methods=['get'])
     def export(self, request):
