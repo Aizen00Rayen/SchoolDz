@@ -6859,24 +6859,57 @@ class StudentInsuranceViewSet(TenantScopedViewSet):
 
     def perform_create(self, serializer):
         user = self.request.user
-        if user.tenant_id:
-            if not user.is_super_admin() and user.tenant.status != 'active':
+        student = serializer.validated_data.get('student')
+        tenant_id = getattr(user, 'tenant_id', None) or getattr(student, 'tenant_id', None)
+        if not tenant_id:
+            raise PermissionDenied('No tenant found for this record.')
+        if getattr(user, 'tenant_id', None) and not user.is_super_admin():
+            if getattr(user.tenant, 'status', None) != 'active':
                 raise PermissionDenied(_inactive_tenant_message(user.tenant))
-            insurance = serializer.save(tenant_id=user.tenant_id, created_by=user)
-        else:
-            insurance = serializer.save(created_by=user)
-        self._log_model_action('create', insurance)
-        if insurance.student and insurance.student.insurance_status != 'insured':
-            insurance.student.insurance_status = 'insured'
-            insurance.student.save(update_fields=['insurance_status'])
+        insurance = serializer.save(tenant_id=tenant_id, created_by=user if user.is_authenticated else None)
+        try:
+            self._log_model_action('create', insurance)
+        except Exception:
+            pass
+        if insurance.student:
+            try:
+                if insurance.student.insurance_status != 'insured':
+                    insurance.student.insurance_status = 'insured'
+                    insurance.student.save(update_fields=['insurance_status', 'updated_at'])
+            except Exception:
+                pass
+
+    def perform_update(self, serializer):
+        user = self.request.user
+        original_tenant_id = getattr(serializer.instance, 'tenant_id', None)
+        tenant_id = original_tenant_id or getattr(user, 'tenant_id', None)
+        insurance = serializer.save(tenant_id=tenant_id)
+        try:
+            self._log_model_action('update', insurance)
+        except Exception:
+            pass
+        if insurance.student:
+            try:
+                if insurance.student.insurance_status != 'insured':
+                    insurance.student.insurance_status = 'insured'
+                    insurance.student.save(update_fields=['insurance_status', 'updated_at'])
+            except Exception:
+                pass
 
     def perform_destroy(self, instance):
         student = instance.student
-        self._log_model_action('delete', instance)
+        try:
+            self._log_model_action('delete', instance)
+        except Exception:
+            pass
         instance.delete()
-        if student and not student.insurances.exists():
-            student.insurance_status = 'uninsured'
-            student.save(update_fields=['insurance_status'])
+        if student:
+            try:
+                if not student.insurances.exists():
+                    student.insurance_status = 'uninsured'
+                    student.save(update_fields=['insurance_status', 'updated_at'])
+            except Exception:
+                pass
 
 
 
