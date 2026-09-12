@@ -438,6 +438,20 @@ class Course(models.Model):
         ('fixed_sessions', 'fixed_sessions'),
     ]
     pricing_type = models.CharField(max_length=20, choices=PRICING_TYPE_CHOICES, default='fixed_sessions')
+    KIND_CHOICES = [
+        # Attendance-driven, like every other course — a teacher's cut
+        # (compute_teacher_earnings) accrues per present-student session,
+        # independent of whether the bill is fully paid yet.
+        ('regular', 'regular'),
+        # A one-off training/formation sold as a single package: the
+        # teacher's cut is earned the moment a student's bill for it is
+        # fully paid (see compute_teacher_earned_total/compute_teacher_earnings),
+        # using that PaymentItem's own teacher_percentage — attendance never
+        # factors in, since there's no ongoing per-session relationship to
+        # track.
+        ('standalone', 'standalone'),
+    ]
+    kind = models.CharField(max_length=20, choices=KIND_CHOICES, default='regular')
     # Meaning depends on pricing_type — see choices above. Unused (null) for
     # per_session, since there's nothing to divide by there.
     sessions_count = models.IntegerField(null=True, blank=True)

@@ -15,7 +15,7 @@ import { usePermission } from "@/lib/permissions";
 const DEFAULT_FORM = {
   title: "", description: "", category: "", pricing_type: "fixed_sessions", sessions_count: 12, price: 0,
   max_students: 20, color: "#0A0A0B", status: "active", show_on_enrollment: false,
-  school_level: "", school_year: "", specialty: "",
+  school_level: "", school_year: "", specialty: "", kind: "regular",
 };
 
 function pricingLabel(r, t) {
@@ -46,7 +46,12 @@ export default function CoursesPage() {
             <div className="flex items-center gap-2.5">
               <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: r.color || "#0A0A0B" }} />
               <div>
-                <div className="font-medium">{r.title}</div>
+                <div className="font-medium flex items-center gap-1.5">
+                  {r.title}
+                  {r.kind === "standalone" && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">{t("course.kind_standalone_badge")}</span>
+                  )}
+                </div>
                 <div className="text-[11px] text-muted-foreground">{r.category || "—"}</div>
               </div>
             </div>
@@ -92,6 +97,21 @@ export default function CoursesPage() {
             </Select>
           </Field>
           <SchoolLevelFields form={form} setForm={setForm} />
+          <Field label={t("field.course_kind")}>
+            <Select
+              value={form.kind || "regular"}
+              onValueChange={(v) => setForm({ ...form, kind: v })}
+            >
+              <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+              <SelectContent className="bg-popover">
+                <SelectItem value="regular">{t("course.kind_regular")}</SelectItem>
+                <SelectItem value="standalone">{t("course.kind_standalone")}</SelectItem>
+              </SelectContent>
+            </Select>
+            {form.kind === "standalone" && (
+              <p className="text-[11px] text-muted-foreground mt-1.5">{t("course.kind_standalone_hint")}</p>
+            )}
+          </Field>
           <Field label={t("field.pricing_type")}>
             <Select
               value={form.pricing_type || "fixed_sessions"}

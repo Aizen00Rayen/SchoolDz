@@ -230,7 +230,7 @@ export default function TeacherPaymentsPage() {
             <table className="w-full min-w-[640px] text-sm">
               <thead className="bg-muted/40 border-b border-border">
                 <tr>
-                  {["menu.teachers", "tp.percentage", "tp.present_count", "tp.book_percentage", "tp.book_earned", "tp.earned", "tp.paid_out", "tp.balance"].map((k) => (
+                  {["menu.teachers", "tp.percentage", "tp.present_count", "tp.book_percentage", "tp.book_earned", "tp.standalone_earned", "tp.earned", "tp.paid_out", "tp.balance"].map((k) => (
                     <th key={k} className="text-start px-4 py-2.5 font-medium text-xs uppercase tracking-widest text-muted-foreground">
                       {t(k)}
                     </th>
@@ -283,6 +283,7 @@ export default function TeacherPaymentsPage() {
                       )}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{money(r.book_earned)}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{money(r.standalone_earned)}</td>
                     <td className="px-4 py-3 font-mono">{money(r.earned)}</td>
                     <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{money(r.paid_out)}</td>
                     <td className={`px-4 py-3 font-mono font-semibold ${r.balance > 0 ? "text-destructive" : ""}`}>

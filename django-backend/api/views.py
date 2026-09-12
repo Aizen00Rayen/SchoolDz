@@ -6219,7 +6219,16 @@ def _teacher_earnings_context(tenant_id):
         for c in Course.objects.filter(id__in=course_ids).values('id', 'price', 'pricing_type', 'sessions_count')
     }
     teacher_pct = dict(Teacher.objects.filter(tenant_id=tenant_id).values_list('id', 'payment_percentage'))
-    return session_info, price_per_session, teacher_pct
+    # A 'standalone' course's teacher earnings come entirely from a
+    # payment-driven stream (see compute_teacher_earned_total/
+    # compute_teacher_earnings) — its course_ids are excluded from the
+    # attendance loop below, queried tenant-wide rather than just
+    # course_ids above since a standalone course may have a group with no
+    # sessions at all (attendance never applies to it).
+    standalone_course_ids = set(
+        Course.objects.filter(tenant_id=tenant_id, kind='standalone').values_list('id', flat=True)
+    )
+    return session_info, price_per_session, teacher_pct, standalone_course_ids
 
 
 def compute_teacher_earned_total(tenant_id, date_from=None, date_to=None, _context=None):
@@ -6239,12 +6248,16 @@ def compute_teacher_earned_total(tenant_id, date_from=None, date_to=None, _conte
     if date_to:
         attendance = attendance.filter(session__start_at__date__lte=date_to)
 
-    session_info, price_per_session, teacher_pct = _context or _teacher_earnings_context(tenant_id)
+    session_info, price_per_session, teacher_pct, standalone_course_ids = _context or _teacher_earnings_context(tenant_id)
 
     total = 0.0
     for a in attendance.values('session_id'):
         info = session_info.get(a['session_id'])
         if not info or not info['teacher_id']:
+            continue
+        # Attendance never earns a standalone course's teacher anything —
+        # its cut comes entirely from the fully-paid-bill stream below.
+        if info['course_id'] in standalone_course_ids:
             continue
         pct = float(teacher_pct.get(info['teacher_id']) or 0)
         total += price_per_session.get(info['course_id'], 0.0) * pct / 100
@@ -6271,6 +6284,25 @@ def compute_teacher_earned_total(tenant_id, date_from=None, date_to=None, _conte
     for teacher_id, revenue in book_revenue.items():
         book_pct = float(book_pct_by_teacher.get(teacher_id) or 0)
         total += revenue * book_pct / 100
+
+    # Standalone-course teacher earnings — a third income stream, driven by
+    # fully-paid bills rather than attendance (see Course.kind's docstring).
+    # Uses each PaymentItem's own teacher_percentage (auto-filled from the
+    # item's group's teacher, overridable per family) against that item's
+    # own amount, credited to that group's teacher.
+    standalone_items = PaymentItem.objects.filter(
+        payment__tenant_id=tenant_id, payment__status='paid', kind='course',
+        course_id__in=standalone_course_ids, teacher_percentage__isnull=False,
+    ).select_related('group')
+    if date_from:
+        standalone_items = standalone_items.filter(payment__paid_at__date__gte=date_from)
+    if date_to:
+        standalone_items = standalone_items.filter(payment__paid_at__date__lte=date_to)
+    for item in standalone_items:
+        if not item.group or not item.group.teacher_id:
+            continue
+        pct = float(item.teacher_percentage or 0)
+        total += float(item.amount) * pct / 100
 
     return round(total, 2)
 
@@ -6304,7 +6336,7 @@ def compute_teacher_earnings(tenant_id, request, _context=None):
     # attendance row. Teacher falls back to the session's own teacher_id when
     # set (a substitute covering someone else's group), else the group's
     # regular teacher; course similarly falls back to the group's course.
-    session_info, price_per_session, _ = _context or _teacher_earnings_context(tenant_id)
+    session_info, price_per_session, _, standalone_course_ids = _context or _teacher_earnings_context(tenant_id)
 
     present_count = {}
     base_value = {}
@@ -6312,6 +6344,10 @@ def compute_teacher_earnings(tenant_id, request, _context=None):
         info = session_info.get(a.session_id)
         tid = info['teacher_id'] if info else None
         if not tid:
+            continue
+        # Attendance never earns a standalone course's teacher anything —
+        # its cut comes entirely from the standalone_earned stream below.
+        if info['course_id'] in standalone_course_ids:
             continue
         present_count[tid] = present_count.get(tid, 0) + 1
         base_value[tid] = base_value.get(tid, 0.0) + price_per_session.get(info['course_id'], 0.0)
@@ -6344,6 +6380,28 @@ def compute_teacher_earnings(tenant_id, request, _context=None):
         author_id = item.book.author_teacher_id
         book_revenue[author_id] = book_revenue.get(author_id, 0.0) + float(item.amount)
 
+    # Standalone-course earnings: a third income stream, driven by fully-paid
+    # bills rather than attendance (see Course.kind's docstring). Uses each
+    # PaymentItem's own teacher_percentage (auto-filled from the item's
+    # group's teacher, overridable per family) against that item's own
+    # amount, credited to that group's teacher — not the tenant-wide
+    # `t.payment_percentage` used for the attendance stream above, since a
+    # specific bill's split may have been overridden for that family.
+    standalone_items = PaymentItem.objects.filter(
+        payment__tenant_id=tenant_id, payment__status='paid', kind='course',
+        course_id__in=standalone_course_ids, teacher_percentage__isnull=False,
+    ).select_related('group')
+    standalone_items = filter_by_date_range(standalone_items, request, 'payment__paid_at__date')
+    if teacher_id:
+        standalone_items = standalone_items.filter(group__teacher_id=teacher_id)
+    standalone_revenue = {}
+    for item in standalone_items:
+        if not item.group or not item.group.teacher_id:
+            continue
+        tid = item.group.teacher_id
+        pct = float(item.teacher_percentage or 0)
+        standalone_revenue[tid] = standalone_revenue.get(tid, 0.0) + float(item.amount) * pct / 100
+
     rows = []
     for t in teachers:
         count = present_count.get(t.id, 0)
@@ -6351,7 +6409,8 @@ def compute_teacher_earnings(tenant_id, request, _context=None):
         session_earned = base_value.get(t.id, 0.0) * pct / 100
         book_pct = float(t.book_percentage or 0)
         book_earned = round(book_revenue.get(t.id, 0.0) * book_pct / 100, 2)
-        earned = round(session_earned + book_earned, 2)
+        standalone_earned = round(standalone_revenue.get(t.id, 0.0), 2)
+        earned = round(session_earned + book_earned + standalone_earned, 2)
         already = round(paid_out.get(t.id, 0.0), 2)
         rows.append({
             'teacher_id': t.id,
@@ -6360,6 +6419,7 @@ def compute_teacher_earnings(tenant_id, request, _context=None):
             'present_count': count,
             'book_percentage': book_pct,
             'book_earned': book_earned,
+            'standalone_earned': standalone_earned,
             'earned': earned,
             'paid_out': already,
             'balance': round(earned - already, 2),
