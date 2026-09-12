@@ -1,9 +1,9 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Plus, Trash2 } from "lucide-react";
 import CrudPanel, { StatusPill } from "./CrudPanel";
-import { AlertTriangle, Wallet, FileDown, Info } from "lucide-react";
+import { AlertTriangle, Wallet, FileDown, Info, Calendar } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -40,6 +40,8 @@ const EMPTY_ITEM = {
 const DEFAULT_FORM = {
   student_id: "", items: [{ ...EMPTY_ITEM }],
   method: "cash", status: "paid", notes: "",
+  paid_at: new Date().toISOString().slice(0, 10),
+  due_date: "",
 };
 
 function InfoRow({ label, value }) {
@@ -122,12 +124,51 @@ export default function PaymentsPage() {
     queryFn: async () => (await api.get("/payments/balances")).data,
   });
   const [balanceFilter, setBalanceFilter] = useState("all");
+  const [datePeriod, setDatePeriod] = useState("all");
+  const [customDates, setCustomDates] = useState({ from: "", to: "" });
   const [detailStudentId, setDetailStudentId] = useState(null);
   const crudRef = useRef(null);
   const stuMap = Object.fromEntries((students?.items || []).map((s) => [s.id, s]));
   const teacherMap = Object.fromEntries((teachers?.items || []).map((t) => [t.id, t]));
   const courseMap = Object.fromEntries((courses?.items || []).map((c) => [c.id, c]));
   const balanceMap = Object.fromEntries((balances?.items || []).map((b) => [b.student_id, b]));
+
+  const extraParams = useMemo(() => {
+    const params = {};
+    if (balanceFilter !== "all") {
+      params.balance_status = balanceFilter;
+    }
+
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, "0");
+    const fmt = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+    if (datePeriod === "day") {
+      const today = fmt(now);
+      params.period = "day";
+      params.from = today;
+      params.to = today;
+    } else if (datePeriod === "week") {
+      const dayOfWeek = (now.getDay() + 6) % 7;
+      const start = new Date(now);
+      start.setDate(now.getDate() - dayOfWeek);
+      const end = new Date(start);
+      end.setDate(start.getDate() + 6);
+      params.period = "week";
+      params.from = fmt(start);
+      params.to = fmt(end);
+    } else if (datePeriod === "month") {
+      const start = new Date(now.getFullYear(), now.getMonth(), 1);
+      const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      params.period = "month";
+      params.from = fmt(start);
+      params.to = fmt(end);
+    } else if (datePeriod === "custom") {
+      if (customDates.from) params.from = customDates.from;
+      if (customDates.to) params.to = customDates.to;
+    }
+    return Object.keys(params).length > 0 ? params : undefined;
+  }, [balanceFilter, datePeriod, customDates]);
 
   const { data: detail, isLoading: detailLoading } = useQuery({
     queryKey: ["payments-student-summary", detailStudentId],
@@ -202,6 +243,8 @@ export default function PaymentsPage() {
       // render with the same editable cards create() uses.
       prepareEditForm={(row) => ({
         ...row,
+        paid_at: row.paid_at ? row.paid_at.slice(0, 10) : "",
+        due_date: row.due_date ? row.due_date.slice(0, 10) : "",
         items: (row.items || []).map((it) => ({ ...it, item_type: deriveItemType(it) })),
       })}
       // The item rows carry frontend-only bookkeeping (item_type) and, on
@@ -231,21 +274,70 @@ export default function PaymentsPage() {
         });
         return { ...rest, items };
       }}
-      extraParams={balanceFilter !== "all" ? { balance_status: balanceFilter } : undefined}
+      extraParams={extraParams}
       filterBar={(
-        <div className="flex items-center gap-1.5">
-          <Select value={balanceFilter} onValueChange={setBalanceFilter}>
-            <SelectTrigger className="bg-background h-9 w-44" data-testid="payments-balance-filter">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="bg-popover">
-              <SelectItem value="all">{t("payments.balance_all")}</SelectItem>
-              <SelectItem value="owes">{t("payments.balance_owes")}</SelectItem>
-              <SelectItem value="overpaid">{t("payments.balance_overpaid")}</SelectItem>
-              <SelectItem value="settled">{t("payments.balance_settled")}</SelectItem>
-            </SelectContent>
-          </Select>
-          <Info className="w-4 h-4 text-muted-foreground flex-shrink-0" title={t("payments.balance_explainer")} />
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Day / Week / Month / Custom date period buttons */}
+          <div className="inline-flex rounded-lg border border-border p-0.5 bg-muted/40 shrink-0">
+            {[
+              { key: "all", label: t("payments.period_all") },
+              { key: "day", label: t("payments.period_day") },
+              { key: "week", label: t("payments.period_week") },
+              { key: "month", label: t("payments.period_month") },
+              { key: "custom", label: t("payments.period_custom") },
+            ].map((p) => (
+              <button
+                key={p.key}
+                type="button"
+                onClick={() => setDatePeriod(p.key)}
+                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-all ${
+                  datePeriod === p.key
+                    ? "bg-background text-foreground shadow-sm font-semibold border border-border/60"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+                data-testid={`payments-period-${p.key}`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          {datePeriod === "custom" && (
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Input
+                type="date"
+                value={customDates.from}
+                onChange={(e) => setCustomDates((prev) => ({ ...prev, from: e.target.value }))}
+                className="h-9 w-32 text-xs bg-background"
+                placeholder={t("reports.from")}
+                data-testid="payments-custom-from"
+              />
+              <span className="text-muted-foreground text-xs">&ndash;</span>
+              <Input
+                type="date"
+                value={customDates.to}
+                onChange={(e) => setCustomDates((prev) => ({ ...prev, to: e.target.value }))}
+                className="h-9 w-32 text-xs bg-background"
+                placeholder={t("reports.to")}
+                data-testid="payments-custom-to"
+              />
+            </div>
+          )}
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Select value={balanceFilter} onValueChange={setBalanceFilter}>
+              <SelectTrigger className="bg-background h-9 w-40" data-testid="payments-balance-filter">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-popover">
+                <SelectItem value="all">{t("payments.balance_all")}</SelectItem>
+                <SelectItem value="owes">{t("payments.balance_owes")}</SelectItem>
+                <SelectItem value="overpaid">{t("payments.balance_overpaid")}</SelectItem>
+                <SelectItem value="settled">{t("payments.balance_settled")}</SelectItem>
+              </SelectContent>
+            </Select>
+            <Info className="w-4 h-4 text-muted-foreground flex-shrink-0" title={t("payments.balance_explainer")} />
+          </div>
         </div>
       )}
       columns={[
@@ -267,6 +359,65 @@ export default function PaymentsPage() {
               </Button>
             </div>
           ),
+        },
+        {
+          key: "date",
+          label: t("field.date"),
+          render: (r) => {
+            const dateVal = r.paid_at || r.due_date || r.created_at;
+            if (!dateVal) return <span className="text-muted-foreground text-xs">—</span>;
+            const dateStr = dateVal.slice(0, 10);
+            const isPaid = r.status === "paid" || (r.status === "partial" && r.paid_at);
+            const isPending = r.status === "pending";
+            const isOverdue = isPending && r.due_date && new Date(r.due_date) < new Date();
+
+            let tagTone = "bg-muted/70 text-foreground border-border";
+            let subLabel = null;
+
+            if (r.paid_at) {
+              tagTone = "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/25";
+              try {
+                const d = new Date(r.paid_at);
+                const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                if (time && time !== "Invalid Date") {
+                  subLabel = (
+                    <span className="text-[10px] text-muted-foreground font-mono ps-1">
+                      {time}
+                    </span>
+                  );
+                }
+              } catch (_) {}
+            } else if (r.due_date) {
+              if (isOverdue) {
+                tagTone = "bg-destructive/10 text-destructive border-destructive/25";
+                subLabel = (
+                  <span className="text-[10px] font-semibold text-destructive ps-1">
+                    {t("payments.overdue")}
+                  </span>
+                );
+              } else {
+                tagTone = "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/25";
+                subLabel = (
+                  <span className="text-[10px] font-medium text-amber-600 dark:text-amber-400 ps-1">
+                    {t("payments.due")}: {r.due_date}
+                  </span>
+                );
+              }
+            }
+
+            return (
+              <div className="flex flex-col gap-0.5 items-start">
+                <span
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-mono font-medium border ${tagTone}`}
+                  data-testid={`payments-date-tag-${r.id}`}
+                >
+                  <Calendar className="w-3 h-3 shrink-0 opacity-75" />
+                  {dateStr}
+                </span>
+                {subLabel}
+              </div>
+            );
+          },
         },
         {
           key: "student", label: t("field.student"),
@@ -593,7 +744,39 @@ export default function PaymentsPage() {
                 </SelectContent>
               </Select>
             </Field>
+            {(form.status === "paid" || form.status === "partial" || form.status === "refunded" || form.status === "cancelled") ? (
+              <Field label={t("field.paid_at")}>
+                <Input
+                  type="date"
+                  value={form.paid_at || ""}
+                  onChange={(e) => setForm({ ...form, paid_at: e.target.value })}
+                  data-testid="payments-form-paid-at"
+                />
+              </Field>
+            ) : (
+              <Field label={t("field.due_date")}>
+                <Input
+                  type="date"
+                  value={form.due_date || ""}
+                  onChange={(e) => setForm({ ...form, due_date: e.target.value })}
+                  data-testid="payments-form-due-date"
+                />
+              </Field>
+            )}
           </div>
+
+          {form.status === "partial" && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field label={t("field.due_date")}>
+                <Input
+                  type="date"
+                  value={form.due_date || ""}
+                  onChange={(e) => setForm({ ...form, due_date: e.target.value })}
+                  data-testid="payments-form-partial-due-date"
+                />
+              </Field>
+            </div>
+          )}
 
           {form.status === "partial" && (
             <p className="text-xs text-muted-foreground -mt-2">{t("payments.partial_hint")}</p>

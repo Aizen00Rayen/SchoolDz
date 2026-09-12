@@ -4807,6 +4807,42 @@ class PaymentViewSet(TenantScopedViewSet):
             balances = compute_student_balances(request.user.tenant_id)
             matching_ids = [sid for sid, b in balances.items() if b['status'] == balance_status]
             queryset = queryset.filter(student_id__in=matching_ids)
+
+        # Date filtering: period=day|week|month or from/to
+        period = request.GET.get('period')
+        date_from = request.GET.get('from')
+        date_to = request.GET.get('to')
+
+        today = timezone.localdate() if hasattr(timezone, 'localdate') else timezone.now().date()
+        if period == 'day':
+            date_from = today.isoformat()
+            date_to = today.isoformat()
+        elif period == 'week':
+            start_week = today - timedelta(days=today.weekday())
+            end_week = start_week + timedelta(days=6)
+            date_from = start_week.isoformat()
+            date_to = end_week.isoformat()
+        elif period == 'month':
+            start_month = today.replace(day=1)
+            import calendar
+            _, last_day = calendar.monthrange(today.year, today.month)
+            end_month = today.replace(day=last_day)
+            date_from = start_month.isoformat()
+            date_to = end_month.isoformat()
+
+        if date_from:
+            queryset = queryset.filter(
+                Q(paid_at__date__gte=date_from) |
+                Q(paid_at__isnull=True, due_date__gte=date_from) |
+                Q(paid_at__isnull=True, due_date__isnull=True, created_at__date__gte=date_from)
+            )
+        if date_to:
+            queryset = queryset.filter(
+                Q(paid_at__date__lte=date_to) |
+                Q(paid_at__isnull=True, due_date__lte=date_to) |
+                Q(paid_at__isnull=True, due_date__isnull=True, created_at__date__lte=date_to)
+            )
+
         queryset = queryset.order_by('-created_at')[:500]
         serializer = self.get_serializer(queryset, many=True)
         return Response({'items': serializer.data, 'total': len(serializer.data)})
