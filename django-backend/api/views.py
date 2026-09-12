@@ -260,6 +260,7 @@ INVOICE_KIND_AR = {
     'per_session': 'بالحصة',
     'trip': 'رحلة مدرسية',
     'book': 'كتاب',
+    'insurance': 'تأمين',
     'other': 'آخر',
     'mixed': 'عدة عناصر',
 }
@@ -6752,23 +6753,27 @@ class StudentInsuranceViewSet(TenantScopedViewSet):
 
     def check_module_view(self):
         user = self.request.user
-        if not (user.can_view('insurances') or user.can_view('payments') or user.role in ('owner', 'director', 'accountant')):
-            raise PermissionDenied('Forbidden')
+        if user.is_super_admin() or user.role in ('owner', 'director', 'accountant') or user.can_view('insurances') or user.can_view('payments'):
+            return
+        raise PermissionDenied('Forbidden')
 
     def check_module_add(self):
         user = self.request.user
-        if not (user.can_add('insurances') or user.can_add('payments') or user.role in ('owner', 'director', 'accountant')):
-            raise PermissionDenied('Forbidden')
+        if user.is_super_admin() or user.role in ('owner', 'director', 'accountant') or user.can_add('insurances') or user.can_add('payments'):
+            return
+        raise PermissionDenied('Forbidden')
 
     def check_module_modify(self):
         user = self.request.user
-        if not (user.can_modify('insurances') or user.can_modify('payments') or user.role in ('owner', 'director', 'accountant')):
-            raise PermissionDenied('Forbidden')
+        if user.is_super_admin() or user.role in ('owner', 'director', 'accountant') or user.can_modify('insurances') or user.can_modify('payments'):
+            return
+        raise PermissionDenied('Forbidden')
 
     def check_module_delete(self):
         user = self.request.user
-        if not (user.can_delete('insurances') or user.can_delete('payments') or user.role in ('owner', 'director', 'accountant')):
-            raise PermissionDenied('Forbidden')
+        if user.is_super_admin() or user.role in ('owner', 'director', 'accountant') or user.can_delete('insurances') or user.can_delete('payments'):
+            return
+        raise PermissionDenied('Forbidden')
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset()).select_related('student', 'student__parent')
@@ -6804,12 +6809,14 @@ class StudentInsuranceViewSet(TenantScopedViewSet):
                 ])
             return export_rows(headers, rows, 'insurances', request.GET.get('type'))
 
-        total_amount = round(sum(float(ins.amount or 0) for ins in queryset), 2)
+        agg = queryset.aggregate(total_amount=Sum('amount'), total_count=Count('id'))
+        total_amount = round(float(agg['total_amount'] or 0), 2)
+        total_count = agg['total_count'] or 0
         queryset = queryset.order_by('-paid_at', '-created_at')[:1000]
         serializer = self.get_serializer(queryset, many=True)
         return Response({
             'items': serializer.data,
-            'total_count': len(serializer.data),
+            'total_count': total_count,
             'total_amount': total_amount,
         })
 
@@ -6847,10 +6854,25 @@ class StudentInsuranceViewSet(TenantScopedViewSet):
         return export_rows(headers, rows, 'insurances', request.GET.get('type'))
 
     def perform_create(self, serializer):
-        insurance = serializer.save(created_by=self.request.user)
+        user = self.request.user
+        if user.tenant_id:
+            if not user.is_super_admin() and user.tenant.status != 'active':
+                raise PermissionDenied(_inactive_tenant_message(user.tenant))
+            insurance = serializer.save(tenant_id=user.tenant_id, created_by=user)
+        else:
+            insurance = serializer.save(created_by=user)
+        self._log_model_action('create', insurance)
         if insurance.student and insurance.student.insurance_status != 'insured':
             insurance.student.insurance_status = 'insured'
             insurance.student.save(update_fields=['insurance_status'])
+
+    def perform_destroy(self, instance):
+        student = instance.student
+        self._log_model_action('delete', instance)
+        instance.delete()
+        if student and not student.insurances.exists():
+            student.insurance_status = 'uninsured'
+            student.save(update_fields=['insurance_status'])
 
 
 

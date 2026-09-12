@@ -49,7 +49,7 @@ export default function CoursesPage() {
                 <div className="font-medium flex items-center gap-1.5">
                   {r.title}
                   {(r.kind === "package" || r.kind === "standalone") && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary">{t("course.kind_package_badge")}</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-foreground border border-border font-medium">{t("course.kind_package_badge")}</span>
                   )}
                 </div>
                 <div className="text-[11px] text-muted-foreground">{r.category || "—"}</div>

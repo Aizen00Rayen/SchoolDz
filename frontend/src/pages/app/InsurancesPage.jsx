@@ -312,7 +312,7 @@ export default function InsurancesPage() {
                 {editing ? (
                   <div className="px-3 py-2 rounded-md bg-muted/40 border border-input text-sm text-foreground font-medium flex items-center gap-2">
                     <User className="w-4 h-4 text-muted-foreground" />
-                    {editing.student_name}
+                    {editing.student_name || "—"}
                   </div>
                 ) : (
                   <StudentSearchSelect
