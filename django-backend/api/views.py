@@ -517,6 +517,10 @@ class TenantScopedViewSet(viewsets.ModelViewSet):
         if isinstance(instance, TeacherPayout):
             teacher_name = f"{instance.teacher.first_name} {instance.teacher.last_name}" if instance.teacher_id else 'teacher'
             return f"{teacher_name} ({instance.amount})"
+        if isinstance(instance, StudentInsurance):
+            st = instance.student
+            student_name = f"{st.first_name} {st.last_name}" if st else 'student'
+            return f"{student_name} ({instance.amount})"
         for field in ('title', 'name'):
             if hasattr(instance, field) and getattr(instance, field):
                 return getattr(instance, field)

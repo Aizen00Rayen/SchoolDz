@@ -1,5 +1,6 @@
 import uuid
 from datetime import time
+from decimal import Decimal
 from django.db import models
 from django.core.validators import MinValueValidator, MaxValueValidator, MaxLengthValidator
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager
@@ -1217,7 +1218,7 @@ class StudentInsurance(models.Model):
     id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='insurances')
     student = models.ForeignKey(Student, on_delete=models.CASCADE, db_column='student_id', related_name='insurances')
-    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0.01)])
+    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
     paid_at = models.DateField()
     academic_year = models.CharField(max_length=50, null=True, blank=True)
     notes = models.TextField(null=True, blank=True)
