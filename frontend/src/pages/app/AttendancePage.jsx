@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, ClipboardCheck, ExternalLink, FileText, Loader2, Printer, RotateCcw, Save, Search, Upload } from "lucide-react";
+import {
+  Calendar, CheckCircle2, ClipboardCheck, Clock, ExternalLink, FileText,
+  Loader2, Printer, RotateCcw, Save, Search, Upload,
+} from "lucide-react";
 
 import { api, extractError, openPrivateFile, resolveFileUrl } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -99,6 +102,12 @@ export default function AttendancePage() {
   const [marks, setMarks] = useState({}); // student_id -> status
   const [q, setQ] = useState("");
 
+  // Filters for session selection
+  const [periodFilter, setPeriodFilter] = useState("all");
+  const [statusTimingFilter, setStatusTimingFilter] = useState("all"); // 'all' | 'done' | 'upcoming'
+  const [groupFilter, setGroupFilter] = useState("");
+  const [initialChecked, setInitialChecked] = useState(false);
+
   const { data: sessions } = useQuery({
     queryKey: ["sessions-list-attendance"],
     queryFn: async () => (await api.get("/sessions")).data,
@@ -127,6 +136,147 @@ export default function AttendancePage() {
     () => Object.fromEntries((teachers?.items || []).map((tr) => [tr.id, tr])),
     [teachers],
   );
+
+  const now = useMemo(() => new Date(), []);
+
+  const isSessionDone = useMemo(
+    () => (s) => {
+      if (s.status === "completed") return true;
+      if (s.status === "cancelled") return false;
+      const end = s.end_at ? new Date(s.end_at) : (s.start_at ? new Date(s.start_at) : null);
+      return end ? end <= now : false;
+    },
+    [now],
+  );
+
+  const isSessionUpcoming = useMemo(
+    () => (s) => {
+      if (s.status === "completed") return false;
+      const end = s.end_at ? new Date(s.end_at) : (s.start_at ? new Date(s.start_at) : null);
+      return end ? end > now : true;
+    },
+    [now],
+  );
+
+  const matchesPeriod = useMemo(
+    () => (s, period) => {
+      if (period === "all") return true;
+      if (!s.start_at) return false;
+      const d = new Date(s.start_at);
+
+      if (period === "today") {
+        return (
+          d.getFullYear() === now.getFullYear() &&
+          d.getMonth() === now.getMonth() &&
+          d.getDate() === now.getDate()
+        );
+      }
+
+      if (period === "week") {
+        const startOfWeek = new Date(now);
+        const day = now.getDay();
+        const diff = (day === 0 ? -6 : 1) - day;
+        startOfWeek.setDate(now.getDate() + diff);
+        startOfWeek.setHours(0, 0, 0, 0);
+
+        const endOfWeek = new Date(startOfWeek);
+        endOfWeek.setDate(startOfWeek.getDate() + 6);
+        endOfWeek.setHours(23, 59, 59, 999);
+
+        return d >= startOfWeek && d <= endOfWeek;
+      }
+
+      if (period === "month") {
+        return (
+          d.getFullYear() === now.getFullYear() &&
+          d.getMonth() === now.getMonth()
+        );
+      }
+
+      return true;
+    },
+    [now],
+  );
+
+  const allSessions = useMemo(() => sessions?.items || [], [sessions]);
+
+  // Default to "today" if today has sessions scheduled
+  useEffect(() => {
+    if (!initialChecked && allSessions.length > 0) {
+      const hasToday = allSessions.some((s) => matchesPeriod(s, "today"));
+      if (hasToday) {
+        setPeriodFilter("today");
+      }
+      setInitialChecked(true);
+    }
+  }, [allSessions, initialChecked, matchesPeriod]);
+
+  // Counts for period pills
+  const periodCounts = useMemo(() => {
+    let today = 0;
+    let week = 0;
+    let month = 0;
+    allSessions.forEach((s) => {
+      if (statusTimingFilter === "done" && !isSessionDone(s)) return;
+      if (statusTimingFilter === "upcoming" && !isSessionUpcoming(s)) return;
+      if (groupFilter && s.group_id !== groupFilter) return;
+
+      if (matchesPeriod(s, "today")) today++;
+      if (matchesPeriod(s, "week")) week++;
+      if (matchesPeriod(s, "month")) month++;
+    });
+    const all = allSessions.filter((s) => {
+      if (statusTimingFilter === "done" && !isSessionDone(s)) return false;
+      if (statusTimingFilter === "upcoming" && !isSessionUpcoming(s)) return false;
+      if (groupFilter && s.group_id !== groupFilter) return false;
+      return true;
+    }).length;
+    return { today, week, month, all };
+  }, [allSessions, statusTimingFilter, groupFilter, isSessionDone, isSessionUpcoming, matchesPeriod]);
+
+  // Counts for status pills
+  const statusCounts = useMemo(() => {
+    let done = 0;
+    let upcoming = 0;
+    allSessions.forEach((s) => {
+      if (!matchesPeriod(s, periodFilter)) return;
+      if (groupFilter && s.group_id !== groupFilter) return;
+
+      if (isSessionDone(s)) done++;
+      if (isSessionUpcoming(s)) upcoming++;
+    });
+    const all = allSessions.filter(
+      (s) => matchesPeriod(s, periodFilter) && (!groupFilter || s.group_id === groupFilter)
+    ).length;
+    return { done, upcoming, all };
+  }, [allSessions, periodFilter, groupFilter, isSessionDone, isSessionUpcoming, matchesPeriod]);
+
+  const filteredSessions = useMemo(() => {
+    return allSessions
+      .filter((s) => {
+        if (!matchesPeriod(s, periodFilter)) return false;
+        if (statusTimingFilter === "done" && !isSessionDone(s)) return false;
+        if (statusTimingFilter === "upcoming" && !isSessionUpcoming(s)) return false;
+        if (groupFilter && s.group_id !== groupFilter) return false;
+        return true;
+      })
+      .sort((a, b) => new Date(b.start_at || 0) - new Date(a.start_at || 0));
+  }, [allSessions, periodFilter, statusTimingFilter, groupFilter, isSessionDone, isSessionUpcoming, matchesPeriod]);
+
+  // Keep currently selected session available even if active filters exclude it
+  const displaySessions = useMemo(() => {
+    if (sessionId && !filteredSessions.some((s) => s.id === sessionId)) {
+      const current = allSessions.find((s) => s.id === sessionId);
+      if (current) return [current, ...filteredSessions];
+    }
+    return filteredSessions;
+  }, [filteredSessions, sessionId, allSessions]);
+
+  const resetFilters = () => {
+    setPeriodFilter("all");
+    setStatusTimingFilter("all");
+    setGroupFilter("");
+  };
 
   const selectedSession = useMemo(
     () => (sessions?.items || []).find((s) => s.id === sessionId),
@@ -243,27 +393,177 @@ export default function AttendancePage() {
         }
       />
 
-      <div className="surface-card p-5 mb-6">
-        <Label className="text-xs mb-2 block">{t("attendance.select_session")}</Label>
-        <Select value={sessionId} onValueChange={setSessionId}>
-          <SelectTrigger className="bg-background max-w-xl" data-testid="attendance-session-select">
-            <SelectValue placeholder={t("attendance.pick_session_placeholder")} />
-          </SelectTrigger>
-          <SelectContent className="bg-popover max-h-96">
-            {(sessions?.items || []).map((s) => {
-              const g = (groups?.items || []).find((gg) => gg.id === s.group_id);
-              const teacher = teacherMap[s.teacher_id || g?.teacher_id];
-              const groupLabel = g ? groupOptionLabel(g, courseMap, t) : t("field.group");
-              return (
-                <SelectItem key={s.id} value={s.id}>
-                  {new Date(s.start_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })} — {groupLabel}
-                  {teacher ? ` · ${teacher.first_name} ${teacher.last_name}` : ""}
-                  {s.topic ? ` · ${s.topic}` : ""}
-                </SelectItem>
-              );
-            })}
-          </SelectContent>
-        </Select>
+      <div className="surface-card p-5 mb-6 space-y-4 shadow-sm border border-border/70">
+        {/* Filters Row: Time Period + Timing/Status */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 pb-3.5">
+          {/* Period filter buttons */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-accent" />
+              {t("attendance.filter_period")} :
+            </span>
+            <div className="inline-flex rounded-lg border border-border p-0.5 bg-muted/40 shrink-0">
+              {[
+                { key: "today", label: t("attendance.period_today"), count: periodCounts.today },
+                { key: "week", label: t("attendance.period_week"), count: periodCounts.week },
+                { key: "month", label: t("attendance.period_month"), count: periodCounts.month },
+                { key: "all", label: t("attendance.period_all"), count: periodCounts.all },
+              ].map((p) => (
+                <button
+                  key={p.key}
+                  type="button"
+                  onClick={() => setPeriodFilter(p.key)}
+                  data-testid={`attendance-filter-period-${p.key}`}
+                  className={`px-2.5 py-1 text-xs font-medium rounded-md transition-all ${
+                    periodFilter === p.key
+                      ? "bg-background text-foreground shadow-sm font-semibold border border-border/60"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {p.label}
+                  {p.count > 0 && (
+                    <span className="ms-1 px-1.5 py-0.2 rounded-full text-[10px] bg-muted font-normal text-muted-foreground">
+                      {p.count}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Status/Timing filter buttons */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-semibold text-muted-foreground flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-accent" />
+              {t("attendance.filter_status")} :
+            </span>
+            <div className="inline-flex rounded-lg border border-border p-0.5 bg-muted/40 shrink-0">
+              {[
+                { key: "all", label: t("attendance.status_all"), count: statusCounts.all },
+                { key: "done", label: t("attendance.status_done"), count: statusCounts.done },
+                { key: "upcoming", label: t("attendance.status_upcoming"), count: statusCounts.upcoming },
+              ].map((s) => (
+                <button
+                  key={s.key}
+                  type="button"
+                  onClick={() => setStatusTimingFilter(s.key)}
+                  data-testid={`attendance-filter-status-${s.key}`}
+                  className={`px-2.5 py-1 text-xs font-medium rounded-md transition-all ${
+                    statusTimingFilter === s.key
+                      ? "bg-background text-foreground shadow-sm font-semibold border border-border/60"
+                      : "text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {s.label}
+                  {s.count > 0 && (
+                    <span className="ms-1 px-1.5 py-0.2 rounded-full text-[10px] bg-muted font-normal text-muted-foreground">
+                      {s.count}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Group Filter and Session Picker */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end pt-0.5">
+          <div>
+            <Label className="text-xs font-medium mb-1.5 block text-muted-foreground">
+              {t("field.group")}
+            </Label>
+            <Select
+              value={groupFilter || "__all"}
+              onValueChange={(v) => setGroupFilter(v === "__all" ? "" : v)}
+            >
+              <SelectTrigger className="bg-background h-9 text-xs">
+                <SelectValue placeholder={t("reports.all_groups")} />
+              </SelectTrigger>
+              <SelectContent className="bg-popover max-h-80">
+                <SelectItem value="__all">{t("reports.all_groups")}</SelectItem>
+                {(groups?.items || []).map((g) => (
+                  <SelectItem key={g.id} value={g.id}>
+                    {groupOptionLabel(g, courseMap, t)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="md:col-span-2">
+            <div className="flex items-center justify-between mb-1.5">
+              <Label className="text-xs font-medium text-muted-foreground">
+                {t("attendance.select_session")} ({filteredSessions.length})
+              </Label>
+              {(periodFilter !== "all" || statusTimingFilter !== "all" || groupFilter) && (
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  className="text-[11px] text-muted-foreground hover:text-accent flex items-center gap-1 transition-colors"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  {t("attendance.reset_filters")}
+                </button>
+              )}
+            </div>
+            <Select value={sessionId} onValueChange={setSessionId}>
+              <SelectTrigger className="bg-background h-9" data-testid="attendance-session-select">
+                <SelectValue
+                  placeholder={
+                    filteredSessions.length === 0
+                      ? t("attendance.no_filtered_sessions")
+                      : t("attendance.pick_session_placeholder")
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent className="bg-popover max-h-96">
+                {displaySessions.length === 0 ? (
+                  <div className="p-3 text-xs text-muted-foreground text-center">
+                    <p>{t("attendance.no_filtered_sessions")}</p>
+                    <button
+                      type="button"
+                      onClick={resetFilters}
+                      className="mt-2 text-xs text-accent underline hover:no-underline"
+                    >
+                      {t("attendance.reset_filters")}
+                    </button>
+                  </div>
+                ) : (
+                  displaySessions.map((s) => {
+                    const g = (groups?.items || []).find((gg) => gg.id === s.group_id);
+                    const teacher = teacherMap[s.teacher_id || g?.teacher_id];
+                    const groupLabel = g ? groupOptionLabel(g, courseMap, t) : t("field.group");
+                    const done = isSessionDone(s);
+                    const isOutsideFilter = !filteredSessions.some((x) => x.id === s.id);
+                    return (
+                      <SelectItem key={s.id} value={s.id}>
+                        <span className="font-medium">
+                          {new Date(s.start_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}
+                        </span>
+                        {" — "}
+                        {groupLabel}
+                        {teacher ? ` · ${teacher.first_name} ${teacher.last_name}` : ""}
+                        {s.topic ? ` · ${s.topic}` : ""}
+                        <span
+                          className={`ms-2 px-1.5 py-0.5 rounded text-[10px] font-normal ${
+                            done ? "bg-muted text-muted-foreground" : "bg-accent/15 text-accent"
+                          }`}
+                        >
+                          {done ? t("attendance.status_done") : t("attendance.status_upcoming")}
+                        </span>
+                        {isOutsideFilter && (
+                          <span className="ms-1.5 text-[10px] text-muted-foreground italic">
+                            (sélectionnée)
+                          </span>
+                        )}
+                      </SelectItem>
+                    );
+                  })
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
       </div>
 
       {!sessionId ? (
