@@ -434,7 +434,8 @@ export default function PaymentsPage() {
           render: (r) => {
             const s = stuMap[r.student_id];
             const b = balanceMap[r.student_id];
-            if (!s) return "—";
+            const studentName = s ? `${s.first_name} ${s.last_name}` : (r.student_name || "—");
+            if (!s && !r.student_name) return "—";
             // The color reflects the student's overall running balance —
             // total paid vs the real cost of every session actually attended
             // — not the status of this one invoice. A student can have every
@@ -458,7 +459,7 @@ export default function PaymentsPage() {
                 onClick={() => setDetailStudentId(r.student_id)}
                 data-testid={`payments-student-detail-${r.student_id}`}
               >
-                {s.first_name} {s.last_name}
+                {studentName}
               </button>
             );
           },

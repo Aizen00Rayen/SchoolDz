@@ -255,6 +255,8 @@ class PaymentSerializer(serializers.ModelSerializer):
     student_id = TenantScopedPKField(
         Student, source='student', required=False, allow_null=True
     )
+    student_name = serializers.SerializerMethodField()
+    student_code = serializers.CharField(source='student.student_code', read_only=True, default=None)
     # Always server-computed as sum(items.amount) — see
     # PaymentViewSet.create — never trusted from the client, so a payload
     # can't claim a bill total that doesn't match what its items actually
@@ -265,6 +267,16 @@ class PaymentSerializer(serializers.ModelSerializer):
     # since the write path for these goes through the view, not a nested
     # writable serializer.
     items = PaymentItemSerializer(many=True, read_only=True)
+
+    def get_student_name(self, obj):
+        if obj.student:
+            fn = obj.student.first_name or ''
+            ln = obj.student.last_name or ''
+            name = f"{fn} {ln}".strip()
+            if not name and obj.student.first_name_latin:
+                name = f"{obj.student.first_name_latin or ''} {obj.student.last_name_latin or ''}".strip()
+            return name or str(obj.student.student_code or obj.student_id)
+        return None
 
     class Meta:
         model = Payment

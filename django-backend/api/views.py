@@ -4782,8 +4782,9 @@ class PaymentViewSet(TenantScopedViewSet):
     def get_queryset(self):
         # PaymentSerializer.items iterates payment.items.all() per row —
         # without this, a 500-row payments list fires a query per row just
-        # to list each bill's line items.
-        return super().get_queryset().prefetch_related(
+        # to list each bill's line items. select_related('student') ensures
+        # student details are loaded in a single join.
+        return super().get_queryset().select_related('student').prefetch_related(
             Prefetch('items', queryset=PaymentItem.objects.select_related('course', 'trip', 'book', 'book_copy', 'group'))
         )
 
@@ -4797,11 +4798,31 @@ class PaymentViewSet(TenantScopedViewSet):
             queryset = queryset.filter(status=status_val)
         q = request.GET.get('q')
         if q:
-            queryset = queryset.filter(
-                Q(invoice_number__icontains=q) | Q(reference__icontains=q) | Q(notes__icontains=q)
-                | Q(student__first_name__icontains=q) | Q(student__last_name__icontains=q)
-                | Q(student__first_name_latin__icontains=q) | Q(student__last_name_latin__icontains=q)
+            q = q.strip()
+            # Invoice reference / number / notes / phone / code search
+            bill_q = (
+                Q(invoice_number__icontains=q)
+                | Q(reference__icontains=q)
+                | Q(notes__icontains=q)
+                | Q(student__student_code__icontains=q)
+                | Q(student__phone__icontains=q)
+                | Q(student__parent__phone__icontains=q)
             )
+            # Full student name search across first/last names (both Arabic and Latin)
+            student_name_q = name_search_q(
+                q,
+                'student__first_name',
+                'student__last_name',
+                'student__first_name_latin',
+                'student__last_name_latin',
+            )
+            # Course / trip / book title search
+            item_q = (
+                Q(items__course__title__icontains=q)
+                | Q(items__trip__title__icontains=q)
+                | Q(items__book__title__icontains=q)
+            )
+            queryset = queryset.filter(bill_q | student_name_q | item_q).distinct()
         balance_status = request.GET.get('balance_status')
         if balance_status in ('owes', 'overpaid', 'settled'):
             balances = compute_student_balances(request.user.tenant_id)
