@@ -1219,7 +1219,7 @@ def payment_invoice_pdf(request, payment_id):
         pass
     elif user.role == 'parent':
         guardian = Guardian.objects.filter(user_id=user.id, tenant_id=user.tenant_id).first()
-        if not guardian or payment.tenant_id != user.tenant_id or payment.student.parent_id != guardian.id:
+        if not guardian or payment.tenant_id != user.tenant_id or (payment.student and payment.student.parent_id != guardian.id):
             raise NotFound('Payment not found')
     else:
         if not user.tenant_id or payment.tenant_id != user.tenant_id:
@@ -1229,7 +1229,7 @@ def payment_invoice_pdf(request, payment_id):
     student = payment.student
 
     logo_data_uri = None
-    if tenant.logo_url:
+    if tenant and tenant.logo_url:
         try:
             filename = tenant.logo_url.rsplit('/', 1)[-1]
             logo_path = os.path.join(settings.MEDIA_ROOT, 'logos', filename)
@@ -1251,19 +1251,19 @@ def payment_invoice_pdf(request, payment_id):
 
     # Invoices are handed to Algerian parents, so the status reads in Arabic.
     if payment.status == 'paid':
-        status_label = INVOICE_STATUS_AR['paid']
-        status_line = f"{INVOICE_STATUS_AR['paid']} — {payment.paid_at.strftime('%d/%m/%Y')}" if payment.paid_at else INVOICE_STATUS_AR['paid']
+        status_label = INVOICE_STATUS_AR.get('paid', 'مدفوع')
+        status_line = f"{status_label} — {payment.paid_at.strftime('%d/%m/%Y')}" if payment.paid_at else status_label
     elif payment.status == 'partial':
-        status_label = INVOICE_STATUS_AR['partial']
-        status_line = f"{INVOICE_STATUS_AR['partial']} — {payment.paid_at.strftime('%d/%m/%Y')}" if payment.paid_at else INVOICE_STATUS_AR['partial']
+        status_label = INVOICE_STATUS_AR.get('partial', 'جزئي')
+        status_line = f"{status_label} — {payment.paid_at.strftime('%d/%m/%Y')}" if payment.paid_at else status_label
     elif is_overdue:
-        status_label = INVOICE_STATUS_AR['overdue']
-        status_line = f"{INVOICE_STATUS_AR['overdue']} — {payment.due_date.strftime('%d/%m/%Y')}"
+        status_label = INVOICE_STATUS_AR.get('overdue', 'متأخر')
+        status_line = f"{status_label} — {payment.due_date.strftime('%d/%m/%Y')}" if payment.due_date else status_label
     elif payment.status == 'pending':
-        status_label = INVOICE_STATUS_AR['pending']
-        status_line = f"{INVOICE_STATUS_AR['due_on']} {payment.due_date.strftime('%d/%m/%Y')}" if payment.due_date else INVOICE_STATUS_AR['pending']
+        status_label = INVOICE_STATUS_AR.get('pending', 'معلق')
+        status_line = f"{INVOICE_STATUS_AR.get('due_on', 'مستحق في')} {payment.due_date.strftime('%d/%m/%Y')}" if payment.due_date else status_label
     else:
-        status_label = INVOICE_STATUS_AR.get(payment.status, payment.get_status_display())
+        status_label = INVOICE_STATUS_AR.get(payment.status, payment.get_status_display() if hasattr(payment, 'get_status_display') else str(payment.status))
         status_line = status_label
 
     lines = []
@@ -1272,13 +1272,13 @@ def payment_invoice_pdf(request, payment_id):
     for item in payment.items.all():
         item_discount = _payment_item_discount(item)
         item_net = max(0.0, float(item.amount or 0) - item_discount)
-        item_st = item.status or ('paid' if payment.status in ('paid', 'partial') else payment.status)
+        item_st = getattr(item, 'status', None) or ('paid' if payment.status in ('paid', 'partial') else payment.status)
         if item_st == 'paid':
             paid_sum += item_net
         else:
             pending_sum += item_net
 
-        kind_label_ar = INVOICE_KIND_AR.get(item.kind, item.get_kind_display())
+        kind_label_ar = INVOICE_KIND_AR.get(item.kind, item.get_kind_display() if hasattr(item, 'get_kind_display') else str(item.kind))
         sub_parts = []
         if item.group:
             sub_parts.append(item.group.name)
@@ -1292,43 +1292,44 @@ def payment_invoice_pdf(request, payment_id):
         if item.course or item.trip or item.book:
             sub_parts.append(kind_label_ar)
         if item_st == 'pending' and item.due_date:
-            sub_parts.append(f"{INVOICE_STATUS_AR.get('due_on', 'مستحق في')} {item.due_date.strftime('%d/%m/%Y')}")
+            due_str = item.due_date.strftime('%d/%m/%Y') if hasattr(item.due_date, 'strftime') else str(item.due_date)
+            sub_parts.append(f"{INVOICE_STATUS_AR.get('due_on', 'مستحق في')} {due_str}")
 
         lines.append({
             'title': item.trip.title if item.trip else (item.course.title if item.course else (item.book.title if item.book else kind_label_ar)),
             'sub': ' · '.join(sub_parts),
-            'amount': f"{item.amount:,.2f}",
+            'amount': f"{float(item.amount or 0):,.2f}",
             'status': item_st,
             'status_label': INVOICE_STATUS_AR.get(item_st, item_st),
         })
 
-    subtotal = payment.amount
-    discount = payment.discount or 0
-    total = subtotal - discount
-    currency_code = tenant.currency or 'DZD'
+    subtotal = float(payment.amount or 0)
+    discount = float(payment.discount or 0)
+    total = max(0.0, subtotal - discount)
+    currency_code = (tenant.currency if tenant else None) or 'DZD'
     is_partial = payment.status == 'partial' or (paid_sum > 0 and pending_sum > 0)
 
     # Handed to Algerian parents, so the whole document — not just the
     # status — reads in Arabic: numeric dates (no English month names),
     # Arabic kind/method/currency wording, RTL template.
     context = {
-        'primary_color': tenant.primary_color or '#0A0A0B',
-        'accent_color': tenant.accent_color or '#E53935',
+        'primary_color': (tenant.primary_color if tenant else None) or '#0A0A0B',
+        'accent_color': (tenant.accent_color if tenant else None) or '#E53935',
         'overdue_color': '#B23A2E',
         'stamp_color': stamp_color,
         'status_label': status_label,
         'status_line': status_line,
-        'tenant_name': tenant.name,
-        'tenant_initial': (tenant.name or 'S')[0].upper(),
+        'tenant_name': tenant.name if tenant else 'Scolaris',
+        'tenant_initial': (tenant.name or 'S')[0].upper() if tenant else 'S',
         'tenant_currency': None,
         'logo_data_uri': logo_data_uri,
         'invoice_number': payment.invoice_number or payment.id,
-        'issued_date': payment.created_at.strftime('%d/%m/%Y'),
-        'student_name': f"{student.first_name} {student.last_name}",
-        'guardian_name': student.parent.name if student.parent else None,
-        'method_label': INVOICE_METHOD_AR.get(payment.method, payment.get_method_display()),
-        'due_date': payment.due_date.strftime('%d/%m/%Y') if payment.due_date and payment.status != 'paid' else None,
-        'student_code': student.student_code,
+        'issued_date': payment.created_at.strftime('%d/%m/%Y') if payment.created_at else '',
+        'student_name': f"{student.first_name} {student.last_name}" if student else "—",
+        'guardian_name': (student.parent.name if student.parent else None) if student else None,
+        'method_label': INVOICE_METHOD_AR.get(payment.method, payment.get_method_display() if hasattr(payment, 'get_method_display') else str(payment.method)),
+        'due_date': payment.due_date.strftime('%d/%m/%Y') if (payment.due_date and payment.status != 'paid') else None,
+        'student_code': student.student_code if student else None,
         'lines': lines,
         'subtotal': f"{subtotal:,.2f}",
         'discount': f"{discount:,.2f}",
@@ -4781,14 +4782,19 @@ def _payment_item_discount(item_payload):
     is the sum of this across every item on the bill, computed server-side so
     the client never has to (and can't misreport it) — see PaymentViewSet.create."""
     try:
-        amount = float(item_payload.get('amount') or 0)
-        teacher_pct = item_payload.get('teacher_percentage')
-        school_pct = item_payload.get('school_percentage')
+        if isinstance(item_payload, dict):
+            amount = float(item_payload.get('amount') or 0)
+            teacher_pct = item_payload.get('teacher_percentage')
+            school_pct = item_payload.get('school_percentage')
+        else:
+            amount = float(getattr(item_payload, 'amount', 0) or 0)
+            teacher_pct = getattr(item_payload, 'teacher_percentage', None)
+            school_pct = getattr(item_payload, 'school_percentage', None)
         if teacher_pct is None or school_pct is None:
             return 0.0
         teacher_pct = float(teacher_pct)
         school_pct = float(school_pct)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, AttributeError):
         return 0.0
     return max(0.0, amount * (1 - (teacher_pct + school_pct) / 100))
 
