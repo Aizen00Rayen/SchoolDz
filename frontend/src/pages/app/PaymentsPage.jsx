@@ -75,7 +75,7 @@ function itemDiscount(item) {
   if (item.item_type !== "course") return 0;
   const teacherPct = item.teacher_percentage;
   const schoolPct = item.school_percentage;
-  if (teacherPct == null || schoolPct == null) return 0;
+  if (teacherPct == null || teacherPct === "" || schoolPct == null || schoolPct === "") return 0;
   return Math.max(0, itemAmount(item) * (1 - (parseFloat(teacherPct) + parseFloat(schoolPct)) / 100));
 }
 
@@ -192,7 +192,7 @@ export default function PaymentsPage() {
     const teacher = group ? teacherMap[group.teacher_id] : null;
     if (!teacher) return { teacher_percentage: null, school_percentage: null };
     const pct = parseFloat(teacher.payment_percentage) || 0;
-    return { teacher_percentage: pct, school_percentage: Math.max(0, 100 - pct) };
+    return { teacher_percentage: pct, school_percentage: Math.round(Math.max(0, 100 - pct) * 100) / 100 };
   };
 
   const pctFromCourse = (courseId) => {
@@ -204,7 +204,7 @@ export default function PaymentsPage() {
         const teacher = teacherMap[[...teacherIds][0]];
         if (teacher) {
           const pct = parseFloat(teacher.payment_percentage) || 0;
-          return { teacher_percentage: pct, school_percentage: Math.max(0, 100 - pct) };
+          return { teacher_percentage: pct, school_percentage: Math.round(Math.max(0, 100 - pct) * 100) / 100 };
         }
       }
     }
@@ -275,8 +275,12 @@ export default function PaymentsPage() {
           if (it.item_type === "course" && it.course_id) {
             out.course_id = it.course_id;
             if (it.group_id) out.group_id = it.group_id;
-            if (it.teacher_percentage != null) out.teacher_percentage = it.teacher_percentage;
-            if (it.school_percentage != null) out.school_percentage = it.school_percentage;
+            if (it.teacher_percentage != null && it.teacher_percentage !== "") {
+              out.teacher_percentage = parseFloat(it.teacher_percentage);
+            }
+            if (it.school_percentage != null && it.school_percentage !== "") {
+              out.school_percentage = parseFloat(it.school_percentage);
+            }
           }
           if (it.item_type === "trip" && it.trip_id) out.trip_id = it.trip_id;
           if (it.item_type === "book" && it.book_id) out.book_id = it.book_id;
@@ -774,20 +778,20 @@ export default function PaymentsPage() {
                           )}
                           <Field label={t("payments.teacher_percentage")}>
                             <Input
-                              type="number" min="0" max="100" placeholder="—"
+                              type="number" min="0" max="100" step="any" placeholder="—"
                               value={item.teacher_percentage ?? ""}
                               onChange={(e) => updateItem(idx, {
-                                teacher_percentage: e.target.value === "" ? null : parseFloat(e.target.value) || 0,
+                                teacher_percentage: e.target.value === "" ? null : e.target.value,
                               })}
                               data-testid={`payments-item-${idx}-teacher-percentage`}
                             />
                           </Field>
                           <Field label={t("payments.school_percentage")}>
                             <Input
-                              type="number" min="0" max="100" placeholder="—"
+                              type="number" min="0" max="100" step="any" placeholder="—"
                               value={item.school_percentage ?? ""}
                               onChange={(e) => updateItem(idx, {
-                                school_percentage: e.target.value === "" ? null : parseFloat(e.target.value) || 0,
+                                school_percentage: e.target.value === "" ? null : e.target.value,
                               })}
                               data-testid={`payments-item-${idx}-school-percentage`}
                             />

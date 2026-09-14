@@ -263,7 +263,7 @@ export default function TeacherPaymentsPage() {
                       ) : (
                         <div className="flex items-center gap-1">
                           <Input
-                            type="number" min="0" max="100" step="1"
+                            type="number" min="0" max="100" step="any"
                             className="h-8 w-20 font-mono text-xs"
                             value={pctDrafts[r.teacher_id] ?? r.percentage}
                             onChange={(e) => setPctDrafts((prev) => ({ ...prev, [r.teacher_id]: e.target.value }))}
@@ -284,7 +284,7 @@ export default function TeacherPaymentsPage() {
                       ) : (
                         <div className="flex items-center gap-1">
                           <Input
-                            type="number" min="0" max="100" step="1"
+                            type="number" min="0" max="100" step="any"
                             className="h-8 w-20 font-mono text-xs"
                             value={bookPctDrafts[r.teacher_id] ?? r.book_percentage}
                             onChange={(e) => setBookPctDrafts((prev) => ({ ...prev, [r.teacher_id]: e.target.value }))}
