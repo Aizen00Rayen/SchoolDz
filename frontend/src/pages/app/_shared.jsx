@@ -270,7 +270,14 @@ export function StudentSearchSelect({ value, onChange, placeholder }) {
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={onKeyDown}
         onFocus={() => setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onBlur={() => {
+          setTimeout(() => {
+            setOpen(false);
+            if (!value && results?.items?.length === 1) {
+              select(results.items[0]);
+            }
+          }, 200);
+        }}
         placeholder={placeholder || t("picker.search_students")}
         data-testid="student-search-select"
       />

@@ -4966,8 +4966,8 @@ class PaymentViewSet(TenantScopedViewSet):
             for fk in ('course_id', 'group_id', 'trip_id', 'book_id'):
                 if fk in bill_data and not bill_data[fk]:
                     bill_data[fk] = None
-            if 'student_id' in bill_data and not bill_data['student_id']:
-                bill_data['student_id'] = None
+            if not bill_data.get('student_id'):
+                raise ValidationError({'student_id': 'يرجى اختيار تلميذ أولاً.'})
 
             serializer = self.get_serializer(data=bill_data)
             serializer.is_valid(raise_exception=True)

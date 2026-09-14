@@ -303,6 +303,11 @@ class PaymentSerializer(serializers.ModelSerializer):
         # excluded here so new code can't accidentally read/write them.
         exclude = ['tenant', 'student', 'course', 'group', 'trip', 'book', 'book_copy', 'kind']
 
+    def validate(self, attrs):
+        if not self.instance and not attrs.get('student'):
+            raise serializers.ValidationError({'student_id': 'يرجى اختيار تلميذ أولاً.'})
+        return attrs
+
 
 class TripSerializer(serializers.ModelSerializer):
     tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)

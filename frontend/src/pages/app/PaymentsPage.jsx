@@ -288,6 +288,17 @@ export default function PaymentsPage() {
         });
         return { ...rest, items };
       }}
+      onBeforeSubmit={(form) => {
+        if (!form.student_id) {
+          toast.error("يرجى اختيار التلميذ أولاً");
+          return false;
+        }
+        if (!form.items || form.items.length === 0) {
+          toast.error("يرجى إضافة عنصر واحد على الأقل للدفع");
+          return false;
+        }
+        return true;
+      }}
       extraParams={extraParams}
       filterBar={(
         <div className="flex flex-wrap items-center gap-2">
