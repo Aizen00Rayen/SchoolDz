@@ -227,6 +227,8 @@ class PaymentItemSerializer(serializers.ModelSerializer):
     trip_title = serializers.CharField(source='trip.title', read_only=True, default=None)
     book_title = serializers.CharField(source='book.title', read_only=True, default=None)
     group_name = serializers.CharField(source='group.name', read_only=True, default=None)
+    status = serializers.ChoiceField(choices=['paid', 'pending'], default='paid', required=False)
+    due_date = serializers.DateField(allow_null=True, required=False)
 
     class Meta:
         model = PaymentItem
@@ -257,6 +259,8 @@ class PaymentSerializer(serializers.ModelSerializer):
     )
     student_name = serializers.SerializerMethodField()
     student_code = serializers.CharField(source='student.student_code', read_only=True, default=None)
+    paid_amount = serializers.SerializerMethodField()
+    pending_amount = serializers.SerializerMethodField()
     # Always server-computed as sum(items.amount) — see
     # PaymentViewSet.create — never trusted from the client, so a payload
     # can't claim a bill total that doesn't match what its items actually
@@ -277,6 +281,20 @@ class PaymentSerializer(serializers.ModelSerializer):
                 name = f"{obj.student.first_name_latin or ''} {obj.student.last_name_latin or ''}".strip()
             return name or str(obj.student.student_code or obj.student_id)
         return None
+
+    def get_paid_amount(self, obj):
+        paid_items = [
+            it for it in obj.items.all()
+            if (getattr(it, 'status', None) == 'paid' or (not getattr(it, 'status', None) and obj.status in ('paid', 'partial')))
+        ]
+        return round(sum(float(it.amount or 0) for it in paid_items), 2)
+
+    def get_pending_amount(self, obj):
+        pending_items = [
+            it for it in obj.items.all()
+            if (getattr(it, 'status', None) == 'pending' or (not getattr(it, 'status', None) and obj.status == 'pending'))
+        ]
+        return round(sum(float(it.amount or 0) for it in pending_items), 2)
 
     class Meta:
         model = Payment

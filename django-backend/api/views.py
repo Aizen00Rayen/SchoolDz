@@ -1267,7 +1267,17 @@ def payment_invoice_pdf(request, payment_id):
         status_line = status_label
 
     lines = []
+    paid_sum = 0.0
+    pending_sum = 0.0
     for item in payment.items.all():
+        item_discount = _payment_item_discount(item)
+        item_net = max(0.0, float(item.amount or 0) - item_discount)
+        item_st = item.status or ('paid' if payment.status in ('paid', 'partial') else payment.status)
+        if item_st == 'paid':
+            paid_sum += item_net
+        else:
+            pending_sum += item_net
+
         kind_label_ar = INVOICE_KIND_AR.get(item.kind, item.get_kind_display())
         sub_parts = []
         if item.group:
@@ -1281,16 +1291,22 @@ def payment_invoice_pdf(request, payment_id):
         # the title itself then).
         if item.course or item.trip or item.book:
             sub_parts.append(kind_label_ar)
+        if item_st == 'pending' and item.due_date:
+            sub_parts.append(f"{INVOICE_STATUS_AR.get('due_on', 'مستحق في')} {item.due_date.strftime('%d/%m/%Y')}")
+
         lines.append({
             'title': item.trip.title if item.trip else (item.course.title if item.course else (item.book.title if item.book else kind_label_ar)),
             'sub': ' · '.join(sub_parts),
             'amount': f"{item.amount:,.2f}",
+            'status': item_st,
+            'status_label': INVOICE_STATUS_AR.get(item_st, item_st),
         })
 
     subtotal = payment.amount
     discount = payment.discount or 0
     total = subtotal - discount
     currency_code = tenant.currency or 'DZD'
+    is_partial = payment.status == 'partial' or (paid_sum > 0 and pending_sum > 0)
 
     # Handed to Algerian parents, so the whole document — not just the
     # status — reads in Arabic: numeric dates (no English month names),
@@ -1317,6 +1333,9 @@ def payment_invoice_pdf(request, payment_id):
         'subtotal': f"{subtotal:,.2f}",
         'discount': f"{discount:,.2f}",
         'total': f"{total:,.2f}",
+        'is_partial': is_partial,
+        'paid_amount': f"{paid_sum:,.2f}",
+        'pending_amount': f"{pending_sum:,.2f}",
         'currency': INVOICE_CURRENCY_AR.get(currency_code, currency_code),
     }
 
@@ -4887,76 +4906,59 @@ class PaymentViewSet(TenantScopedViewSet):
 
         bill_data = {k: v for k, v in request.data.items() if k != 'items'}
 
-        # Group items by status if individual items have 'status' set ('paid' vs 'pending' etc.)
-        items_by_status = {}
+        # Determine statuses across items
+        has_paid = False
+        has_pending = False
         for item in items_payload:
             item_st = item.get('status') or bill_data.get('status', 'paid')
             if item_st not in ('paid', 'pending', 'partial', 'refunded', 'cancelled'):
                 item_st = 'paid'
-            items_by_status.setdefault(item_st, []).append(item)
+            item['status'] = item_st
+            if item_st == 'paid':
+                has_paid = True
+            elif item_st == 'pending':
+                has_pending = True
 
-        if len(items_by_status) <= 1:
-            status_val = list(items_by_status.keys())[0] if items_by_status else bill_data.get('status', 'paid')
-            bill_data['status'] = status_val
-            try:
-                bill_data['amount'] = sum(float(item.get('amount') or 0) for item in items_payload)
-            except (TypeError, AttributeError, ValueError):
-                raise ValidationError({'items': 'Each item needs a numeric amount.'})
-            bill_data['discount'] = round(sum(_payment_item_discount(item) for item in items_payload), 2)
+        if has_paid and has_pending:
+            status_val = 'partial'
+        elif has_pending:
+            status_val = 'pending'
+        elif has_paid:
+            status_val = 'paid'
+        else:
+            status_val = bill_data.get('status', 'paid')
+            if status_val not in ('paid', 'pending', 'partial', 'refunded', 'cancelled'):
+                status_val = 'paid'
 
-            if status_val in ('paid', 'partial') and not bill_data.get('paid_at'):
+        bill_data['status'] = status_val
+        try:
+            bill_data['amount'] = sum(float(item.get('amount') or 0) for item in items_payload)
+        except (TypeError, AttributeError, ValueError):
+            raise ValidationError({'items': 'Each item needs a numeric amount.'})
+        bill_data['discount'] = round(sum(_payment_item_discount(item) for item in items_payload), 2)
+
+        if has_paid or status_val in ('paid', 'partial'):
+            if not bill_data.get('paid_at'):
                 bill_data['paid_at'] = timezone.now().isoformat()
 
-            serializer = self.get_serializer(data=bill_data)
-            serializer.is_valid(raise_exception=True)
+        if has_pending and not bill_data.get('due_date'):
+            item_due = next((it.get('due_date') for it in items_payload if it.get('status') == 'pending' and it.get('due_date')), None)
+            if item_due:
+                bill_data['due_date'] = item_due
 
-            with transaction.atomic():
-                if user.tenant_id and not user.is_super_admin() and user.tenant.status != 'active':
-                    raise PermissionDenied(_inactive_tenant_message(user.tenant))
-                Tenant.objects.select_for_update().get(id=tenant.id)
-                invoice_number = _next_sequence_code(tenant.id, Payment, 'invoice_number', tenant.invoice_prefix or 'INV-', 6)
-                payment = serializer.save(tenant_id=user.tenant_id, amount=bill_data['amount'], invoice_number=invoice_number) if user.tenant_id else serializer.save(amount=bill_data['amount'], invoice_number=invoice_number)
-                self._log_model_action('create', payment)
-                self._create_items(payment, items_payload, user)
+        serializer = self.get_serializer(data=bill_data)
+        serializer.is_valid(raise_exception=True)
 
-            return Response(self.get_serializer(payment).data, status=status.HTTP_200_OK)
-
-        # Multi-status split: create separate invoices (e.g. one for paid items, one for pending debt)
-        created_payments = []
         with transaction.atomic():
             if user.tenant_id and not user.is_super_admin() and user.tenant.status != 'active':
                 raise PermissionDenied(_inactive_tenant_message(user.tenant))
             Tenant.objects.select_for_update().get(id=tenant.id)
+            invoice_number = _next_sequence_code(tenant.id, Payment, 'invoice_number', tenant.invoice_prefix or 'INV-', 6)
+            payment = serializer.save(tenant_id=user.tenant_id, amount=bill_data['amount'], invoice_number=invoice_number) if user.tenant_id else serializer.save(amount=bill_data['amount'], invoice_number=invoice_number)
+            self._log_model_action('create', payment)
+            self._create_items(payment, items_payload, user)
 
-            for group_st, group_items in items_by_status.items():
-                group_data = {k: v for k, v in bill_data.items() if k not in ('amount', 'discount', 'status', 'paid_at', 'due_date')}
-                group_data['status'] = group_st
-                try:
-                    group_data['amount'] = sum(float(item.get('amount') or 0) for item in group_items)
-                except (TypeError, AttributeError, ValueError):
-                    raise ValidationError({'items': 'Each item needs a numeric amount.'})
-                group_data['discount'] = round(sum(_payment_item_discount(item) for item in group_items), 2)
-
-                if group_st in ('paid', 'partial'):
-                    group_data['paid_at'] = bill_data.get('paid_at') or timezone.now().isoformat()
-                    group_data['due_date'] = None
-                else:
-                    group_data['paid_at'] = None
-                    item_due = next((it.get('due_date') for it in group_items if it.get('due_date')), None)
-                    group_data['due_date'] = item_due or bill_data.get('due_date') or None
-
-                group_serializer = self.get_serializer(data=group_data)
-                group_serializer.is_valid(raise_exception=True)
-
-                invoice_number = _next_sequence_code(tenant.id, Payment, 'invoice_number', tenant.invoice_prefix or 'INV-', 6)
-                payment = group_serializer.save(tenant_id=user.tenant_id, amount=group_data['amount'], invoice_number=invoice_number) if user.tenant_id else group_serializer.save(amount=group_data['amount'], invoice_number=invoice_number)
-                self._log_model_action('create', payment)
-                self._create_items(payment, group_items, user)
-                created_payments.append(payment)
-
-        resp_data = self.get_serializer(created_payments[0]).data
-        resp_data['created_payments'] = [self.get_serializer(p).data for p in created_payments]
-        return Response(resp_data, status=status.HTTP_200_OK)
+        return Response(self.get_serializer(payment).data, status=status.HTTP_200_OK)
 
     def _create_items(self, payment, items_payload, user):
         """Validates and saves each line item onto `payment` — shared by
@@ -4967,7 +4969,9 @@ class PaymentViewSet(TenantScopedViewSet):
         atomically, with whatever cleanup they need on the items being
         replaced (see update())."""
         for item_payload in items_payload:
-            clean_item_payload = {k: v for k, v in item_payload.items() if k not in ('status', 'due_date', 'item_type')}
+            clean_item_payload = {k: v for k, v in item_payload.items() if k not in ('id', 'item_type')}
+            if not clean_item_payload.get('status'):
+                clean_item_payload['status'] = 'paid' if payment.status in ('paid', 'partial') else payment.status
             item_serializer = PaymentItemSerializer(data=clean_item_payload, context=self.get_serializer_context())
             item_serializer.is_valid(raise_exception=True)
             item = item_serializer.save(payment=payment)
@@ -5053,6 +5057,8 @@ class PaymentViewSet(TenantScopedViewSet):
                 'amount': str(item.amount),
                 'teacher_percentage': item.teacher_percentage,
                 'school_percentage': item.school_percentage,
+                'status': item.status or 'paid',
+                'due_date': item.due_date,
             } for item in instance.items.all()]
             if not items_payload:
                 raise ValidationError({'items': 'This bill has no items to reactivate.'})
@@ -5068,6 +5074,12 @@ class PaymentViewSet(TenantScopedViewSet):
             # Server-computed from each item's own percentages — never trust
             # a client-sent discount (see _payment_item_discount's docstring).
             data['discount'] = round(sum(_payment_item_discount(item) for item in items_payload), 2)
+
+            item_statuses = {it.get('status') for it in items_payload if it.get('status')}
+            if len(item_statuses) > 1 and 'paid' in item_statuses and 'pending' in item_statuses:
+                data['status'] = 'partial'
+            elif len(item_statuses) == 1:
+                data['status'] = list(item_statuses)[0]
 
         # Same rule as create(): 'partial' also stamps paid_at, since it's
         # real money received — see compute_student_balances's docstring.
@@ -5289,7 +5301,10 @@ def compute_student_balances(tenant_id):
     # would otherwise show as settled/overpaid).
     paid = {}
     course_items = PaymentItem.objects.filter(
-        payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial'), course__isnull=False,
+        payment__tenant_id=tenant_id, course__isnull=False,
+    ).filter(
+        Q(status='paid') |
+        Q(status__in=['', None], payment__status__in=('paid', 'partial'))
     ).values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage')
     for row in course_items:
         net = float(row['amount']) - _payment_item_discount(row)
@@ -5440,7 +5455,10 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
     # via `active_discount` below rather than counted as if it were cash.
     paid = {}
     items_qs = PaymentItem.objects.filter(
-        payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial'), course_id=course_id,
+        payment__tenant_id=tenant_id, course_id=course_id,
+    ).filter(
+        Q(status='paid') |
+        Q(status__in=['', None], payment__status__in=('paid', 'partial'))
     )
     if student_ids is not None:
         items_qs = items_qs.filter(payment__student_id__in=student_ids)

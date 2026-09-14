@@ -697,10 +697,14 @@ class PaymentItem(models.Model):
     group = models.ForeignKey(Group, on_delete=models.SET_NULL, null=True, blank=True, db_column='group_id', related_name='payment_items')
     trip = models.ForeignKey('Trip', on_delete=models.SET_NULL, null=True, blank=True, db_column='trip_id', related_name='payment_items')
     book = models.ForeignKey('Book', on_delete=models.SET_NULL, null=True, blank=True, db_column='book_id', related_name='payment_items')
-    # Same server-side atomic assignment as Payment.book_copy used to do —
-    # see PaymentViewSet.create.
     book_copy = models.ForeignKey('BookCopy', on_delete=models.SET_NULL, null=True, blank=True, db_column='book_copy_id', related_name='sale_items')
     amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0.01)])
+    STATUS_CHOICES = [
+        ('paid', 'paid'),
+        ('pending', 'pending'),
+    ]
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='paid')
+    due_date = models.DateField(null=True, blank=True)
     # What share of THIS item's own amount goes to the teacher vs the
     # school — only ever meaningfully set on a 'course' item (auto-filled in
     # the UI from that item's own group's teacher, per Teacher.payment_percentage,

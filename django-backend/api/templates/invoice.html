@@ -4,11 +4,9 @@
 <meta charset="utf-8">
 <style>
   @page {
-    /* A5 landscape = an A4 sheet cut in half across the middle (210x148.5mm),
-       not folded in half portrait-wise. Every pt below is scaled to match so
-       the layout stays proportional instead of overflowing the smaller page. */
-    size: A5 landscape;
-    margin: 11mm 10mm;
+    /* A5 portrait = 148mm x 210mm */
+    size: A5 portrait;
+    margin: 9mm 8mm;
   }
   * { box-sizing: border-box; }
   body {
@@ -17,117 +15,140 @@
     text-align: right;
     color: #1c1b19;
     font-family: "DejaVu Sans", sans-serif;
-    font-size: 7.92pt;
+    font-size: 7.5pt;
+    line-height: 1.35;
   }
   .band {
-    height: 5mm;
+    height: 4mm;
     background: {{ primary_color }};
-    margin: -11mm -10mm 9mm;
+    margin: -9mm -8mm 7mm;
   }
 
-  /* row-reverse (not `direction`) mirrors these rows — a physical flip that
-     doesn't depend on WeasyPrint resolving flex main-axis direction from
-     the `direction` property, so the layout is correct either way. */
   .head {
     display: flex;
     flex-direction: row-reverse;
     justify-content: space-between;
     align-items: flex-start;
-    gap: 11.52pt;
-    padding-bottom: 11.52pt;
-    margin-bottom: 11.52pt;
+    gap: 8pt;
+    padding-bottom: 8pt;
+    margin-bottom: 9pt;
     border-bottom: 0.72pt solid #dedad2;
   }
-  .brand { display: flex; flex-direction: row-reverse; align-items: center; gap: 7.2pt; }
+  .brand { display: flex; flex-direction: row-reverse; align-items: center; gap: 6pt; }
   .brand-mark {
-    width: 24.48pt; height: 24.48pt; border-radius: 4.32pt;
+    width: 24pt; height: 24pt; border-radius: 4pt;
     background: {{ primary_color }};
     color: #ffffff;
     text-align: center;
-    line-height: 24.48pt;
+    line-height: 24pt;
     font-family: "DejaVu Serif", serif;
     font-weight: bold;
-    font-size: 10.8pt;
+    font-size: 10pt;
   }
-  .brand-mark img { width: 24.48pt; height: 24.48pt; border-radius: 4.32pt; object-fit: cover; display: block; }
+  .brand-mark img { width: 24pt; height: 24pt; border-radius: 4pt; object-fit: cover; display: block; }
   .brand-name {
     font-family: "DejaVu Serif", serif;
-    font-size: 10.8pt;
+    font-size: 10.5pt;
     font-weight: bold;
   }
-  .brand-sub { font-size: 6.12pt; color: #8a8478; margin-top: 1.44pt; }
+  .brand-sub { font-size: 6pt; color: #8a8478; margin-top: 1pt; }
 
   .doc-meta { text-align: left; }
   .doc-eyebrow {
-    font-size: 5.76pt; font-weight: bold; letter-spacing: 1.08pt; text-transform: uppercase;
-    color: {{ accent_color }}; margin-bottom: 2.88pt;
+    font-size: 5.5pt; font-weight: bold; letter-spacing: 1pt; text-transform: uppercase;
+    color: {{ accent_color }}; margin-bottom: 2pt;
   }
-  .doc-number { font-family: "DejaVu Sans Mono", monospace; font-size: 7.92pt; font-weight: bold; }
-  .doc-date { font-family: "DejaVu Sans Mono", monospace; font-size: 6.48pt; color: #8a8478; margin-top: 2.16pt; }
+  .doc-number { font-family: "DejaVu Sans Mono", monospace; font-size: 7.5pt; font-weight: bold; }
+  .doc-date { font-family: "DejaVu Sans Mono", monospace; font-size: 6.2pt; color: #8a8478; margin-top: 1.5pt; }
 
   .grid-meta {
     display: flex;
     flex-direction: row-reverse;
     justify-content: space-between;
-    margin-bottom: 15.84pt;
+    margin-bottom: 11pt;
+    gap: 6pt;
   }
   .grid-meta > div { width: 32%; }
   .meta-label {
-    font-size: 5.4pt; font-weight: bold; letter-spacing: 0.72pt; text-transform: uppercase; color: #8a8478;
-    margin-bottom: 3.6pt;
+    font-size: 5.2pt; font-weight: bold; letter-spacing: 0.6pt; text-transform: uppercase; color: #8a8478;
+    margin-bottom: 2.5pt;
   }
-  .meta-value { font-size: 7.56pt; font-weight: bold; }
-  .meta-sub { font-size: 6.48pt; color: #55504a; margin-top: 1.44pt; font-family: "DejaVu Sans Mono", monospace; }
+  .meta-value { font-size: 7.2pt; font-weight: bold; }
+  .meta-sub { font-size: 6.2pt; color: #55504a; margin-top: 1pt; font-family: "DejaVu Sans Mono", monospace; }
 
-  /* Description is the first (rightmost, read-first) column; Amount the
-     second (leftmost) — markup order below matches this directly rather
-     than relying on `dir` to reorder table columns. */
-  table.items { width: 100%; border-collapse: collapse; margin-bottom: 2.88pt; }
+  table.items { width: 100%; border-collapse: collapse; margin-bottom: 4pt; }
   table.items thead th {
-    text-align: right; font-size: 5.4pt; font-weight: bold; letter-spacing: 0.72pt; text-transform: uppercase;
-    color: #8a8478; padding: 0 0 5.76pt; border-bottom: 0.86pt solid #c7c1b6;
+    text-align: right; font-size: 5.2pt; font-weight: bold; letter-spacing: 0.6pt; text-transform: uppercase;
+    color: #8a8478; padding: 0 0 4pt; border-bottom: 0.86pt solid #c7c1b6;
   }
-  table.items thead th.num { text-align: left; }
-  table.items tbody td { padding: 7.2pt 0; border-bottom: 0.72pt solid #dedad2; font-size: 7.56pt; vertical-align: top; }
+  table.items thead th.st { text-align: center; width: 48pt; }
+  table.items thead th.num { text-align: left; width: 62pt; }
+  table.items tbody td { padding: 5pt 0; border-bottom: 0.72pt solid #dedad2; font-size: 7.2pt; vertical-align: middle; }
+  table.items tbody td.st { text-align: center; white-space: nowrap; }
   table.items tbody td.num {
     text-align: left; font-family: "DejaVu Sans Mono", monospace; white-space: nowrap;
   }
   .item-title { font-weight: bold; }
-  .item-sub { font-size: 6.12pt; color: #8a8478; margin-top: 1.44pt; }
+  .item-sub { font-size: 5.8pt; color: #8a8478; margin-top: 1pt; }
 
-  .totals-wrap { display: flex; justify-content: flex-start; margin-top: 8.64pt; }
-  .totals { width: 144pt; }
-  .totals-row { display: flex; flex-direction: row-reverse; justify-content: space-between; font-size: 6.84pt; padding: 3.6pt 0; color: #55504a; }
+  .line-badge {
+    display: inline-block;
+    padding: 1.2pt 4pt;
+    border-radius: 2pt;
+    font-size: 5.5pt;
+    font-weight: bold;
+    letter-spacing: 0.3pt;
+  }
+  .badge-paid {
+    background: #ecfdf5;
+    color: #047857;
+    border: 0.5pt solid #a7f3d0;
+  }
+  .badge-pending {
+    background: #fffbeb;
+    color: #b45309;
+    border: 0.5pt solid #fde68a;
+  }
+
+  .totals-wrap { display: flex; justify-content: flex-start; margin-top: 6pt; }
+  .totals { width: 145pt; }
+  .totals-row { display: flex; flex-direction: row-reverse; justify-content: space-between; font-size: 6.5pt; padding: 2.5pt 0; color: #55504a; }
   .totals-row .val { font-family: "DejaVu Sans Mono", monospace; }
   .totals-row.discount .val { color: {{ overdue_color }}; }
   .totals-row.grand {
-    border-top: 0.86pt solid #c7c1b6; margin-top: 2.88pt; padding-top: 7.2pt;
-    font-size: 9pt; font-weight: bold; color: #1c1b19;
+    border-top: 0.86pt solid #c7c1b6; margin-top: 2pt; padding-top: 5pt;
+    font-size: 8.5pt; font-weight: bold; color: #1c1b19;
   }
-  .totals-row.grand .val { font-family: "DejaVu Sans Mono", monospace; font-size: 9.72pt; }
+  .totals-row.grand .val { font-family: "DejaVu Sans Mono", monospace; font-size: 9pt; }
+  .totals-row.paid-row {
+    color: #047857; font-weight: bold; font-size: 6.8pt; padding-top: 3pt;
+  }
+  .totals-row.debt-row {
+    color: #b45309; font-weight: bold; font-size: 6.8pt; border-top: 0.5pt dashed #dedad2; margin-top: 2pt; padding-top: 3pt;
+  }
 
   .stamp {
     display: inline-block;
-    margin-top: 4.32pt;
-    transform: rotate(6deg);
-    border: 1.15pt solid {{ stamp_color }};
+    margin-top: 3pt;
+    transform: rotate(5deg);
+    border: 1pt solid {{ stamp_color }};
     color: {{ stamp_color }};
     font-family: "DejaVu Serif", serif;
     font-weight: bold;
-    font-size: 7.92pt;
-    letter-spacing: 0.72pt;
+    font-size: 7.2pt;
+    letter-spacing: 0.6pt;
     text-transform: uppercase;
-    padding: 1.44pt 6.48pt;
-    border-radius: 2.16pt;
+    padding: 1pt 5pt;
+    border-radius: 2pt;
   }
 
   .foot {
-    margin-top: 18.72pt; padding-top: 10.08pt; border-top: 0.72pt solid #dedad2;
-    display: flex; flex-direction: row-reverse; justify-content: space-between; align-items: flex-end; gap: 10.08pt;
+    margin-top: 14pt; padding-top: 8pt; border-top: 0.72pt solid #dedad2;
+    display: flex; flex-direction: row-reverse; justify-content: space-between; align-items: flex-end; gap: 8pt;
   }
-  .foot-note { font-size: 6.12pt; color: #55504a; line-height: 1.5; max-width: 230.4pt; }
+  .foot-note { font-size: 5.8pt; color: #55504a; line-height: 1.4; max-width: 220pt; }
   .foot-note strong { color: #1c1b19; }
-  .foot-currency { font-size: 5.4pt; color: #8a8478; text-align: left; font-family: "DejaVu Sans Mono", monospace; }
+  .foot-currency { font-size: 5.2pt; color: #8a8478; text-align: left; font-family: "DejaVu Sans Mono", monospace; }
 </style>
 </head>
 <body>
@@ -171,7 +192,11 @@
 
   <table class="items">
     <thead>
-      <tr><th>البيان</th><th class="num">المبلغ</th></tr>
+      <tr>
+        <th>البيان</th>
+        <th class="st">الحالة</th>
+        <th class="num">المبلغ</th>
+      </tr>
     </thead>
     <tbody>
       {% for line in lines %}
@@ -179,6 +204,11 @@
         <td>
           <div class="item-title">{{ line.title }}</div>
           {% if line.sub %}<div class="item-sub">{{ line.sub }}</div>{% endif %}
+        </td>
+        <td class="st">
+          <span class="line-badge {% if line.status == 'paid' %}badge-paid{% else %}badge-pending{% endif %}">
+            {{ line.status_label }}
+          </span>
         </td>
         <td class="num">{{ line.amount }}</td>
       </tr>
@@ -202,6 +232,16 @@
         <span>المجموع ({{ currency }})</span>
         <span class="val">{{ total }}</span>
       </div>
+      {% if is_partial %}
+      <div class="totals-row paid-row">
+        <span>المدفوع</span>
+        <span class="val">{{ paid_amount }}</span>
+      </div>
+      <div class="totals-row debt-row">
+        <span>المتبقي (في الذمة)</span>
+        <span class="val">{{ pending_amount }}</span>
+      </div>
+      {% endif %}
     </div>
   </div>
 

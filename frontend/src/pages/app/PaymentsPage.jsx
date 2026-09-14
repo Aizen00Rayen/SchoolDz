@@ -249,7 +249,7 @@ export default function PaymentsPage() {
         items: (row.items || []).map((it) => ({
           ...it,
           item_type: deriveItemType(it),
-          status: row.status || "paid",
+          status: it.status || row.status || "paid",
         })),
       })}
       // The item rows carry frontend-only bookkeeping (item_type) and, on
