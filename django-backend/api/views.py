@@ -4952,6 +4952,16 @@ class PaymentViewSet(TenantScopedViewSet):
             if item_due:
                 bill_data['due_date'] = item_due
 
+        if not bill_data.get('due_date'):
+            bill_data['due_date'] = None
+        if not bill_data.get('paid_at'):
+            bill_data['paid_at'] = None
+        for fk in ('course_id', 'group_id', 'trip_id', 'book_id'):
+            if fk in bill_data and not bill_data[fk]:
+                bill_data[fk] = None
+        if 'student_id' in bill_data and not bill_data['student_id']:
+            bill_data['student_id'] = None
+
         serializer = self.get_serializer(data=bill_data)
         serializer.is_valid(raise_exception=True)
 
@@ -4978,6 +4988,11 @@ class PaymentViewSet(TenantScopedViewSet):
             clean_item_payload = {k: v for k, v in item_payload.items() if k not in ('id', 'item_type')}
             if not clean_item_payload.get('status'):
                 clean_item_payload['status'] = 'paid' if payment.status in ('paid', 'partial') else payment.status
+            if not clean_item_payload.get('due_date'):
+                clean_item_payload['due_date'] = None
+            for fk in ('course_id', 'group_id', 'trip_id', 'book_id'):
+                if fk in clean_item_payload and not clean_item_payload[fk]:
+                    clean_item_payload[fk] = None
             item_serializer = PaymentItemSerializer(data=clean_item_payload, context=self.get_serializer_context())
             item_serializer.is_valid(raise_exception=True)
             item = item_serializer.save(payment=payment)
