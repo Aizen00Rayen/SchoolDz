@@ -1208,144 +1208,150 @@ def payment_invoice_pdf(request, payment_id):
     for a single payment. Reachable by staff of that tenant, the payment's
     own guardian, or a super admin — deliberately not a PaymentViewSet action
     since TenantScopedViewSet blocks role='parent' outright."""
-    user = request.user
-    payment = Payment.objects.select_related('student', 'student__parent', 'tenant').prefetch_related(
-        Prefetch('items', queryset=PaymentItem.objects.select_related('course', 'group', 'trip', 'book', 'book_copy'))
-    ).filter(id=payment_id).first()
-    if not payment:
-        raise NotFound('Payment not found')
-
-    if user.is_super_admin():
-        pass
-    elif user.role == 'parent':
-        guardian = Guardian.objects.filter(user_id=user.id, tenant_id=user.tenant_id).first()
-        if not guardian or payment.tenant_id != user.tenant_id or (payment.student and payment.student.parent_id != guardian.id):
-            raise NotFound('Payment not found')
-    else:
-        if not user.tenant_id or payment.tenant_id != user.tenant_id:
+    try:
+        user = request.user
+        payment = Payment.objects.select_related('student', 'student__parent', 'tenant').prefetch_related(
+            Prefetch('items', queryset=PaymentItem.objects.select_related('course', 'group', 'trip', 'book', 'book_copy'))
+        ).filter(id=payment_id).first()
+        if not payment:
             raise NotFound('Payment not found')
 
-    tenant = payment.tenant
-    student = payment.student
-
-    logo_data_uri = None
-    if tenant and tenant.logo_url:
-        try:
-            filename = tenant.logo_url.rsplit('/', 1)[-1]
-            logo_path = os.path.join(settings.MEDIA_ROOT, 'logos', filename)
-            with open(logo_path, 'rb') as f:
-                raw = f.read()
-            mime = mimetypes.guess_type(filename)[0] or 'image/png'
-            logo_data_uri = f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
-        except OSError:
-            logo_data_uri = None
-
-    today = timezone.now().date()
-    # 'partial' now means real money was received for exactly this receipt
-    # (see compute_student_balances) — it's no longer "this bill itself is
-    # unpaid," so it's excluded from the overdue check and gets its own
-    # label/stamp instead of being lumped in with 'pending'.
-    is_overdue = payment.status == 'pending' and payment.due_date and payment.due_date < today
-    stamp_key = 'overdue' if is_overdue else payment.status
-    stamp_color = STAMP_COLORS.get(stamp_key, '#8A8478')
-
-    # Invoices are handed to Algerian parents, so the status reads in Arabic.
-    if payment.status == 'paid':
-        status_label = INVOICE_STATUS_AR.get('paid', 'مدفوع')
-        status_line = f"{status_label} — {payment.paid_at.strftime('%d/%m/%Y')}" if payment.paid_at else status_label
-    elif payment.status == 'partial':
-        status_label = INVOICE_STATUS_AR.get('partial', 'جزئي')
-        status_line = f"{status_label} — {payment.paid_at.strftime('%d/%m/%Y')}" if payment.paid_at else status_label
-    elif is_overdue:
-        status_label = INVOICE_STATUS_AR.get('overdue', 'متأخر')
-        status_line = f"{status_label} — {payment.due_date.strftime('%d/%m/%Y')}" if payment.due_date else status_label
-    elif payment.status == 'pending':
-        status_label = INVOICE_STATUS_AR.get('pending', 'معلق')
-        status_line = f"{INVOICE_STATUS_AR.get('due_on', 'مستحق في')} {payment.due_date.strftime('%d/%m/%Y')}" if payment.due_date else status_label
-    else:
-        status_label = INVOICE_STATUS_AR.get(payment.status, payment.get_status_display() if hasattr(payment, 'get_status_display') else str(payment.status))
-        status_line = status_label
-
-    lines = []
-    paid_sum = 0.0
-    pending_sum = 0.0
-    for item in payment.items.all():
-        item_discount = _payment_item_discount(item)
-        item_net = max(0.0, float(item.amount or 0) - item_discount)
-        item_st = getattr(item, 'status', None) or ('paid' if payment.status in ('paid', 'partial') else payment.status)
-        if item_st == 'paid':
-            paid_sum += item_net
+        if user.is_super_admin():
+            pass
+        elif user.role == 'parent':
+            guardian = Guardian.objects.filter(user_id=user.id, tenant_id=user.tenant_id).first()
+            if not guardian or payment.tenant_id != user.tenant_id or (payment.student and payment.student.parent_id != guardian.id):
+                raise NotFound('Payment not found')
         else:
-            pending_sum += item_net
+            if not user.tenant_id or payment.tenant_id != user.tenant_id:
+                raise NotFound('Payment not found')
 
-        kind_label_ar = INVOICE_KIND_AR.get(item.kind, item.get_kind_display() if hasattr(item, 'get_kind_display') else str(item.kind))
-        sub_parts = []
-        if item.group:
-            sub_parts.append(item.group.name)
-        if item.trip:
-            sub_parts.append(item.trip.destination)
-        if item.book_copy:
-            sub_parts.append(item.book_copy.copy_code)
-        # Only add the kind label when it isn't already the line's title
-        # (that happens when there's no linked course/trip/book — kind is
-        # the title itself then).
-        if item.course or item.trip or item.book:
-            sub_parts.append(kind_label_ar)
-        if item_st == 'pending' and item.due_date:
-            due_str = item.due_date.strftime('%d/%m/%Y') if hasattr(item.due_date, 'strftime') else str(item.due_date)
-            sub_parts.append(f"{INVOICE_STATUS_AR.get('due_on', 'مستحق في')} {due_str}")
+        tenant = payment.tenant
+        student = payment.student
 
-        lines.append({
-            'title': item.trip.title if item.trip else (item.course.title if item.course else (item.book.title if item.book else kind_label_ar)),
-            'sub': ' · '.join(sub_parts),
-            'amount': f"{float(item.amount or 0):,.2f}",
-            'status': item_st,
-            'status_label': INVOICE_STATUS_AR.get(item_st, item_st),
-        })
+        logo_data_uri = None
+        if tenant and tenant.logo_url:
+            try:
+                filename = tenant.logo_url.rsplit('/', 1)[-1]
+                logo_path = os.path.join(settings.MEDIA_ROOT, 'logos', filename)
+                with open(logo_path, 'rb') as f:
+                    raw = f.read()
+                mime = mimetypes.guess_type(filename)[0] or 'image/png'
+                logo_data_uri = f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+            except OSError:
+                logo_data_uri = None
 
-    subtotal = float(payment.amount or 0)
-    discount = float(payment.discount or 0)
-    total = max(0.0, subtotal - discount)
-    currency_code = (tenant.currency if tenant else None) or 'DZD'
-    is_partial = payment.status == 'partial' or (paid_sum > 0 and pending_sum > 0)
+        today = timezone.now().date()
+        # 'partial' now means real money was received for exactly this receipt
+        # (see compute_student_balances) — it's no longer "this bill itself is
+        # unpaid," so it's excluded from the overdue check and gets its own
+        # label/stamp instead of being lumped in with 'pending'.
+        is_overdue = payment.status == 'pending' and payment.due_date and payment.due_date < today
+        stamp_key = 'overdue' if is_overdue else payment.status
+        stamp_color = STAMP_COLORS.get(stamp_key, '#8A8478')
 
-    # Handed to Algerian parents, so the whole document — not just the
-    # status — reads in Arabic: numeric dates (no English month names),
-    # Arabic kind/method/currency wording, RTL template.
-    context = {
-        'primary_color': (tenant.primary_color if tenant else None) or '#0A0A0B',
-        'accent_color': (tenant.accent_color if tenant else None) or '#E53935',
-        'overdue_color': '#B23A2E',
-        'stamp_color': stamp_color,
-        'status_label': status_label,
-        'status_line': status_line,
-        'tenant_name': tenant.name if tenant else 'Scolaris',
-        'tenant_initial': (tenant.name or 'S')[0].upper() if tenant else 'S',
-        'tenant_currency': None,
-        'logo_data_uri': logo_data_uri,
-        'invoice_number': payment.invoice_number or payment.id,
-        'issued_date': payment.created_at.strftime('%d/%m/%Y') if payment.created_at else '',
-        'student_name': f"{student.first_name} {student.last_name}" if student else "—",
-        'guardian_name': (student.parent.name if student.parent else None) if student else None,
-        'method_label': INVOICE_METHOD_AR.get(payment.method, payment.get_method_display() if hasattr(payment, 'get_method_display') else str(payment.method)),
-        'due_date': payment.due_date.strftime('%d/%m/%Y') if (payment.due_date and payment.status != 'paid') else None,
-        'student_code': student.student_code if student else None,
-        'lines': lines,
-        'subtotal': f"{subtotal:,.2f}",
-        'discount': f"{discount:,.2f}",
-        'total': f"{total:,.2f}",
-        'is_partial': is_partial,
-        'paid_amount': f"{paid_sum:,.2f}",
-        'pending_amount': f"{pending_sum:,.2f}",
-        'currency': INVOICE_CURRENCY_AR.get(currency_code, currency_code),
-    }
+        # Invoices are handed to Algerian parents, so the status reads in Arabic.
+        if payment.status == 'paid':
+            status_label = INVOICE_STATUS_AR.get('paid', 'مدفوع')
+            status_line = f"{status_label} — {payment.paid_at.strftime('%d/%m/%Y')}" if payment.paid_at else status_label
+        elif payment.status == 'partial':
+            status_label = INVOICE_STATUS_AR.get('partial', 'جزئي')
+            status_line = f"{status_label} — {payment.paid_at.strftime('%d/%m/%Y')}" if payment.paid_at else status_label
+        elif is_overdue:
+            status_label = INVOICE_STATUS_AR.get('overdue', 'متأخر')
+            status_line = f"{status_label} — {payment.due_date.strftime('%d/%m/%Y')}" if payment.due_date else status_label
+        elif payment.status == 'pending':
+            status_label = INVOICE_STATUS_AR.get('pending', 'معلق')
+            status_line = f"{INVOICE_STATUS_AR.get('due_on', 'مستحق في')} {payment.due_date.strftime('%d/%m/%Y')}" if payment.due_date else status_label
+        else:
+            status_label = INVOICE_STATUS_AR.get(payment.status, payment.get_status_display() if hasattr(payment, 'get_status_display') else str(payment.status))
+            status_line = status_label
 
-    html_string = render_to_string('invoice.html', context)
-    pdf_bytes = HTML(string=html_string).write_pdf()
+        lines = []
+        paid_sum = 0.0
+        pending_sum = 0.0
+        for item in payment.items.all():
+            item_discount = _payment_item_discount(item)
+            item_net = max(0.0, float(item.amount or 0) - item_discount)
+            item_st = getattr(item, 'status', None) or ('paid' if payment.status in ('paid', 'partial') else payment.status)
+            if item_st == 'paid':
+                paid_sum += item_net
+            else:
+                pending_sum += item_net
 
-    response = HttpResponse(pdf_bytes, content_type='application/pdf')
-    response['Content-Disposition'] = f'inline; filename="{payment.invoice_number or payment.id}.pdf"'
-    return response
+            kind_label_ar = INVOICE_KIND_AR.get(item.kind, item.get_kind_display() if hasattr(item, 'get_kind_display') else str(item.kind))
+            sub_parts = []
+            if item.group:
+                sub_parts.append(item.group.name)
+            if item.trip:
+                sub_parts.append(item.trip.destination)
+            if item.book_copy:
+                sub_parts.append(item.book_copy.copy_code)
+            # Only add the kind label when it isn't already the line's title
+            # (that happens when there's no linked course/trip/book — kind is
+            # the title itself then).
+            if item.course or item.trip or item.book:
+                sub_parts.append(kind_label_ar)
+            if item_st == 'pending' and item.due_date:
+                due_str = item.due_date.strftime('%d/%m/%Y') if hasattr(item.due_date, 'strftime') else str(item.due_date)
+                sub_parts.append(f"{INVOICE_STATUS_AR.get('due_on', 'مستحق في')} {due_str}")
+
+            lines.append({
+                'title': item.trip.title if item.trip else (item.course.title if item.course else (item.book.title if item.book else kind_label_ar)),
+                'sub': ' · '.join(sub_parts),
+                'amount': f"{float(item.amount or 0):,.2f}",
+                'status': item_st,
+                'status_label': INVOICE_STATUS_AR.get(item_st, item_st),
+            })
+
+        subtotal = float(payment.amount or 0)
+        discount = float(payment.discount or 0)
+        total = max(0.0, subtotal - discount)
+        currency_code = (tenant.currency if tenant else None) or 'DZD'
+        is_partial = payment.status == 'partial' or (paid_sum > 0 and pending_sum > 0)
+
+        # Handed to Algerian parents, so the whole document — not just the
+        # status — reads in Arabic: numeric dates (no English month names),
+        # Arabic kind/method/currency wording, RTL template.
+        context = {
+            'primary_color': (tenant.primary_color if tenant else None) or '#0A0A0B',
+            'accent_color': (tenant.accent_color if tenant else None) or '#E53935',
+            'overdue_color': '#B23A2E',
+            'stamp_color': stamp_color,
+            'status_label': status_label,
+            'status_line': status_line,
+            'tenant_name': tenant.name if tenant else 'Scolaris',
+            'tenant_initial': (tenant.name or 'S')[0].upper() if tenant else 'S',
+            'tenant_currency': None,
+            'logo_data_uri': logo_data_uri,
+            'invoice_number': payment.invoice_number or payment.id,
+            'issued_date': payment.created_at.strftime('%d/%m/%Y') if payment.created_at else '',
+            'student_name': f"{student.first_name} {student.last_name}" if student else "—",
+            'guardian_name': (student.parent.name if student.parent else None) if student else None,
+            'method_label': INVOICE_METHOD_AR.get(payment.method, payment.get_method_display() if hasattr(payment, 'get_method_display') else str(payment.method)),
+            'due_date': payment.due_date.strftime('%d/%m/%Y') if (payment.due_date and payment.status != 'paid') else None,
+            'student_code': student.student_code if student else None,
+            'lines': lines,
+            'subtotal': f"{subtotal:,.2f}",
+            'discount': f"{discount:,.2f}",
+            'total': f"{total:,.2f}",
+            'is_partial': is_partial,
+            'paid_amount': f"{paid_sum:,.2f}",
+            'pending_amount': f"{pending_sum:,.2f}",
+            'currency': INVOICE_CURRENCY_AR.get(currency_code, currency_code),
+        }
+
+        html_string = render_to_string('invoice.html', context)
+        pdf_bytes = HTML(string=html_string).write_pdf()
+
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="{payment.invoice_number or payment.id}.pdf"'
+        return response
+    except (NotFound, PermissionDenied):
+        raise
+    except Exception as e:
+        logger.exception("Failed to generate payment invoice PDF: %s", e)
+        return Response({'detail': f'Invoice generation error: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])
@@ -4900,81 +4906,87 @@ class PaymentViewSet(TenantScopedViewSet):
         time inside the same atomic block as the bill itself, so an
         out-of-stock book anywhere in the list rolls back the whole bill
         rather than leaving a partial invoice behind."""
-        self.check_module_add()
-        user = request.user
-        tenant = Tenant.objects.filter(id=user.tenant_id).first()
-        if not tenant:
-            raise ValidationError('Tenant not found')
-
-        items_payload = request.data.get('items')
-        if not isinstance(items_payload, list) or not items_payload:
-            raise ValidationError({'items': 'At least one item is required.'})
-
-        bill_data = {k: v for k, v in request.data.items() if k != 'items'}
-
-        # Determine statuses across items
-        has_paid = False
-        has_pending = False
-        for item in items_payload:
-            item_st = item.get('status') or bill_data.get('status', 'paid')
-            if item_st not in ('paid', 'pending', 'partial', 'refunded', 'cancelled'):
-                item_st = 'paid'
-            item['status'] = item_st
-            if item_st == 'paid':
-                has_paid = True
-            elif item_st == 'pending':
-                has_pending = True
-
-        if has_paid and has_pending:
-            status_val = 'partial'
-        elif has_pending:
-            status_val = 'pending'
-        elif has_paid:
-            status_val = 'paid'
-        else:
-            status_val = bill_data.get('status', 'paid')
-            if status_val not in ('paid', 'pending', 'partial', 'refunded', 'cancelled'):
-                status_val = 'paid'
-
-        bill_data['status'] = status_val
         try:
-            bill_data['amount'] = sum(float(item.get('amount') or 0) for item in items_payload)
-        except (TypeError, AttributeError, ValueError):
-            raise ValidationError({'items': 'Each item needs a numeric amount.'})
-        bill_data['discount'] = round(sum(_payment_item_discount(item) for item in items_payload), 2)
+            self.check_module_add()
+            user = request.user
+            tenant = Tenant.objects.filter(id=user.tenant_id).first()
+            if not tenant:
+                raise ValidationError('Tenant not found')
 
-        if has_paid or status_val in ('paid', 'partial'):
+            items_payload = request.data.get('items')
+            if not isinstance(items_payload, list) or not items_payload:
+                raise ValidationError({'items': 'At least one item is required.'})
+
+            bill_data = {k: v for k, v in request.data.items() if k != 'items'}
+
+            # Determine statuses across items
+            has_paid = False
+            has_pending = False
+            for item in items_payload:
+                item_st = item.get('status') or bill_data.get('status', 'paid')
+                if item_st not in ('paid', 'pending', 'partial', 'refunded', 'cancelled'):
+                    item_st = 'paid'
+                item['status'] = item_st
+                if item_st == 'paid':
+                    has_paid = True
+                elif item_st == 'pending':
+                    has_pending = True
+
+            if has_paid and has_pending:
+                status_val = 'partial'
+            elif has_pending:
+                status_val = 'pending'
+            elif has_paid:
+                status_val = 'paid'
+            else:
+                status_val = bill_data.get('status', 'paid')
+                if status_val not in ('paid', 'pending', 'partial', 'refunded', 'cancelled'):
+                    status_val = 'paid'
+
+            bill_data['status'] = status_val
+            try:
+                bill_data['amount'] = sum(float(item.get('amount') or 0) for item in items_payload)
+            except (TypeError, AttributeError, ValueError):
+                raise ValidationError({'items': 'Each item needs a numeric amount.'})
+            bill_data['discount'] = round(sum(_payment_item_discount(item) for item in items_payload), 2)
+
+            if has_paid or status_val in ('paid', 'partial'):
+                if not bill_data.get('paid_at'):
+                    bill_data['paid_at'] = timezone.now().isoformat()
+
+            if has_pending and not bill_data.get('due_date'):
+                item_due = next((it.get('due_date') for it in items_payload if it.get('status') == 'pending' and it.get('due_date')), None)
+                if item_due:
+                    bill_data['due_date'] = item_due
+
+            if not bill_data.get('due_date'):
+                bill_data['due_date'] = None
             if not bill_data.get('paid_at'):
-                bill_data['paid_at'] = timezone.now().isoformat()
+                bill_data['paid_at'] = None
+            for fk in ('course_id', 'group_id', 'trip_id', 'book_id'):
+                if fk in bill_data and not bill_data[fk]:
+                    bill_data[fk] = None
+            if 'student_id' in bill_data and not bill_data['student_id']:
+                bill_data['student_id'] = None
 
-        if has_pending and not bill_data.get('due_date'):
-            item_due = next((it.get('due_date') for it in items_payload if it.get('status') == 'pending' and it.get('due_date')), None)
-            if item_due:
-                bill_data['due_date'] = item_due
+            serializer = self.get_serializer(data=bill_data)
+            serializer.is_valid(raise_exception=True)
 
-        if not bill_data.get('due_date'):
-            bill_data['due_date'] = None
-        if not bill_data.get('paid_at'):
-            bill_data['paid_at'] = None
-        for fk in ('course_id', 'group_id', 'trip_id', 'book_id'):
-            if fk in bill_data and not bill_data[fk]:
-                bill_data[fk] = None
-        if 'student_id' in bill_data and not bill_data['student_id']:
-            bill_data['student_id'] = None
+            with transaction.atomic():
+                if user.tenant_id and not user.is_super_admin() and user.tenant.status != 'active':
+                    raise PermissionDenied(_inactive_tenant_message(user.tenant))
+                Tenant.objects.select_for_update().get(id=tenant.id)
+                invoice_number = _next_sequence_code(tenant.id, Payment, 'invoice_number', tenant.invoice_prefix or 'INV-', 6)
+                payment = serializer.save(tenant_id=user.tenant_id, amount=bill_data['amount'], invoice_number=invoice_number) if user.tenant_id else serializer.save(amount=bill_data['amount'], invoice_number=invoice_number)
+                self._log_model_action('create', payment)
+                self._create_items(payment, items_payload, user)
 
-        serializer = self.get_serializer(data=bill_data)
-        serializer.is_valid(raise_exception=True)
-
-        with transaction.atomic():
-            if user.tenant_id and not user.is_super_admin() and user.tenant.status != 'active':
-                raise PermissionDenied(_inactive_tenant_message(user.tenant))
-            Tenant.objects.select_for_update().get(id=tenant.id)
-            invoice_number = _next_sequence_code(tenant.id, Payment, 'invoice_number', tenant.invoice_prefix or 'INV-', 6)
-            payment = serializer.save(tenant_id=user.tenant_id, amount=bill_data['amount'], invoice_number=invoice_number) if user.tenant_id else serializer.save(amount=bill_data['amount'], invoice_number=invoice_number)
-            self._log_model_action('create', payment)
-            self._create_items(payment, items_payload, user)
-
-        return Response(self.get_serializer(payment).data, status=status.HTTP_200_OK)
+            return Response(self.get_serializer(payment).data, status=status.HTTP_200_OK)
+        except (ValidationError, PermissionDenied, NotFound):
+            raise
+        except Exception as e:
+            logger.exception("Failed to create payment: %s", e)
+            return Response({'detail': f'Payment creation error: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def _create_items(self, payment, items_payload, user):
         """Validates and saves each line item onto `payment` — shared by
@@ -4993,6 +5005,23 @@ class PaymentViewSet(TenantScopedViewSet):
             for fk in ('course_id', 'group_id', 'trip_id', 'book_id'):
                 if fk in clean_item_payload and not clean_item_payload[fk]:
                     clean_item_payload[fk] = None
+
+            # Only course items may have teacher or school percentage
+            if not clean_item_payload.get('course_id'):
+                clean_item_payload['teacher_percentage'] = None
+                clean_item_payload['school_percentage'] = None
+            else:
+                for pct_f in ('teacher_percentage', 'school_percentage'):
+                    if pct_f in clean_item_payload:
+                        v = clean_item_payload[pct_f]
+                        if v == '' or v is None:
+                            clean_item_payload[pct_f] = None
+                        else:
+                            try:
+                                clean_item_payload[pct_f] = round(float(v), 2)
+                            except (ValueError, TypeError):
+                                clean_item_payload[pct_f] = None
+
             item_serializer = PaymentItemSerializer(data=clean_item_payload, context=self.get_serializer_context())
             item_serializer.is_valid(raise_exception=True)
             item = item_serializer.save(payment=payment)
@@ -5042,100 +5071,106 @@ class PaymentViewSet(TenantScopedViewSet):
         the new items server-side, same as create(). That's what lets a
         bill that was billed under an earlier (buggy) price/percentage rule
         get corrected in place rather than cancelled and re-billed."""
-        self.check_module_modify()
-        partial = kwargs.get('partial', False)
-        instance = self.get_object()
-        previous_status = instance.status
-        user = request.user
+        try:
+            self.check_module_modify()
+            partial = kwargs.get('partial', False)
+            instance = self.get_object()
+            previous_status = instance.status
+            user = request.user
 
-        data = request.data.copy()
-        items_payload = data.get('items')
-        replace_items = isinstance(items_payload, list) and len(items_payload) > 0
+            data = request.data.copy()
+            items_payload = data.get('items')
+            replace_items = isinstance(items_payload, list) and len(items_payload) > 0
 
-        # Reactivating a cancelled/refunded bill (paid/partial/pending again)
-        # without an explicit items payload used to leave its book items'
-        # `book_copy` pointing at whatever copy they held before — which
-        # _restore_book_copies had already freed back to in_stock when the
-        # bill was first cancelled, so that same copy could easily have been
-        # sold to someone else in the meantime. Route this case through the
-        # same replace-items path create()/an explicit edit already uses, so
-        # book stock gets re-validated/re-allocated instead of silently
-        # trusting stale copy references.
-        new_status_requested = data.get('status')
-        reactivating = (
-            not replace_items
-            and instance.status in ('cancelled', 'refunded')
-            and new_status_requested is not None
-            and new_status_requested not in ('cancelled', 'refunded')
-        )
-        if reactivating:
-            items_payload = [{
-                'kind': item.kind,
-                'course_id': item.course_id,
-                'group_id': item.group_id,
-                'trip_id': item.trip_id,
-                'book_id': item.book_id,
-                'amount': str(item.amount),
-                'teacher_percentage': item.teacher_percentage,
-                'school_percentage': item.school_percentage,
-                'status': item.status or 'paid',
-                'due_date': item.due_date,
-            } for item in instance.items.all()]
-            if not items_payload:
-                raise ValidationError({'items': 'This bill has no items to reactivate.'})
-            data['items'] = items_payload
-            replace_items = True
+            # Reactivating a cancelled/refunded bill (paid/partial/pending again)
+            # without an explicit items payload used to leave its book items'
+            # `book_copy` pointing at whatever copy they held before — which
+            # _restore_book_copies had already freed back to in_stock when the
+            # bill was first cancelled, so that same copy could easily have been
+            # sold to someone else in the meantime. Route this case through the
+            # same replace-items path create()/an explicit edit already uses, so
+            # book stock gets re-validated/re-allocated instead of silently
+            # trusting stale copy references.
+            new_status_requested = data.get('status')
+            reactivating = (
+                not replace_items
+                and instance.status in ('cancelled', 'refunded')
+                and new_status_requested is not None
+                and new_status_requested not in ('cancelled', 'refunded')
+            )
+            if reactivating:
+                items_payload = [{
+                    'kind': item.kind,
+                    'course_id': item.course_id,
+                    'group_id': item.group_id,
+                    'trip_id': item.trip_id,
+                    'book_id': item.book_id,
+                    'amount': str(item.amount),
+                    'teacher_percentage': item.teacher_percentage,
+                    'school_percentage': item.school_percentage,
+                    'status': item.status or 'paid',
+                    'due_date': item.due_date,
+                } for item in instance.items.all()]
+                if not items_payload:
+                    raise ValidationError({'items': 'This bill has no items to reactivate.'})
+                data['items'] = items_payload
+                replace_items = True
 
-        save_kwargs = {}
-        if replace_items:
-            try:
-                save_kwargs['amount'] = sum(float(item.get('amount') or 0) for item in items_payload)
-            except (TypeError, AttributeError, ValueError):
-                raise ValidationError({'items': 'Each item needs a numeric amount.'})
-            # Server-computed from each item's own percentages — never trust
-            # a client-sent discount (see _payment_item_discount's docstring).
-            data['discount'] = round(sum(_payment_item_discount(item) for item in items_payload), 2)
-
-            item_statuses = {it.get('status') for it in items_payload if it.get('status')}
-            if len(item_statuses) > 1 and 'paid' in item_statuses and 'pending' in item_statuses:
-                data['status'] = 'partial'
-            elif len(item_statuses) == 1:
-                data['status'] = list(item_statuses)[0]
-
-        # Same rule as create(): 'partial' also stamps paid_at, since it's
-        # real money received — see compute_student_balances's docstring.
-        if data.get('status') in ('paid', 'partial') and not data.get('paid_at'):
-            data['paid_at'] = timezone.now().isoformat()
-
-        serializer = self.get_serializer(instance, data=data, partial=partial)
-        serializer.is_valid(raise_exception=True)
-
-        with transaction.atomic():
+            save_kwargs = {}
             if replace_items:
-                # Release whatever book stock the old items held before
-                # deleting them — otherwise a swapped-out book item's copy
-                # would stay marked "sold" forever with nothing pointing at it.
-                self._restore_book_copies(instance)
-                instance.items.all().delete()
+                try:
+                    save_kwargs['amount'] = sum(float(item.get('amount') or 0) for item in items_payload)
+                except (TypeError, AttributeError, ValueError):
+                    raise ValidationError({'items': 'Each item needs a numeric amount.'})
+                # Server-computed from each item's own percentages — never trust
+                # a client-sent discount (see _payment_item_discount's docstring).
+                data['discount'] = round(sum(_payment_item_discount(item) for item in items_payload), 2)
 
-            # amount is read_only on PaymentSerializer (never trusted from
-            # the client), same as create() — pass it as an explicit save()
-            # kwarg here instead of going through self.perform_update()'s
-            # normal validated_data-only save. tenant_id is re-pinned
-            # explicitly too, matching perform_update()'s own belt-and-braces
-            # guard against a payload ever moving a record cross-tenant.
-            original_tenant_id = instance.tenant_id
-            payment = serializer.save(tenant_id=original_tenant_id, **save_kwargs) if original_tenant_id else serializer.save(**save_kwargs)
-            self._log_model_action('update', payment)
+                item_statuses = {it.get('status') for it in items_payload if it.get('status')}
+                if len(item_statuses) > 1 and 'paid' in item_statuses and 'pending' in item_statuses:
+                    data['status'] = 'partial'
+                elif len(item_statuses) == 1:
+                    data['status'] = list(item_statuses)[0]
 
-            if replace_items:
-                self._create_items(payment, items_payload, user)
+            # Same rule as create(): 'partial' also stamps paid_at, since it's
+            # real money received — see compute_student_balances's docstring.
+            if data.get('status') in ('paid', 'partial') and not data.get('paid_at'):
+                data['paid_at'] = timezone.now().isoformat()
 
-            new_status = payment.status
-            if previous_status not in ('cancelled', 'refunded') and new_status in ('cancelled', 'refunded'):
-                self._restore_book_copies(payment)
+            serializer = self.get_serializer(instance, data=data, partial=partial)
+            serializer.is_valid(raise_exception=True)
 
-        return Response(self.get_serializer(payment).data)
+            with transaction.atomic():
+                if replace_items:
+                    # Release whatever book stock the old items held before
+                    # deleting them — otherwise a swapped-out book item's copy
+                    # would stay marked "sold" forever with nothing pointing at it.
+                    self._restore_book_copies(instance)
+                    instance.items.all().delete()
+
+                # amount is read_only on PaymentSerializer (never trusted from
+                # the client), same as create() — pass it as an explicit save()
+                # kwarg here instead of going through self.perform_update()'s
+                # normal validated_data-only save. tenant_id is re-pinned
+                # explicitly too, matching perform_update()'s own belt-and-braces
+                # guard against a payload ever moving a record cross-tenant.
+                original_tenant_id = instance.tenant_id
+                payment = serializer.save(tenant_id=original_tenant_id, **save_kwargs) if original_tenant_id else serializer.save(**save_kwargs)
+                self._log_model_action('update', payment)
+
+                if replace_items:
+                    self._create_items(payment, items_payload, user)
+
+                new_status = payment.status
+                if previous_status not in ('cancelled', 'refunded') and new_status in ('cancelled', 'refunded'):
+                    self._restore_book_copies(payment)
+
+            return Response(self.get_serializer(payment).data)
+        except (ValidationError, PermissionDenied, NotFound):
+            raise
+        except Exception as e:
+            logger.exception("Failed to update payment: %s", e)
+            return Response({'detail': f'Payment update error: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def partial_update(self, request, *args, **kwargs):
         kwargs['partial'] = True
