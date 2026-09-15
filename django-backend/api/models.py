@@ -456,7 +456,7 @@ class Course(models.Model):
     # Meaning depends on pricing_type — see choices above. Unused (null) for
     # per_session, since there's nothing to divide by there.
     sessions_count = models.IntegerField(null=True, blank=True)
-    price = models.DecimalField(max_digits=10, decimal_places=2, default=0, validators=[MinValueValidator(0)])
+    price = models.DecimalField(max_digits=10, decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0'))])
     max_students = models.IntegerField(default=20)
     color = models.CharField(max_length=16, default='#E53935')
     image_url = models.CharField(max_length=255, null=True, blank=True)
@@ -621,7 +621,7 @@ class Payment(models.Model):
         ('other', 'other'),
     ]
     kind = models.CharField(max_length=50, choices=KIND_CHOICES, default='monthly')
-    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
+    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0'))])
     # Never negative — a negative discount would mean charging the family
     # more than the bill's own subtotal. The frontend already clamps this,
     # but this is the one place every caller (including a direct API call)
@@ -631,7 +631,7 @@ class Payment(models.Model):
     # reads, so cancelling, reporting, and the invoice all keep working
     # unchanged regardless of how many differently-discounted items a bill
     # has.
-    discount = models.DecimalField(max_digits=10, decimal_places=2, default=0, validators=[MinValueValidator(0)])
+    discount = models.DecimalField(max_digits=10, decimal_places=2, default=0, validators=[MinValueValidator(Decimal('0'))])
     METHOD_CHOICES = [
         ('cash', 'cash'),
         ('card', 'card'),
@@ -699,7 +699,7 @@ class PaymentItem(models.Model):
     trip = models.ForeignKey('Trip', on_delete=models.SET_NULL, null=True, blank=True, db_column='trip_id', related_name='payment_items')
     book = models.ForeignKey('Book', on_delete=models.SET_NULL, null=True, blank=True, db_column='book_id', related_name='payment_items')
     book_copy = models.ForeignKey('BookCopy', on_delete=models.SET_NULL, null=True, blank=True, db_column='book_copy_id', related_name='sale_items')
-    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
+    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0'))])
     STATUS_CHOICES = [
         ('paid', 'paid'),
         ('pending', 'pending'),
@@ -721,11 +721,11 @@ class PaymentItem(models.Model):
     # multi-item bill instead of one split smeared across all of them.
     teacher_percentage = models.DecimalField(
         max_digits=5, decimal_places=2, null=True, blank=True,
-        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        validators=[MinValueValidator(Decimal('0')), MaxValueValidator(Decimal('100'))],
     )
     school_percentage = models.DecimalField(
         max_digits=5, decimal_places=2, null=True, blank=True,
-        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        validators=[MinValueValidator(Decimal('0')), MaxValueValidator(Decimal('100'))],
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -1093,7 +1093,7 @@ class Expense(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='expenses')
     category = models.ForeignKey(ExpenseCategory, on_delete=models.SET_NULL, null=True, blank=True, db_column='category_id', related_name='expenses')
     title = models.CharField(max_length=255)
-    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0.01)])
+    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0'))])
     spent_at = models.DateField()
     METHOD_CHOICES = [
         ('cash', 'cash'),
@@ -1121,7 +1121,7 @@ class TeacherPayout(models.Model):
     id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='teacher_payouts')
     teacher = models.ForeignKey(Teacher, on_delete=models.CASCADE, db_column='teacher_id', related_name='payouts')
-    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0.01)])
+    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0'))])
     paid_at = models.DateField()
     period_start = models.DateField(null=True, blank=True)
     period_end = models.DateField(null=True, blank=True)
@@ -1226,7 +1226,7 @@ class StudentInsurance(models.Model):
     id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='insurances')
     student = models.ForeignKey(Student, on_delete=models.CASCADE, db_column='student_id', related_name='insurances')
-    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
+    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0'))])
     paid_at = models.DateField()
     academic_year = models.CharField(max_length=50, null=True, blank=True)
     notes = models.TextField(null=True, blank=True)

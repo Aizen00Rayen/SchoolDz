@@ -1,3 +1,4 @@
+from decimal import Decimal
 from rest_framework import serializers
 
 # NOTE: every `tenant_id` below is deliberately read_only. It used to be a
@@ -230,7 +231,7 @@ class PaymentItemSerializer(serializers.ModelSerializer):
     trip_title = serializers.CharField(source='trip.title', read_only=True, default=None)
     book_title = serializers.CharField(source='book.title', read_only=True, default=None)
     group_name = serializers.CharField(source='group.name', read_only=True, default=None)
-    amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0)
+    amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0'))
     status = serializers.ChoiceField(
         choices=['paid', 'pending', 'partial', 'pardoned', 'pardonned', 'cancelled'],
         default='paid',
@@ -589,6 +590,7 @@ class StudentInsuranceSerializer(serializers.ModelSerializer):
     student_name = serializers.SerializerMethodField()
     parent_name = serializers.SerializerMethodField()
     parent_phone = serializers.SerializerMethodField()
+    amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal('0'))
 
     class Meta:
         model = StudentInsurance
