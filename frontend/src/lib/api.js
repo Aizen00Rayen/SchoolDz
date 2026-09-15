@@ -178,16 +178,24 @@ export function formatApiErrorDetail(detail) {
 
 export function extractError(err) {
   const data = err?.response?.data;
-  // Backend returns either {detail: "..."} (DRF default) or {error: "..."} (our custom views).
-  // Check detail first since it can carry richer shapes (validation error lists),
-  // but fall through to error/message rather than a generic string the moment
-  // detail is merely absent — {error: "..."} responses are common (guard-rail
-  // 400s like "Cannot delete a super admin account") and were previously never
-  // shown because "Something went wrong" is truthy and always won the `||` chain.
-  const msg =
-    formatApiErrorDetail(data?.detail) ||
-    (data?.error && typeof data.error === "string" ? data.error : null) ||
-    err?.message ||
-    "Something went wrong. Please try again.";
-  return msg;
+  if (data) {
+    if (data.detail) return formatApiErrorDetail(data.detail);
+    if (data.error && typeof data.error === "string") return data.error;
+    if (Array.isArray(data)) {
+      return data.map((x) => (typeof x === "object" ? JSON.stringify(x) : String(x))).join(" ");
+    }
+    if (typeof data === "object") {
+      const parts = [];
+      for (const [k, v] of Object.entries(data)) {
+        const valStr = Array.isArray(v)
+          ? v.map((x) => (typeof x === "object" ? JSON.stringify(x) : String(x))).join(", ")
+          : typeof v === "object"
+          ? JSON.stringify(v)
+          : String(v);
+        parts.push(k === "non_field_errors" || k === "detail" ? valStr : `${k}: ${valStr}`);
+      }
+      if (parts.length > 0) return parts.join(" | ");
+    }
+  }
+  return err?.message || "Something went wrong. Please try again.";
 }

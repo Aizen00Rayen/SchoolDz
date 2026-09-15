@@ -640,6 +640,10 @@ export default function PaymentsPage() {
                                       patch.amount = 0;
                                       patch.teacher_percentage = 0;
                                       patch.school_percentage = 0;
+                                    } else if ((item.status === "pardoned" || item.status === "pardonned") && item.item_type === "course" && item.course_id) {
+                                      const course = courseMap[item.course_id];
+                                      if (course) patch.amount = parseFloat(course.price) || 0;
+                                      Object.assign(patch, pctFromCourse(item.course_id));
                                     }
                                     updateItem(idx, patch);
                                   }}
@@ -854,9 +858,19 @@ export default function PaymentsPage() {
                             <Input
                               type="number" min="0" max="100" step="any" placeholder="—"
                               value={item.teacher_percentage ?? ""}
-                              onChange={(e) => updateItem(idx, {
-                                teacher_percentage: e.target.value === "" ? null : e.target.value,
-                              })}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === "") {
+                                  updateItem(idx, { teacher_percentage: null });
+                                } else {
+                                  const num = parseFloat(val);
+                                  const patch = { teacher_percentage: val };
+                                  if (!isNaN(num) && num >= 0 && num <= 100) {
+                                    patch.school_percentage = Math.round((100 - num) * 100) / 100;
+                                  }
+                                  updateItem(idx, patch);
+                                }
+                              }}
                               data-testid={`payments-item-${idx}-teacher-percentage`}
                             />
                           </Field>
@@ -864,9 +878,19 @@ export default function PaymentsPage() {
                             <Input
                               type="number" min="0" max="100" step="any" placeholder="—"
                               value={item.school_percentage ?? ""}
-                              onChange={(e) => updateItem(idx, {
-                                school_percentage: e.target.value === "" ? null : e.target.value,
-                              })}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                if (val === "") {
+                                  updateItem(idx, { school_percentage: null });
+                                } else {
+                                  const num = parseFloat(val);
+                                  const patch = { school_percentage: val };
+                                  if (!isNaN(num) && num >= 0 && num <= 100) {
+                                    patch.teacher_percentage = Math.round((100 - num) * 100) / 100;
+                                  }
+                                  updateItem(idx, patch);
+                                }
+                              }}
                               data-testid={`payments-item-${idx}-school-percentage`}
                             />
                           </Field>

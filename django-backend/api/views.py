@@ -4924,7 +4924,14 @@ class PaymentViewSet(TenantScopedViewSet):
         try:
             self.check_module_add()
             user = request.user
-            tenant = Tenant.objects.filter(id=user.tenant_id).first()
+            tenant_id = getattr(user, 'tenant_id', None)
+            if not tenant_id and getattr(user, 'is_super_admin', lambda: False)():
+                student_id = request.data.get('student_id')
+                if student_id:
+                    stu = Student.objects.filter(id=student_id).first()
+                    if stu:
+                        tenant_id = stu.tenant_id
+            tenant = Tenant.objects.filter(id=tenant_id).first() if tenant_id else None
             if not tenant:
                 raise ValidationError('Tenant not found')
 
@@ -4993,7 +5000,7 @@ class PaymentViewSet(TenantScopedViewSet):
                     raise PermissionDenied(_inactive_tenant_message(user.tenant))
                 Tenant.objects.select_for_update().get(id=tenant.id)
                 invoice_number = _next_sequence_code(tenant.id, Payment, 'invoice_number', tenant.invoice_prefix or 'INV-', 6)
-                payment = serializer.save(tenant_id=user.tenant_id, amount=bill_data['amount'], invoice_number=invoice_number) if user.tenant_id else serializer.save(amount=bill_data['amount'], invoice_number=invoice_number)
+                payment = serializer.save(tenant_id=tenant.id, amount=bill_data['amount'], invoice_number=invoice_number)
                 self._log_model_action('create', payment)
                 self._create_items(payment, items_payload, user)
 
@@ -5057,7 +5064,7 @@ class PaymentViewSet(TenantScopedViewSet):
             if item.book_id:
                 copy = (
                     BookCopy.objects.select_for_update()
-                    .filter(tenant_id=user.tenant_id, book_id=item.book_id, status='in_stock')
+                    .filter(tenant_id=payment.tenant_id, book_id=item.book_id, status='in_stock')
                     .order_by('copy_code')
                     .first()
                 )

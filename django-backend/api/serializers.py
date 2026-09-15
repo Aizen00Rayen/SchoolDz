@@ -28,7 +28,10 @@ class TenantScopedPKField(serializers.PrimaryKeyRelatedField):
 
     def get_queryset(self):
         request = self.context.get('request')
-        tenant_id = getattr(getattr(request, 'user', None), 'tenant_id', None)
+        user = getattr(request, 'user', None)
+        if user and getattr(user, 'is_super_admin', lambda: False)():
+            return self._related_model.objects.all()
+        tenant_id = getattr(user, 'tenant_id', None)
         if not tenant_id:
             return self._related_model.objects.none()
         return self._related_model.objects.filter(tenant_id=tenant_id)
@@ -227,6 +230,7 @@ class PaymentItemSerializer(serializers.ModelSerializer):
     trip_title = serializers.CharField(source='trip.title', read_only=True, default=None)
     book_title = serializers.CharField(source='book.title', read_only=True, default=None)
     group_name = serializers.CharField(source='group.name', read_only=True, default=None)
+    amount = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0)
     status = serializers.ChoiceField(
         choices=['paid', 'pending', 'partial', 'pardoned', 'pardonned', 'cancelled'],
         default='paid',
@@ -241,17 +245,12 @@ class PaymentItemSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         if attrs.get('status') == 'pardonned':
             attrs['status'] = 'pardoned'
+        if not attrs.get('course'):
+            attrs['teacher_percentage'] = None
+            attrs['school_percentage'] = None
         teacher_pct = attrs.get('teacher_percentage')
         school_pct = attrs.get('school_percentage')
-        # A %-split only ever means something on a course item (see the
-        # model docstring — a book's royalty is the separate
-        # Teacher.book_percentage mechanism) — reject it elsewhere instead
-        # of silently computing a discount nothing in the UI ever offers.
-        if (teacher_pct is not None or school_pct is not None) and not attrs.get('course'):
-            raise serializers.ValidationError(
-                'teacher_percentage/school_percentage only apply to a course item.'
-            )
-        if teacher_pct is not None and school_pct is not None and (teacher_pct + school_pct) > 100:
+        if teacher_pct is not None and school_pct is not None and round(float(teacher_pct) + float(school_pct), 2) > 100:
             raise serializers.ValidationError(
                 'teacher_percentage + school_percentage cannot exceed 100.'
             )
