@@ -644,6 +644,7 @@ class Payment(models.Model):
         ('paid', 'paid'),
         ('pending', 'pending'),
         ('partial', 'partial'),
+        ('pardoned', 'pardoned'),
         ('refunded', 'refunded'),
         ('cancelled', 'cancelled'),
     ]
@@ -698,10 +699,13 @@ class PaymentItem(models.Model):
     trip = models.ForeignKey('Trip', on_delete=models.SET_NULL, null=True, blank=True, db_column='trip_id', related_name='payment_items')
     book = models.ForeignKey('Book', on_delete=models.SET_NULL, null=True, blank=True, db_column='book_id', related_name='payment_items')
     book_copy = models.ForeignKey('BookCopy', on_delete=models.SET_NULL, null=True, blank=True, db_column='book_copy_id', related_name='sale_items')
-    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0.01)])
+    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(0)])
     STATUS_CHOICES = [
         ('paid', 'paid'),
         ('pending', 'pending'),
+        ('partial', 'partial'),
+        ('pardoned', 'pardoned'),
+        ('cancelled', 'cancelled'),
     ]
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='paid')
     due_date = models.DateField(null=True, blank=True)

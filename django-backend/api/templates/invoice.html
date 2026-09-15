@@ -109,6 +109,21 @@
     color: #b45309;
     border: 0.5pt solid #fde68a;
   }
+  .badge-partial {
+    background: #eff6ff;
+    color: #1d4ed8;
+    border: 0.5pt solid #bfdbfe;
+  }
+  .badge-pardoned {
+    background: #f5f3ff;
+    color: #6d28d9;
+    border: 0.5pt solid #ddd6fe;
+  }
+  .badge-cancelled {
+    background: #fef2f2;
+    color: #b91c1c;
+    border: 0.5pt solid #fecaca;
+  }
 
   .totals-wrap { display: flex; justify-content: flex-start; margin-top: 6pt; }
   .totals { width: 145pt; }
@@ -206,7 +221,7 @@
           {% if line.sub %}<div class="item-sub">{{ line.sub }}</div>{% endif %}
         </td>
         <td class="st">
-          <span class="line-badge {% if line.status == 'paid' %}badge-paid{% else %}badge-pending{% endif %}">
+          <span class="line-badge {% if line.status == 'paid' %}badge-paid{% elif line.status == 'pending' %}badge-pending{% elif line.status == 'partial' %}badge-partial{% elif line.status == 'pardoned' or line.status == 'pardonned' %}badge-pardoned{% else %}badge-cancelled{% endif %}">
             {{ line.status_label }}
           </span>
         </td>

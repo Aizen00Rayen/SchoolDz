@@ -227,7 +227,11 @@ class PaymentItemSerializer(serializers.ModelSerializer):
     trip_title = serializers.CharField(source='trip.title', read_only=True, default=None)
     book_title = serializers.CharField(source='book.title', read_only=True, default=None)
     group_name = serializers.CharField(source='group.name', read_only=True, default=None)
-    status = serializers.ChoiceField(choices=['paid', 'pending'], default='paid', required=False)
+    status = serializers.ChoiceField(
+        choices=['paid', 'pending', 'partial', 'pardoned', 'pardonned', 'cancelled'],
+        default='paid',
+        required=False,
+    )
     due_date = serializers.DateField(allow_null=True, required=False)
 
     class Meta:
@@ -235,6 +239,8 @@ class PaymentItemSerializer(serializers.ModelSerializer):
         exclude = ['payment', 'course', 'group', 'trip', 'book', 'book_copy']
 
     def validate(self, attrs):
+        if attrs.get('status') == 'pardonned':
+            attrs['status'] = 'pardoned'
         teacher_pct = attrs.get('teacher_percentage')
         school_pct = attrs.get('school_percentage')
         # A %-split only ever means something on a course item (see the
@@ -304,6 +310,8 @@ class PaymentSerializer(serializers.ModelSerializer):
         exclude = ['tenant', 'student', 'course', 'group', 'trip', 'book', 'book_copy', 'kind']
 
     def validate(self, attrs):
+        if attrs.get('status') == 'pardonned':
+            attrs['status'] = 'pardoned'
         if not self.instance and not attrs.get('student'):
             raise serializers.ValidationError({'student_id': 'يرجى اختيار تلميذ أولاً.'})
         return attrs

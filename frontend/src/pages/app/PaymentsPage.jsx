@@ -72,6 +72,10 @@ function itemAmount(item) {
  * always matches what the server will actually charge. Only a course item
  * ever carries a split; a trip/book item is never discounted this way. */
 function itemDiscount(item) {
+  if (item.status === "pardoned" || item.status === "pardonned") {
+    return itemAmount(item);
+  }
+  if (item.status === "cancelled") return 0;
   if (item.item_type !== "course") return 0;
   const teacherPct = item.teacher_percentage;
   const schoolPct = item.school_percentage;
@@ -125,6 +129,7 @@ export default function PaymentsPage() {
     queryFn: async () => (await api.get("/payments/balances")).data,
   });
   const [balanceFilter, setBalanceFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [datePeriod, setDatePeriod] = useState("all");
   const [customDates, setCustomDates] = useState({ from: "", to: "" });
   const [detailStudentId, setDetailStudentId] = useState(null);
@@ -138,6 +143,9 @@ export default function PaymentsPage() {
     const params = {};
     if (balanceFilter !== "all") {
       params.balance_status = balanceFilter;
+    }
+    if (statusFilter !== "all") {
+      params.status = statusFilter;
     }
 
     const now = new Date();
@@ -169,7 +177,7 @@ export default function PaymentsPage() {
       if (customDates.to) params.to = customDates.to;
     }
     return Object.keys(params).length > 0 ? params : undefined;
-  }, [balanceFilter, datePeriod, customDates]);
+  }, [balanceFilter, statusFilter, datePeriod, customDates]);
 
   const { data: detail, isLoading: detailLoading } = useQuery({
     queryKey: ["payments-student-summary", detailStudentId],
@@ -363,6 +371,23 @@ export default function PaymentsPage() {
             </Select>
             <Info className="w-4 h-4 text-muted-foreground flex-shrink-0" title={t("payments.balance_explainer")} />
           </div>
+
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <SelectTrigger className="bg-background h-9 w-36" data-testid="payments-status-filter">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-popover">
+                <SelectItem value="all">{t("payments.status_all")}</SelectItem>
+                <SelectItem value="paid">{t("status.paid")}</SelectItem>
+                <SelectItem value="pending">{t("status.pending")}</SelectItem>
+                <SelectItem value="partial">{t("status.partial")}</SelectItem>
+                <SelectItem value="pardoned">{t("status.pardoned")}</SelectItem>
+                <SelectItem value="cancelled">{t("status.cancelled")}</SelectItem>
+                <SelectItem value="refunded">{t("status.refunded")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       )}
       columns={[
@@ -514,8 +539,9 @@ export default function PaymentsPage() {
       renderForm={(form, setForm) => {
         const isEditing = Boolean(form.id);
         const items = form.items || [];
-        const subtotal = subtotalOf(items);
-        const discount = items.reduce((sum, it) => sum + itemDiscount(it), 0);
+        const nonCancelledItems = items.filter((it) => it.status !== "cancelled");
+        const subtotal = subtotalOf(nonCancelledItems);
+        const discount = nonCancelledItems.reduce((sum, it) => sum + itemDiscount(it), 0);
         const total = Math.max(0, subtotal - discount);
         const currency = tenant?.currency || "DZD";
 
@@ -595,34 +621,40 @@ export default function PaymentsPage() {
                         </div>
 
                         <div className="flex items-center gap-2">
-                          {!isEditing && (
-                            <div className="inline-flex rounded-md border border-border p-0.5 bg-muted/40">
-                              <button
-                                type="button"
-                                onClick={() => updateItem(idx, { status: "paid" })}
-                                className={`px-2.5 py-1 text-xs rounded font-medium transition-all ${
-                                  (item.status || "paid") === "paid"
-                                    ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-semibold shadow-xs border border-emerald-500/30"
-                                    : "text-muted-foreground hover:text-foreground border border-transparent"
-                                }`}
-                                data-testid={`payments-item-${idx}-status-paid`}
-                              >
-                                {t("status.paid")}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => updateItem(idx, { status: "pending" })}
-                                className={`px-2.5 py-1 text-xs rounded font-medium transition-all ${
-                                  item.status === "pending"
-                                    ? "bg-amber-500/20 text-amber-700 dark:text-amber-300 font-semibold shadow-xs border border-amber-500/30"
-                                    : "text-muted-foreground hover:text-foreground border border-transparent"
-                                }`}
-                                data-testid={`payments-item-${idx}-status-pending`}
-                              >
-                                {t("status.pending")}
-                              </button>
-                            </div>
-                          )}
+                          <div className="inline-flex flex-wrap rounded-md border border-border p-0.5 bg-muted/40 gap-0.5">
+                            {[
+                              { key: "paid", label: t("status.paid"), activeCls: "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 font-semibold border-emerald-500/30" },
+                              { key: "pending", label: t("status.pending"), activeCls: "bg-amber-500/20 text-amber-700 dark:text-amber-300 font-semibold border-amber-500/30" },
+                              { key: "partial", label: t("status.partial"), activeCls: "bg-blue-500/20 text-blue-700 dark:text-blue-300 font-semibold border-blue-500/30" },
+                              { key: "pardoned", label: t("status.pardoned"), activeCls: "bg-purple-500/20 text-purple-700 dark:text-purple-300 font-semibold border-purple-500/30" },
+                              { key: "cancelled", label: t("status.cancelled"), activeCls: "bg-rose-500/20 text-rose-700 dark:text-rose-300 font-semibold border-rose-500/30" },
+                            ].map((st) => {
+                              const isCur = (item.status || "paid") === st.key;
+                              return (
+                                <button
+                                  key={st.key}
+                                  type="button"
+                                  onClick={() => {
+                                    const patch = { status: st.key };
+                                    if (st.key === "pardoned") {
+                                      patch.amount = 0;
+                                      patch.teacher_percentage = 0;
+                                      patch.school_percentage = 0;
+                                    }
+                                    updateItem(idx, patch);
+                                  }}
+                                  className={`px-2 py-0.5 text-xs rounded font-medium transition-all border ${
+                                    isCur
+                                      ? `${st.activeCls} shadow-xs`
+                                      : "border-transparent text-muted-foreground hover:text-foreground"
+                                  }`}
+                                  data-testid={`payments-item-${idx}-status-${st.key}`}
+                                >
+                                  {st.label}
+                                </button>
+                              );
+                            })}
+                          </div>
 
                           {items.length > 1 && (
                             <Button
@@ -636,7 +668,7 @@ export default function PaymentsPage() {
                         </div>
                       </div>
 
-                      {!isEditing && item.status === "pending" && (
+                      {item.status === "pending" && (
                         <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-md bg-amber-500/10 border border-amber-500/25 text-xs">
                           <span className="text-amber-700 dark:text-amber-300 font-medium">
                             {t("payments.item_pending_hint")}
@@ -652,6 +684,37 @@ export default function PaymentsPage() {
                               data-testid={`payments-item-${idx}-due-date`}
                             />
                           </div>
+                        </div>
+                      )}
+
+                      {item.status === "partial" && (
+                        <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-md bg-blue-500/10 border border-blue-500/25 text-xs">
+                          <span className="text-blue-700 dark:text-blue-300 font-medium">
+                            {t("payments.item_partial_hint")}
+                          </span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-muted-foreground">{t("payments.due")}:</span>
+                            <Input
+                              type="date"
+                              value={item.due_date || ""}
+                              onChange={(e) => updateItem(idx, { due_date: e.target.value })}
+                              className="h-7 w-36 text-xs bg-background"
+                              placeholder={t("field.due_date")}
+                              data-testid={`payments-item-${idx}-due-date`}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {(item.status === "pardoned" || item.status === "pardonned") && (
+                        <div className="flex items-center gap-2 p-2 rounded-md bg-purple-500/10 border border-purple-500/25 text-xs text-purple-700 dark:text-purple-300 font-medium">
+                          <span>{t("payments.item_pardoned_hint")}</span>
+                        </div>
+                      )}
+
+                      {item.status === "cancelled" && (
+                        <div className="flex items-center gap-2 p-2 rounded-md bg-rose-500/10 border border-rose-500/25 text-xs text-rose-700 dark:text-rose-300 font-medium">
+                          <span>{t("status.cancelled")}</span>
                         </div>
                       )}
 
@@ -828,12 +891,13 @@ export default function PaymentsPage() {
                       <SelectItem value="paid">{t("status.paid")}</SelectItem>
                       <SelectItem value="pending">{t("status.pending")}</SelectItem>
                       <SelectItem value="partial">{t("status.partial")}</SelectItem>
+                      <SelectItem value="pardoned">{t("status.pardoned")}</SelectItem>
                       <SelectItem value="refunded">{t("status.refunded")}</SelectItem>
                       <SelectItem value="cancelled">{t("status.cancelled")}</SelectItem>
                     </SelectContent>
                   </Select>
                 </Field>
-                {(form.status === "paid" || form.status === "partial" || form.status === "refunded" || form.status === "cancelled") ? (
+                {(form.status === "paid" || form.status === "partial" || form.status === "pardoned" || form.status === "refunded" || form.status === "cancelled") ? (
                   <Field label={t("field.paid_at")}>
                     <Input
                       type="date"

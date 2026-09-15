@@ -248,6 +248,8 @@ INVOICE_STATUS_AR = {
     'pending': 'قيد الانتظار',
     'overdue': 'متأخر',
     'partial': 'مدفوع جزئيًا',
+    'pardoned': 'معفى',
+    'pardonned': 'معفى',
     'refunded': 'مسترد',
     'cancelled': 'ملغى',
     'due_on': 'يُستحق في',
@@ -1195,6 +1197,8 @@ STAMP_COLORS = {
     'paid': '#2F6B4F',
     'partial': '#3E7CB1',
     'pending': '#A8762C',
+    'pardoned': '#5E35B1',
+    'pardonned': '#5E35B1',
     'overdue': '#B23A2E',
     'refunded': '#8A8478',
     'cancelled': '#8A8478',
@@ -1257,6 +1261,9 @@ def payment_invoice_pdf(request, payment_id):
         elif payment.status == 'partial':
             status_label = INVOICE_STATUS_AR.get('partial', 'جزئي')
             status_line = f"{status_label} — {payment.paid_at.strftime('%d/%m/%Y')}" if payment.paid_at else status_label
+        elif payment.status in ('pardoned', 'pardonned'):
+            status_label = INVOICE_STATUS_AR.get('pardoned', 'معفى')
+            status_line = f"{status_label} — {payment.paid_at.strftime('%d/%m/%Y')}" if payment.paid_at else status_label
         elif is_overdue:
             status_label = INVOICE_STATUS_AR.get('overdue', 'متأخر')
             status_line = f"{status_label} — {payment.due_date.strftime('%d/%m/%Y')}" if payment.due_date else status_label
@@ -1273,10 +1280,10 @@ def payment_invoice_pdf(request, payment_id):
         for item in payment.items.all():
             item_discount = _payment_item_discount(item)
             item_net = max(0.0, float(item.amount or 0) - item_discount)
-            item_st = getattr(item, 'status', None) or ('paid' if payment.status in ('paid', 'partial') else payment.status)
-            if item_st == 'paid':
+            item_st = getattr(item, 'status', None) or ('paid' if payment.status in ('paid', 'partial', 'pardoned') else payment.status)
+            if item_st in ('paid', 'partial'):
                 paid_sum += item_net
-            else:
+            elif item_st == 'pending':
                 pending_sum += item_net
 
             kind_label_ar = INVOICE_KIND_AR.get(item.kind, item.get_kind_display() if hasattr(item, 'get_kind_display') else str(item.kind))
@@ -4784,18 +4791,26 @@ def _next_sequence_code(tenant_id, model, field, prefix, width):
 def _payment_item_discount(item_payload):
     """How much of one item's own amount is waived, from its own
     teacher_percentage/school_percentage — 0 when either is missing (a
-    trip/book item, or a course item nobody set a split for). Payment.discount
-    is the sum of this across every item on the bill, computed server-side so
-    the client never has to (and can't misreport it) — see PaymentViewSet.create."""
+    trip/book item, or a course item nobody set a split for). A pardoned
+    item (status='pardoned') is fully waived (discount = amount).
+    Payment.discount is the sum of this across every item on the bill, computed
+    server-side so the client never has to (and can't misreport it) — see
+    PaymentViewSet.create."""
     try:
         if isinstance(item_payload, dict):
             amount = float(item_payload.get('amount') or 0)
             teacher_pct = item_payload.get('teacher_percentage')
             school_pct = item_payload.get('school_percentage')
+            status = item_payload.get('status')
         else:
             amount = float(getattr(item_payload, 'amount', 0) or 0)
             teacher_pct = getattr(item_payload, 'teacher_percentage', None)
             school_pct = getattr(item_payload, 'school_percentage', None)
+            status = getattr(item_payload, 'status', None)
+
+        if status in ('pardoned', 'pardonned'):
+            return amount
+
         if teacher_pct is None or school_pct is None:
             return 0.0
         teacher_pct = float(teacher_pct)
@@ -4826,7 +4841,7 @@ class PaymentViewSet(TenantScopedViewSet):
             queryset = queryset.filter(student_id=student_id)
         status_val = request.GET.get('status')
         if status_val:
-            queryset = queryset.filter(status=status_val)
+            queryset = queryset.filter(Q(status=status_val) | Q(items__status=status_val)).distinct()
         q = request.GET.get('q')
         if q:
             q = q.strip()
@@ -4920,27 +4935,28 @@ class PaymentViewSet(TenantScopedViewSet):
             bill_data = {k: v for k, v in request.data.items() if k != 'items'}
 
             # Determine statuses across items
-            has_paid = False
-            has_pending = False
+            item_statuses = []
             for item in items_payload:
-                item_st = item.get('status') or bill_data.get('status', 'paid')
-                if item_st not in ('paid', 'pending', 'partial', 'refunded', 'cancelled'):
-                    item_st = 'paid'
-                item['status'] = item_st
-                if item_st == 'paid':
-                    has_paid = True
-                elif item_st == 'pending':
-                    has_pending = True
+                raw_st = item.get('status') or bill_data.get('status', 'paid')
+                if raw_st == 'pardonned':
+                    raw_st = 'pardoned'
+                if raw_st not in ('paid', 'pending', 'partial', 'pardoned', 'refunded', 'cancelled'):
+                    raw_st = 'paid'
+                item['status'] = raw_st
+                item_statuses.append(raw_st)
 
-            if has_paid and has_pending:
+            distinct_statuses = set(item_statuses)
+            if len(distinct_statuses) == 1:
+                status_val = list(distinct_statuses)[0]
+            elif 'pending' in distinct_statuses and ('paid' in distinct_statuses or 'partial' in distinct_statuses or 'pardoned' in distinct_statuses):
                 status_val = 'partial'
-            elif has_pending:
-                status_val = 'pending'
-            elif has_paid:
-                status_val = 'paid'
+            elif 'partial' in distinct_statuses or ('paid' in distinct_statuses and 'pardoned' in distinct_statuses):
+                status_val = 'partial'
             else:
                 status_val = bill_data.get('status', 'paid')
-                if status_val not in ('paid', 'pending', 'partial', 'refunded', 'cancelled'):
+                if status_val == 'pardonned':
+                    status_val = 'pardoned'
+                if status_val not in ('paid', 'pending', 'partial', 'pardoned', 'refunded', 'cancelled'):
                     status_val = 'paid'
 
             bill_data['status'] = status_val
@@ -4950,11 +4966,11 @@ class PaymentViewSet(TenantScopedViewSet):
                 raise ValidationError({'items': 'Each item needs a numeric amount.'})
             bill_data['discount'] = round(sum(_payment_item_discount(item) for item in items_payload), 2)
 
-            if has_paid or status_val in ('paid', 'partial'):
+            if status_val in ('paid', 'partial', 'pardoned') or 'paid' in distinct_statuses:
                 if not bill_data.get('paid_at'):
                     bill_data['paid_at'] = timezone.now().isoformat()
 
-            if has_pending and not bill_data.get('due_date'):
+            if 'pending' in distinct_statuses and not bill_data.get('due_date'):
                 item_due = next((it.get('due_date') for it in items_payload if it.get('status') == 'pending' and it.get('due_date')), None)
                 if item_due:
                     bill_data['due_date'] = item_due
@@ -4998,8 +5014,12 @@ class PaymentViewSet(TenantScopedViewSet):
         replaced (see update())."""
         for item_payload in items_payload:
             clean_item_payload = {k: v for k, v in item_payload.items() if k not in ('id', 'item_type')}
-            if not clean_item_payload.get('status'):
-                clean_item_payload['status'] = 'paid' if payment.status in ('paid', 'partial') else payment.status
+            clean_item_status = clean_item_payload.get('status')
+            if clean_item_status == 'pardonned':
+                clean_item_status = 'pardoned'
+            if not clean_item_status:
+                clean_item_status = 'paid' if payment.status in ('paid', 'partial', 'pardoned') else payment.status
+            clean_item_payload['status'] = clean_item_status
             if not clean_item_payload.get('due_date'):
                 clean_item_payload['due_date'] = None
             for fk in ('course_id', 'group_id', 'trip_id', 'book_id'):
@@ -5126,15 +5146,20 @@ class PaymentViewSet(TenantScopedViewSet):
                 # a client-sent discount (see _payment_item_discount's docstring).
                 data['discount'] = round(sum(_payment_item_discount(item) for item in items_payload), 2)
 
-                item_statuses = {it.get('status') for it in items_payload if it.get('status')}
-                if len(item_statuses) > 1 and 'paid' in item_statuses and 'pending' in item_statuses:
-                    data['status'] = 'partial'
-                elif len(item_statuses) == 1:
+                item_statuses = {('pardoned' if it.get('status') == 'pardonned' else it.get('status')) for it in items_payload if it.get('status')}
+                if len(item_statuses) == 1:
                     data['status'] = list(item_statuses)[0]
+                elif 'pending' in item_statuses and ('paid' in item_statuses or 'partial' in item_statuses or 'pardoned' in item_statuses):
+                    data['status'] = 'partial'
+                elif 'partial' in item_statuses or ('paid' in item_statuses and 'pardoned' in item_statuses):
+                    data['status'] = 'partial'
 
-            # Same rule as create(): 'partial' also stamps paid_at, since it's
-            # real money received — see compute_student_balances's docstring.
-            if data.get('status') in ('paid', 'partial') and not data.get('paid_at'):
+            if data.get('status') == 'pardonned':
+                data['status'] = 'pardoned'
+
+            # Same rule as create(): 'partial'/'pardoned' also stamps paid_at, since it's
+            # real money received / settled — see compute_student_balances's docstring.
+            if data.get('status') in ('paid', 'partial', 'pardoned') and not data.get('paid_at'):
                 data['paid_at'] = timezone.now().isoformat()
 
             serializer = self.get_serializer(instance, data=data, partial=partial)
@@ -5268,7 +5293,7 @@ def compute_student_balances(tenant_id):
         if course_id:
             course_ids.add(course_id)
 
-    courses = {c['id']: c for c in Course.objects.filter(id__in=course_ids).values('id', 'price', 'pricing_type', 'sessions_count')}
+    courses = {c['id']: c for c in Course.objects.filter(tenant_id=tenant_id).values('id', 'price', 'pricing_type', 'sessions_count')}
     price_per_session = {
         cid: course_per_session_price(c['price'], c['pricing_type'], c['sessions_count'])
         for cid, c in courses.items()
@@ -5321,7 +5346,7 @@ def compute_student_balances(tenant_id):
     # registers as outstanding debt even before attendance has begun.
     fixed_billed_items = PaymentItem.objects.filter(
         payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial', 'pending'), course__isnull=False,
-    ).values('payment__student_id', 'course_id', 'amount')
+    ).exclude(status__in=('cancelled', 'pardoned', 'pardonned')).values('payment__student_id', 'course_id', 'amount')
     billed_fixed = {}
     for row in fixed_billed_items:
         key = (row['payment__student_id'], row['course_id'])
@@ -5416,12 +5441,18 @@ def compute_student_balances(tenant_id):
     # gross amount — see that comment for why the two have to agree.
     active_discount = {}
     active_items = PaymentItem.objects.filter(
-        payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial', 'pending'),
-    ).values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage')
+        payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial', 'pending', 'pardoned'),
+    ).exclude(status='cancelled').values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage', 'status', 'course_id')
     for row in active_items:
-        discount = _payment_item_discount(row)
-        if discount:
-            active_discount[row['payment__student_id']] = active_discount.get(row['payment__student_id'], 0.0) + discount
+        if row.get('status') in ('pardoned', 'pardonned'):
+            course_price = float(courses.get(row['course_id'], {}).get('price') or 0) if row.get('course_id') else 0.0
+            pardoned_amount = max(float(row['amount'] or 0), course_price)
+            if pardoned_amount:
+                active_discount[row['payment__student_id']] = active_discount.get(row['payment__student_id'], 0.0) + pardoned_amount
+        else:
+            discount = _payment_item_discount(row)
+            if discount:
+                active_discount[row['payment__student_id']] = active_discount.get(row['payment__student_id'], 0.0) + discount
 
     balances = {}
     for student_id in set(cost) | set(paid):
@@ -5495,7 +5526,7 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
     # compute_student_balances's identical block for the worked example).
     billed_qs = PaymentItem.objects.filter(
         payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial', 'pending'), course_id=course_id,
-    )
+    ).exclude(status__in=('cancelled', 'pardoned', 'pardonned'))
     if student_ids is not None:
         billed_qs = billed_qs.filter(payment__student_id__in=student_ids)
     billed = {}
@@ -5540,14 +5571,20 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
     # bill is 'paid', 'partial', or still 'pending'.
     active_discount = {}
     active_items_qs = PaymentItem.objects.filter(
-        payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial', 'pending'), course_id=course_id,
-    )
+        payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial', 'pending', 'pardoned'), course_id=course_id,
+    ).exclude(status='cancelled')
     if student_ids is not None:
         active_items_qs = active_items_qs.filter(payment__student_id__in=student_ids)
-    for row in active_items_qs.values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage'):
-        discount = _payment_item_discount(row)
-        if discount:
-            active_discount[row['payment__student_id']] = active_discount.get(row['payment__student_id'], 0.0) + discount
+    for row in active_items_qs.values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage', 'status'):
+        if row.get('status') in ('pardoned', 'pardonned'):
+            course_price = float(course['price'] or 0)
+            pardoned_amount = max(float(row['amount'] or 0), course_price)
+            if pardoned_amount:
+                active_discount[row['payment__student_id']] = active_discount.get(row['payment__student_id'], 0.0) + pardoned_amount
+        else:
+            discount = _payment_item_discount(row)
+            if discount:
+                active_discount[row['payment__student_id']] = active_discount.get(row['payment__student_id'], 0.0) + discount
 
     return {
         student_id: (
