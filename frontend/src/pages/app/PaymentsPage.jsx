@@ -90,10 +90,18 @@ function itemDiscount(item) {
     if (pType === "both") {
       return amt;
     }
-    const teacherPct = parseFloat(item.teacher_percentage) || 0;
-    const schoolPct = item.school_percentage != null && item.school_percentage !== ""
+    let teacherPct = parseFloat(item.teacher_percentage) || 0;
+    let schoolPct = item.school_percentage != null && item.school_percentage !== ""
       ? parseFloat(item.school_percentage)
-      : Math.max(0, 100 - teacherPct);
+      : 0;
+    if (teacherPct === 0 && schoolPct === 0) {
+      teacherPct = 50;
+      schoolPct = 50;
+    } else if (teacherPct === 0) {
+      teacherPct = Math.max(0, 100 - schoolPct);
+    } else if (schoolPct === 0) {
+      schoolPct = Math.max(0, 100 - teacherPct);
+    }
     if (pType === "school") {
       return Math.min(amt, Math.round((amt * (schoolPct / 100) + red) * 100) / 100);
     }
@@ -337,6 +345,14 @@ export default function PaymentsPage() {
             }
             if (it.school_percentage != null && it.school_percentage !== "") {
               out.school_percentage = parseFloat(it.school_percentage);
+            }
+            if ((out.pardon_type === "school" || out.pardon_type === "teacher") && out.teacher_percentage == null && out.school_percentage == null) {
+              out.teacher_percentage = 50;
+              out.school_percentage = 50;
+            } else if (out.teacher_percentage != null && out.school_percentage == null) {
+              out.school_percentage = Math.round(Math.max(0, 100 - out.teacher_percentage) * 100) / 100;
+            } else if (out.school_percentage != null && out.teacher_percentage == null) {
+              out.teacher_percentage = Math.round(Math.max(0, 100 - out.school_percentage) * 100) / 100;
             }
           }
           if (it.item_type === "trip" && it.trip_id) out.trip_id = it.trip_id;
@@ -651,10 +667,18 @@ export default function PaymentsPage() {
           const pType = (it.status === "pardoned" || it.status === "pardonned" || (it.pardon_type && it.pay_later))
             ? (it.pardon_type || "both")
             : null;
-          const tPct = parseFloat(it.teacher_percentage) || 0;
-          const sPct = it.school_percentage != null && it.school_percentage !== ""
+          let tPct = parseFloat(it.teacher_percentage) || 0;
+          let sPct = it.school_percentage != null && it.school_percentage !== ""
             ? parseFloat(it.school_percentage)
-            : Math.max(0, 100 - tPct);
+            : 0;
+          if (tPct === 0 && sPct === 0) {
+            tPct = 50;
+            sPct = 50;
+          } else if (tPct === 0) {
+            tPct = Math.max(0, 100 - sPct);
+          } else if (sPct === 0) {
+            sPct = Math.max(0, 100 - tPct);
+          }
 
           let itemTeacher = Math.round(amt * (tPct / 100) * 100) / 100;
           let itemSchool = Math.round(amt * (sPct / 100) * 100) / 100;
@@ -888,7 +912,14 @@ export default function PaymentsPage() {
                                   key={pt.key}
                                   type="button"
                                   title={pt.title}
-                                  onClick={() => updateItem(idx, { pardon_type: pt.key })}
+                                  onClick={() => {
+                                    const patch = { pardon_type: pt.key };
+                                    if ((pt.key === "school" || pt.key === "teacher") && item.teacher_percentage == null && item.school_percentage == null) {
+                                      patch.teacher_percentage = 50;
+                                      patch.school_percentage = 50;
+                                    }
+                                    updateItem(idx, patch);
+                                  }}
                                   className={`px-2 py-1.5 text-xs rounded font-medium transition-all text-center border ${
                                     isSel
                                       ? "bg-purple-600 text-white dark:bg-purple-500 border-purple-600 shadow-xs font-semibold"
