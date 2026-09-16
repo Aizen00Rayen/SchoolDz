@@ -5036,7 +5036,9 @@ class PaymentViewSet(TenantScopedViewSet):
             else:
                 bill_data['discount'] = round(min(bill_data['amount'], items_discount), 2)
 
-            if status_val in ('paid', 'partial') or ('paid' in distinct_statuses and status_val != 'pending'):
+            if status_val == 'pending' or ('pending' in distinct_statuses and 'paid' not in distinct_statuses):
+                bill_data['paid_at'] = None
+            elif status_val in ('paid', 'partial') or ('paid' in distinct_statuses and status_val != 'pending'):
                 if not bill_data.get('paid_at'):
                     bill_data['paid_at'] = timezone.now().isoformat()
             elif status_val == 'pardoned' and 'pending' not in distinct_statuses:
@@ -5050,7 +5052,7 @@ class PaymentViewSet(TenantScopedViewSet):
 
             if not bill_data.get('due_date'):
                 bill_data['due_date'] = None
-            if not bill_data.get('paid_at'):
+            if not bill_data.get('paid_at') or status_val == 'pending':
                 bill_data['paid_at'] = None
             for fk in ('course_id', 'group_id', 'trip_id', 'book_id'):
                 if fk in bill_data and not bill_data[fk]:
@@ -5281,9 +5283,9 @@ class PaymentViewSet(TenantScopedViewSet):
             if data.get('status') == 'pardonned':
                 data['status'] = 'pardoned'
 
-            # Same rule as create(): 'partial'/'pardoned' also stamps paid_at, since it's
-            # real money received / settled — see compute_student_balances's docstring.
-            if data.get('status') in ('paid', 'partial') and not data.get('paid_at'):
+            if data.get('status') == 'pending':
+                data['paid_at'] = None
+            elif data.get('status') in ('paid', 'partial') and not data.get('paid_at'):
                 data['paid_at'] = timezone.now().isoformat()
             elif data.get('status') == 'pardoned' and data.get('status') != 'pending' and not data.get('paid_at'):
                 data['paid_at'] = timezone.now().isoformat()
@@ -5471,8 +5473,19 @@ def compute_student_balances(tenant_id):
     # so enrolling in a course with a pending bill ("pay later") immediately
     # registers as outstanding debt even before attendance has begun.
     fixed_billed_items = PaymentItem.objects.filter(
-        payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial', 'pending'), course__isnull=False,
-    ).exclude(status__in=('cancelled', 'pardoned', 'pardonned')).values('payment__student_id', 'course_id', 'amount')
+        payment__tenant_id=tenant_id, course__isnull=False,
+    ).filter(
+        Q(payment__status__in=('paid', 'partial', 'pending')) |
+        Q(status__in=('paid', 'partial', 'pending')) |
+        Q(pardon_type__in=('school', 'teacher')) |
+        Q(payment__pardon_type__in=('school', 'teacher'))
+    ).exclude(
+        status='cancelled'
+    ).exclude(
+        payment__status='cancelled'
+    ).exclude(
+        Q(pardon_type='both') | (Q(status__in=('pardoned', 'pardonned')) & Q(pardon_type__isnull=True) & Q(payment__pardon_type__isnull=True))
+    ).values('payment__student_id', 'course_id', 'amount')
     billed_fixed = {}
     for row in fixed_billed_items:
         key = (row['payment__student_id'], row['course_id'])
@@ -5580,7 +5593,7 @@ def compute_student_balances(tenant_id):
                 continue
             course_pardon_applied.add(key)
             course_price = float(courses.get(row['course_id'], {}).get('price') or 0) if row.get('course_id') else 0.0
-            item_amt = max(float(row['amount'] or 0), course_price)
+            item_amt = float(row['amount'] or 0) or course_price
             gross_base = max(item_amt, cost_by_student_course.get(key, 0.0))
             if not p_type or p_type == 'both':
                 pardoned_amount = gross_base
@@ -5667,9 +5680,18 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
         cost[row['student_id']] = amount
 
     billed_qs = PaymentItem.objects.filter(
-        payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial', 'pending', 'pardoned'), course_id=course_id,
-    ).exclude(status='cancelled').exclude(
-        Q(pardon_type='both') | (Q(status__in=('pardoned', 'pardonned')) & Q(pardon_type__isnull=True))
+        payment__tenant_id=tenant_id, course_id=course_id,
+    ).filter(
+        Q(payment__status__in=('paid', 'partial', 'pending')) |
+        Q(status__in=('paid', 'partial', 'pending')) |
+        Q(pardon_type__in=('school', 'teacher')) |
+        Q(payment__pardon_type__in=('school', 'teacher'))
+    ).exclude(
+        status='cancelled'
+    ).exclude(
+        payment__status='cancelled'
+    ).exclude(
+        Q(pardon_type='both') | (Q(status__in=('pardoned', 'pardonned')) & Q(pardon_type__isnull=True) & Q(payment__pardon_type__isnull=True))
     )
     if student_ids is not None:
         billed_qs = billed_qs.filter(payment__student_id__in=student_ids)
@@ -5720,7 +5742,7 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
                 continue
             course_pardon_applied.add(sid)
             course_price = float(course['price'] or 0)
-            item_amt = max(float(row['amount'] or 0), course_price)
+            item_amt = float(row['amount'] or 0) or course_price
             gross_base = max(item_amt, cost.get(sid, 0.0))
             if not p_type or p_type == 'both':
                 pardoned_amount = gross_base

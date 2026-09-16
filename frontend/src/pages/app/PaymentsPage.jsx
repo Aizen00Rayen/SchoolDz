@@ -349,6 +349,20 @@ export default function PaymentsPage() {
         } else if (rest.status === "pardoned") {
           rest.pardon_type = rest.pardon_type || "both";
         }
+
+        const allItemsPending = items.length > 0 && items.every((it) => it.status === "pending");
+        const anyItemPending = items.some((it) => it.status === "pending");
+        if (allItemsPending) {
+          rest.status = "pending";
+          rest.paid_at = null;
+        } else if (anyItemPending && rest.status !== "pending") {
+          rest.status = "partial";
+        }
+        const pendingItemWithDue = items.find((it) => it.status === "pending" && it.due_date);
+        if (pendingItemWithDue && !rest.due_date) {
+          rest.due_date = pendingItemWithDue.due_date;
+        }
+
         return {
           ...rest,
           reduction: reductionVal,
