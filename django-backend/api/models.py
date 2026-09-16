@@ -19,7 +19,7 @@ STAFF_ROLES = ('owner', 'director', 'secretary', 'accountant', 'teacher')
 
 PERMISSION_MODULES = [
     'dashboard', 'students', 'teachers', 'parents', 'courses', 'groups',
-    'sessions', 'calendar', 'timetable', 'rooms', 'payments', 'debts', 'expenses', 'teacher_payments',
+    'sessions', 'calendar', 'timetable', 'rooms', 'payments', 'debts', 'expenses', 'other_incomes', 'teacher_payments',
     'grades', 'attendance', 'messages', 'quizzes', 'website', 'reports',
     'logs', 'users', 'settings', 'trips', 'books', 'insurances',
 ]
@@ -115,6 +115,7 @@ class Tenant(models.Model):
     # deleted, so a deleted default category just came right back on the
     # next page load. This flag means seeding only ever happens once.
     default_expense_categories_seeded_at = models.DateTimeField(null=True, blank=True)
+    default_other_income_categories_seeded_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -1132,6 +1133,54 @@ class Expense(models.Model):
     class Meta:
         db_table = 'expenses'
         ordering = ['-spent_at', '-created_at']
+
+
+# Seeded into OtherIncomeCategory the first time a tenant opens the Other Incomes page
+# (see ensure_default_other_income_categories). Stored as `key` so the UI can
+# translate them; tenant-added categories carry a free-text `name` instead.
+DEFAULT_OTHER_INCOME_CATEGORIES = [
+    'printing', 'canteen', 'supplies', 'room_rental',
+    'badges', 'registration_fees', 'other',
+]
+
+
+class OtherIncomeCategory(models.Model):
+    """Either one of DEFAULT_OTHER_INCOME_CATEGORIES (`key` set, `name` blank — the
+    frontend translates it) or a tenant-created one (`name` set, `key` null)."""
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='other_income_categories')
+    key = models.CharField(max_length=50, null=True, blank=True)
+    name = models.CharField(max_length=255, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'other_income_categories'
+        ordering = ['created_at']
+
+
+class OtherIncome(models.Model):
+    id = models.CharField(max_length=36, primary_key=True, default=generate_uuid, editable=False)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='tenant_id', related_name='other_incomes')
+    category = models.ForeignKey(OtherIncomeCategory, on_delete=models.SET_NULL, null=True, blank=True, db_column='category_id', related_name='other_incomes')
+    title = models.CharField(max_length=255)
+    amount = models.DecimalField(max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal('0'))])
+    received_at = models.DateField()
+    METHOD_CHOICES = [
+        ('cash', 'cash'),
+        ('card', 'card'),
+        ('bank_transfer', 'bank_transfer'),
+        ('cheque', 'cheque'),
+        ('other', 'other'),
+    ]
+    method = models.CharField(max_length=50, choices=METHOD_CHOICES, default='cash')
+    notes = models.TextField(null=True, blank=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'other_incomes'
+        ordering = ['-received_at', '-created_at']
 
 
 class TeacherPayout(models.Model):

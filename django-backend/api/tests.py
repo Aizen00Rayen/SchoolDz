@@ -193,4 +193,93 @@ class StudentBalancePardonDebtTestCase(SimpleTestCase):
         self.assertEqual(student_bal['balance'], -1200.0)
 
 
+class OtherIncomeFinanceCalculationTestCase(SimpleTestCase):
+    @patch('api.views.StudentInsurance')
+    @patch('api.views.compute_teacher_earnings')
+    @patch('api.views.OtherIncome')
+    @patch('api.views.Expense')
+    @patch('api.views.Payment')
+    def test_finance_report_includes_other_income(self, mock_payment, mock_expense, mock_other_income, mock_cte, mock_insurance):
+        from api.views import _compute_finance_report_data
+        from unittest.mock import MagicMock
+        from datetime import date
+
+        # Setup mock request
+        request = MagicMock()
+        request.GET = {}
+
+        # Mock payments: 1 paid payment of 10,000
+        p1 = MagicMock()
+        p1.amount = 10000
+        p1.discount = 0
+        p1.paid_at = date(2026, 9, 1)
+        p1.due_date = None
+        p1.status = 'paid'
+        p1.items.all.return_value = []
+        p1.student = None
+        p1.invoice_number = 'INV-1'
+
+        mock_payment.objects.filter.return_value.select_related.return_value.prefetch_related.return_value.filter.return_value = [p1]
+
+        # Mock expenses: 1 expense of 2,000
+        e1 = MagicMock()
+        e1.amount = 2000
+        e1.spent_at = date(2026, 9, 2)
+        e1.title = 'Electricity'
+        e1.category = MagicMock(key='utilities', name=None)
+        mock_expense.objects.filter.return_value.select_related.return_value = [e1]
+
+        # Mock other incomes: 1 printing income of 3,500
+        oi1 = MagicMock()
+        oi1.amount = 3500
+        oi1.received_at = date(2026, 9, 3)
+        oi1.title = 'Exam papers printing'
+        oi1.category = MagicMock(key='printing', name=None)
+        mock_other_income.objects.filter.return_value.select_related.return_value = [oi1]
+
+        # Mock teacher earnings: 4,000
+        mock_cte.return_value = [{'earned': 4000}]
+
+        # Mock insurances: 0
+        mock_insurance.objects.filter.return_value.select_related.return_value = []
+
+        with patch('api.views.filter_by_date_range', side_effect=lambda qs, req, field: qs):
+            result = _compute_finance_report_data('tenant-1', request)
+
+        self.assertEqual(result['collected'], 10000.0)
+        self.assertEqual(result['other_income'], 3500.0)
+        self.assertEqual(result['expenses'], 2000.0)
+        self.assertEqual(result['teacher_earnings'], 4000.0)
+        # Net = collected + other_income - expenses - teacher_earnings = 10000 + 3500 - 2000 - 4000 = 7500
+        self.assertEqual(result['net'], 7500.0)
+        self.assertIn('printing', result['other_income_by_category'])
+        self.assertEqual(result['other_income_by_category']['printing'], 3500.0)
+
+        # Verify other income transaction is in transactions list
+        oi_tx = [tx for tx in result['transactions'] if tx['type'] == 'other_income']
+        self.assertEqual(len(oi_tx), 1)
+        self.assertEqual(oi_tx[0]['amount'], 3500.0)
+        self.assertEqual(oi_tx[0]['description'], 'Exam papers printing')
+
+    @patch('api.views.OtherIncomeCategory')
+    @patch('api.views.Tenant')
+    def test_ensure_default_other_income_categories_seeding(self, mock_tenant, mock_oic):
+        from api.views import ensure_default_other_income_categories, DEFAULT_OTHER_INCOME_CATEGORIES
+
+        # Case 1: Already seeded (update returns 0) -> does nothing
+        mock_tenant.objects.filter.return_value.update.return_value = 0
+        ensure_default_other_income_categories('tenant-seeded')
+        mock_oic.objects.bulk_create.assert_not_called()
+
+        # Case 2: First time seeding (update returns 1) -> creates missing categories
+        mock_tenant.objects.filter.return_value.update.return_value = 1
+        mock_oic.objects.filter.return_value.values_list.return_value = []
+        ensure_default_other_income_categories('tenant-new')
+        mock_oic.objects.bulk_create.assert_called_once()
+        created_items = mock_oic.objects.bulk_create.call_args[0][0]
+        self.assertEqual(len(created_items), len(DEFAULT_OTHER_INCOME_CATEGORIES))
+
+
+
+
 

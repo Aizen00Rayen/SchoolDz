@@ -48,6 +48,10 @@
     - **Deduct from School Cut (`school`):** The school absorbs 100% of the discount; teacher earnings remain completely untouched.
     - **Deduct from Teacher Cut (`teacher`):** The teacher absorbs 100% of the discount; school net revenue remains completely untouched.
   - Real-time live net breakdown preview for both school and teacher before saving.
+- **Auxiliary Revenue & Other Incomes Engine ("مداخيل أخرى"):**
+  - Dedicated ledger for tracking non-tuition revenue additions (printing & photocopying, cafeteria & snacks, school supplies, hall/room rental, badges & student cards, registration & file fees, plus custom tenant categories).
+  - 100% credited to the school's bottom-line revenue without teacher commission split or dilution.
+  - Full bidirectional integration into live Dashboard KPIs, 6-month revenue trends, Net Profit metrics, and exportable financial reports (CSV, Excel, and branded PDF).
 - **Dynamic Cash Flow Tracking:** Real-time calculation of net revenue, operating expenses, unpaid pending debts, and teacher payouts due.
 - **Printable Invoices:** High-resolution PDF generation via WeasyPrint with custom typography, bilingual metadata, and Arabic RTL layout support.
 - **Algerian Payment Gateway Integration:** Chargily Pay integration supporting CIB and EDAHABIA cards with automatic webhook reconciliation.

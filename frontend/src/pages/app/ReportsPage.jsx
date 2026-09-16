@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  Download, FileDown, TrendingUp, TrendingDown, Receipt, Wallet, TriangleAlert, HandCoins, Loader2, ShieldCheck,
+  Download, FileDown, TrendingUp, TrendingDown, Receipt, Wallet, TriangleAlert, HandCoins, Loader2, ShieldCheck, Coins,
 } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
 import { api, downloadFrom, extractError, openFinanceReportPdf } from "@/lib/api";
@@ -18,6 +18,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { categoryLabel } from "./ExpensesPage";
+import { otherIncomeCategoryLabel } from "./OtherIncomesPage";
 
 function currentMonthValue() {
   const d = new Date();
@@ -129,9 +130,10 @@ export default function ReportsPage() {
         </Field>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 mb-6">
         <Card icon={Wallet} label={t("reports.collected")} value={money(finance?.collected)} />
         <Card icon={ShieldCheck} label={t("reports.insurances_entered")} value={money(finance?.insurances)} />
+        <Card icon={Coins} label={t("reports.other_incomes")} value={money(finance?.other_income)} />
         <Card icon={Receipt} label={t("reports.expenses")} value={money(finance?.expenses)} />
         <Card icon={HandCoins} label={t("reports.teacher_earnings")} value={money(finance?.teacher_earnings)} />
         <Card icon={TrendingUp} label={t("reports.net")} value={money(finance?.net)} />
@@ -171,7 +173,7 @@ export default function ReportsPage() {
                       {tx.reference && <div className="text-[11px] font-mono text-muted-foreground">{tx.reference}</div>}
                     </td>
                     <td className="px-3 py-2 text-xs capitalize">
-                      {tx.type === "expense" ? categoryLabel(tx.kind, t) : tx.type === "insurance" ? t("menu.insurances") : t(`kind.${tx.kind}`)}
+                      {tx.type === "expense" ? categoryLabel(tx.kind, t) : tx.type === "other_income" ? otherIncomeCategoryLabel(tx.kind, t) : tx.type === "insurance" ? t("menu.insurances") : t(`kind.${tx.kind}`)}
                     </td>
                     <td className="px-3 py-2">
                       {tx.status ? <StatusPill status={tx.status} /> : <span className="text-xs text-muted-foreground">—</span>}

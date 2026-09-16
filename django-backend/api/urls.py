@@ -30,6 +30,8 @@ router.register('quizzes', views.QuizViewSet, basename='quiz')
 router.register('coupons', views.CouponViewSet, basename='coupon')
 router.register('expenses', views.ExpenseViewSet, basename='expense')
 router.register('expense-categories', views.ExpenseCategoryViewSet, basename='expense-category')
+router.register('other-incomes', views.OtherIncomeViewSet, basename='other-income')
+router.register('other-income-categories', views.OtherIncomeCategoryViewSet, basename='other-income-category')
 router.register('teacher-payouts', views.TeacherPayoutViewSet, basename='teacher-payout')
 router.register('insurances', views.StudentInsuranceViewSet, basename='insurance')
 

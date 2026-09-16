@@ -33,8 +33,8 @@ import traceback
 
 logger = logging.getLogger(__name__)
 
-from .models import Tenant, User, TenantMembership, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, PaymentItem, Trip, Book, BookCopy, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, DebtWaiver, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, PERMISSION_MODULES, PERMISSION_FLAGS, STAFF_ROLES, StudentInsurance
-from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, RoomSerializer, AttendanceSerializer, PaymentSerializer, PaymentItemSerializer, TripSerializer, BookSerializer, BookCopySerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer, TimetableEntrySerializer, StudentInsuranceSerializer
+from .models import Tenant, User, TenantMembership, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, PaymentItem, Trip, Book, BookCopy, Grade, ChargilyCheckout, PasswordResetToken, Conversation, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, OtherIncome, OtherIncomeCategory, TeacherPayout, DebtWaiver, ActivityLog, TimetableEntry, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_OTHER_INCOME_CATEGORIES, PERMISSION_MODULES, PERMISSION_FLAGS, STAFF_ROLES, StudentInsurance
+from .serializers import TenantSerializer, UserSerializer, GuardianSerializer, TeacherSerializer, StudentSerializer, CourseSerializer, GroupSerializer, ClassSessionSerializer, RoomSerializer, AttendanceSerializer, PaymentSerializer, PaymentItemSerializer, TripSerializer, BookSerializer, BookCopySerializer, GradeSerializer, ChargilyCheckoutSerializer, ConversationSerializer, MessageSerializer, CouponSerializer, QuizSerializer, QuizAttemptSerializer, SchoolGalleryPhotoSerializer, ExpenseSerializer, ExpenseCategorySerializer, OtherIncomeSerializer, OtherIncomeCategorySerializer, TeacherPayoutSerializer, ActivityLogSerializer, TimetableEntrySerializer, StudentInsuranceSerializer
 from .services import GoogleOAuthService, ChargilyClient, LoginRateThrottle, PasswordResetRateThrottle, EnrollmentRateThrottle, StudentLookupRateThrottle, RegisterRateThrottle, QuizSubmitRateThrottle, log_activity
 
 # Single source of truth for pricing:
@@ -294,6 +294,16 @@ EXPENSE_CATEGORY_AR = {
     'taxes': 'الضرائب',
     'equipment': 'التجهيزات',
     'trip': 'رحلة مدرسية',
+    'other': 'أخرى',
+    'uncategorized': 'بدون فئة',
+}
+OTHER_INCOME_CATEGORY_AR = {
+    'printing': 'طباعة ونسخ وثائق',
+    'canteen': 'مقصف ومشروبات',
+    'supplies': 'أدوات ولوازم مدرسية',
+    'room_rental': 'تأجير قاعات',
+    'badges': 'بطاقات وأوشحة',
+    'registration_fees': 'رسوم تسجيل وملفات',
     'other': 'أخرى',
     'uncategorized': 'بدون فئة',
 }
@@ -2167,6 +2177,20 @@ def dashboard_summary(request):
         paid_at__gte=month_start
     ).aggregate(total=Sum(F('amount') - F('discount')))
     revenue_month = float(rev_month_data['total'] or 0)
+
+    # Other income (100% school revenue, not split with teachers)
+    other_inc_today_data = OtherIncome.objects.filter(
+        tenant_id=tid, received_at__range=(day_start.date(), day_end.date())
+    ).aggregate(total=Sum('amount'))
+    other_income_today = float(other_inc_today_data['total'] or 0)
+
+    other_inc_month_data = OtherIncome.objects.filter(
+        tenant_id=tid, received_at__gte=month_start.date()
+    ).aggregate(total=Sum('amount'))
+    other_income_month = float(other_inc_month_data['total'] or 0)
+
+    revenue_today += other_income_today
+    revenue_month += other_income_month
     
     # Outstanding — 'partial' now counts as collected money (see
     # compute_student_balances), so only a still-fully-unpaid 'pending'
@@ -2254,12 +2278,16 @@ def dashboard_summary(request):
             status__in=('paid', 'partial', 'pardoned'),
             paid_at__range=(m_date, m_end)
         ).aggregate(total=Sum(F('amount') - F('discount')))
+        m_other_inc_data = OtherIncome.objects.filter(
+            tenant_id=tid,
+            received_at__range=(m_date.date(), m_end.date())
+        ).aggregate(total=Sum('amount'))
         m_exp_data = Expense.objects.filter(
             tenant_id=tid,
             spent_at__range=(m_date.date(), m_end.date())
         ).aggregate(total=Sum('amount'))
 
-        m_total = float(m_rev_data['total'] or 0)
+        m_total = float(m_rev_data['total'] or 0) + float(m_other_inc_data['total'] or 0)
         m_expenses = float(m_exp_data['total'] or 0)
         # Kept as its own series rather than folded into 'expenses' — that
         # field mirrors the Expenses page's own total, and silently padding
@@ -2283,6 +2311,8 @@ def dashboard_summary(request):
             'groups_total': groups_total,
             'revenue_today': round(revenue_today, 2),
             'revenue_month': round(revenue_month, 2),
+            'other_income_today': round(other_income_today, 2),
+            'other_income_month': round(other_income_month, 2),
             'expenses_today': round(expenses_today, 2),
             'expenses_month': round(expenses_month, 2),
             'teacher_earnings_today': round(teacher_earnings_today, 2),
@@ -6639,6 +6669,102 @@ class ExpenseViewSet(TenantScopedViewSet):
         return export_rows(headers, rows, 'expenses', request.GET.get('type'))
 
 
+# -------------------------------------------------------- Other Incomes
+
+def ensure_default_other_income_categories(tenant_id):
+    """Seed every DEFAULT_OTHER_INCOME_CATEGORIES key the very first time a
+    tenant's Other Incomes page is loaded — and only that once (see
+    Tenant.default_other_income_categories_seeded_at). Seeding exactly once
+    means deleted default categories stay deleted."""
+    updated = Tenant.objects.filter(
+        id=tenant_id, default_other_income_categories_seeded_at__isnull=True,
+    ).update(default_other_income_categories_seeded_at=timezone.now())
+    if not updated:
+        return
+    existing_keys = set(
+        OtherIncomeCategory.objects.filter(tenant_id=tenant_id, key__isnull=False).values_list('key', flat=True)
+    )
+    missing = [key for key in DEFAULT_OTHER_INCOME_CATEGORIES if key not in existing_keys]
+    if missing:
+        OtherIncomeCategory.objects.bulk_create([
+            OtherIncomeCategory(tenant_id=tenant_id, key=key) for key in missing
+        ])
+
+
+class OtherIncomeCategoryViewSet(TenantScopedViewSet):
+    queryset = OtherIncomeCategory.objects.all()
+    serializer_class = OtherIncomeCategorySerializer
+    module_key = 'other_incomes'
+
+    def list(self, request, *args, **kwargs):
+        ensure_default_other_income_categories(request.user.tenant_id)
+        queryset = self.filter_queryset(self.get_queryset())
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({'items': serializer.data, 'total': len(serializer.data)})
+
+    def create(self, request, *args, **kwargs):
+        self.check_module_add()
+        name = (request.data.get('name') or '').strip()
+        if not name:
+            raise ValidationError('name is required')
+        category = OtherIncomeCategory.objects.create(tenant_id=request.user.tenant_id, name=name)
+        log_activity(request, request.user.tenant_id, 'create', entity_type='other_income_category',
+                     entity_id=category.id, description=f'Added other income category "{name}"')
+        return Response(OtherIncomeCategorySerializer(category).data)
+
+    def destroy(self, request, *args, **kwargs):
+        self.check_module_delete()
+        category = self.get_object()
+        log_activity(request, request.user.tenant_id, 'delete', entity_type='other_income_category',
+                     entity_id=category.id, description=f'Deleted other income category "{category.key or category.name}"')
+        return super().destroy(request, *args, **kwargs)
+
+
+class OtherIncomeViewSet(TenantScopedViewSet):
+    queryset = OtherIncome.objects.all()
+    serializer_class = OtherIncomeSerializer
+    module_key = 'other_incomes'
+
+    def perform_create(self, serializer):
+        self.check_module_add()
+        instance = serializer.save(tenant_id=self.request.user.tenant_id, created_by=self.request.user)
+        self._log_model_action('create', instance)
+
+    def perform_update(self, serializer):
+        self.check_module_modify()
+        super().perform_update(serializer)
+
+    def perform_destroy(self, instance):
+        self.check_module_delete()
+        super().perform_destroy(instance)
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset()).select_related('category')
+        queryset = filter_by_date_range(queryset, request, 'received_at')
+        category_id = request.GET.get('category_id')
+        if category_id:
+            queryset = queryset.filter(category_id=category_id)
+        q = request.GET.get('q')
+        if q:
+            queryset = queryset.filter(Q(title__icontains=q) | Q(notes__icontains=q))
+        queryset = queryset.order_by('-received_at', '-created_at')[:1000]
+        serializer = self.get_serializer(queryset, many=True)
+        total = sum(float(e.amount) for e in queryset)
+        return Response({'items': serializer.data, 'total': len(serializer.data), 'total_amount': total})
+
+    @action(detail=False, methods=['get'])
+    def export(self, request):
+        queryset = self.filter_queryset(self.get_queryset()).select_related('category')
+        queryset = filter_by_date_range(queryset, request, 'received_at').order_by('-received_at')
+        headers = ['Date', 'Title', 'Category', 'Amount', 'Method', 'Notes']
+        rows = [[
+            e.received_at.isoformat() if e.received_at else '', e.title,
+            e.category.key or e.category.name if e.category else '',
+            float(e.amount), e.method, e.notes or '',
+        ] for e in queryset]
+        return export_rows(headers, rows, 'other_incomes', request.GET.get('type'))
+
+
 # ------------------------------------------------------- Teacher payments
 
 def filter_by_date_range(queryset, request, field):
@@ -7574,6 +7700,17 @@ def _compute_finance_report_data(tid, request):
             label = (e.category.key or e.category.name) if e.category else 'uncategorized'
             by_category[label] = round(by_category.get(label, 0.0) + float(e.amount), 2)
 
+    # Other Incomes — like expenses, belongs to the school as a whole (not scoped to group or teacher)
+    other_incomes = OtherIncome.objects.filter(tenant_id=tid).select_related('category')
+    other_incomes = filter_by_date_range(other_incomes, request, 'received_at')
+    other_income_total = 0.0 if scoped_to_subset else round(sum(float(oi.amount) for oi in other_incomes), 2)
+
+    other_income_by_category = {}
+    if not scoped_to_subset:
+        for oi in other_incomes:
+            label = (oi.category.key or oi.category.name) if oi.category else 'uncategorized'
+            other_income_by_category[label] = round(other_income_by_category.get(label, 0.0) + float(oi.amount), 2)
+
     teacher_rows = compute_teacher_earnings(tid, request)
     teacher_total = round(sum(r['earned'] for r in teacher_rows), 2)
 
@@ -7619,6 +7756,16 @@ def _compute_finance_report_data(tid, request):
             'amount': round(float(ins.amount or 0), 2),
         })
     if not scoped_to_subset:
+        for oi in other_incomes:
+            transactions.append({
+                'date': oi.received_at.isoformat() if oi.received_at else None,
+                'type': 'other_income',
+                'kind': (oi.category.key or oi.category.name) if oi.category else 'uncategorized',
+                'status': 'paid',
+                'description': oi.title,
+                'reference': None,
+                'amount': round(float(oi.amount), 2),
+            })
         for e in expenses:
             transactions.append({
                 'date': e.spent_at.isoformat() if e.spent_at else None,
@@ -7635,10 +7782,12 @@ def _compute_finance_report_data(tid, request):
         'collected': collected,
         'outstanding': pending_amount,
         'insurances': insurance_total,
+        'other_income': other_income_total,
+        'other_income_by_category': other_income_by_category,
         'expenses': expense_total,
         'expenses_by_category': by_category,
         'teacher_earnings': teacher_total,
-        'net': round(collected - expense_total - teacher_total, 2),
+        'net': round(collected + other_income_total - expense_total - teacher_total, 2),
         'payments_count': len(paid),
         'expenses_scoped_out': scoped_to_subset,
         'teachers': teacher_rows,
@@ -7663,11 +7812,12 @@ def finance_report(request):
         rows = [
             ['Collected', result['collected'], '', '', '', ''],
             ['Insurances entered', result['insurances'], '', '', '', ''],
+            ['Other income', result['other_income'], '', '', '', ''],
             ['Outstanding', result['outstanding'], '', '', '', ''],
             ['Expenses', result['expenses'], '', '', '', ''],
             ['Teacher earnings', result['teacher_earnings'], '', '', '', ''],
             ['Net', result['net'], '', '', '', ''],
-        ] + [[f'Expenses — {k}', v, '', '', '', ''] for k, v in sorted(result['expenses_by_category'].items())]
+        ] + [[f'Other income — {k}', v, '', '', '', ''] for k, v in sorted(result['other_income_by_category'].items())] + [[f'Expenses — {k}', v, '', '', '', ''] for k, v in sorted(result['expenses_by_category'].items())]
         rows.append(['', '', '', '', '', ''])
         rows.append(['Transactions', 'Amount', 'Kind', 'Status', 'Description', 'Reference'])
         rows += [[
@@ -7735,11 +7885,15 @@ def finance_report_print(request):
         {'label': EXPENSE_CATEGORY_AR.get(key, key.replace('_', ' ').title()), 'amount': fmt(amount)}
         for key, amount in sorted(result['expenses_by_category'].items(), key=lambda kv: -kv[1])
     ]
+    other_income_by_category = [
+        {'label': OTHER_INCOME_CATEGORY_AR.get(key, key.replace('_', ' ').title()), 'amount': fmt(amount)}
+        for key, amount in sorted(result.get('other_income_by_category', {}).items(), key=lambda kv: -kv[1])
+    ]
     transactions = [{
         'date': datetime.fromisoformat(t['date']).strftime('%d/%m/%Y') if t['date'] else '—',
         'description': t['description'],
         'reference': t['reference'],
-        'kind_label': INVOICE_KIND_AR.get(t['kind'], t['kind']),
+        'kind_label': (OTHER_INCOME_CATEGORY_AR.get(t['kind'], t['kind']) if t['type'] == 'other_income' else EXPENSE_CATEGORY_AR.get(t['kind'], t['kind']) if t['type'] == 'expense' else INVOICE_KIND_AR.get(t['kind'], t['kind'])),
         'status_label': INVOICE_STATUS_AR.get(t['status'], t['status']) if t['status'] else None,
         'is_expense': t['type'] == 'expense',
         'amount': fmt(t['amount']),
@@ -7757,11 +7911,13 @@ def finance_report_print(request):
         'collected': fmt(result['collected']),
         'outstanding': fmt(result['outstanding']),
         'insurances': fmt(result['insurances']),
+        'other_income': fmt(result.get('other_income', 0)),
         'expenses': fmt(result['expenses']),
         'teacher_earnings': fmt(result['teacher_earnings']),
         'net': fmt(result['net']),
         'expenses_scoped_out': result['expenses_scoped_out'],
         'by_category': by_category,
+        'other_income_by_category': other_income_by_category,
         'transactions': transactions,
     }
 

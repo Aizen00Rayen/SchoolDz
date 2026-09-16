@@ -8,7 +8,7 @@ from rest_framework import serializers
 # student list out into a tenant they registered themselves. Nothing
 # legitimate needs it writable: creation sets the tenant server-side via
 # perform_create()'s save(tenant_id=...) kwarg, which bypasses this field.
-from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, PaymentItem, Trip, Book, BookCopy, Grade, ChargilyCheckout, Conversation, ConversationStaffRead, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, TeacherPayout, ActivityLog, TimetableEntry, StudentInsurance
+from .models import Tenant, User, Guardian, Teacher, Student, Course, Group, ClassSession, Room, Attendance, Payment, PaymentItem, Trip, Book, BookCopy, Grade, ChargilyCheckout, Conversation, ConversationStaffRead, Message, Coupon, Quiz, QuizAttempt, QuizSubmissionFile, SchoolGalleryPhoto, Expense, ExpenseCategory, OtherIncome, OtherIncomeCategory, TeacherPayout, ActivityLog, TimetableEntry, StudentInsurance
 
 
 class TenantScopedPKField(serializers.PrimaryKeyRelatedField):
@@ -558,6 +558,25 @@ class ExpenseSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Expense
+        exclude = ['tenant', 'category', 'created_by']
+
+
+class OtherIncomeCategorySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OtherIncomeCategory
+        exclude = ['tenant']
+
+
+class OtherIncomeSerializer(serializers.ModelSerializer):
+    tenant_id = serializers.PrimaryKeyRelatedField(source='tenant', read_only=True)
+    category_id = TenantScopedPKField(
+        OtherIncomeCategory, source='category', allow_null=True, required=False
+    )
+    category_key = serializers.CharField(source='category.key', read_only=True, default=None)
+    category_name = serializers.CharField(source='category.name', read_only=True, default=None)
+
+    class Meta:
+        model = OtherIncome
         exclude = ['tenant', 'category', 'created_by']
 
 
