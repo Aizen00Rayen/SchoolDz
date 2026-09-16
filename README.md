@@ -37,10 +37,17 @@
 
 ### 💰 Financial Accounting & Advanced Invoicing
 - **Multi-Item Billing:** Single invoices grouping multiple items (courses, textbooks, academic trips) with item-level audit trails.
-- **Three-Way Pardon & Waiver Engine:**
+- **Three-Way Pardon & Deferred Payment Engine:**
   - **Full Pardon (`both`):** 100% waiver (Student pays 0 DZD, Teacher receives 0 DZD).
-  - **School Waiver (`school`):** School waives its share; student pays only the teacher's percentage (`amount × teacher_pct / 100`). Teacher earnings are preserved.
-  - **Teacher Waiver (`teacher`):** Teacher waives their percentage; student pays only the school's cut (`amount × school_pct / 100`). Teacher earns 0 DZD.
+  - **School Waiver (`school`):** School waives its share; student owes only the teacher's percentage (`amount × teacher_pct / 100`). Teacher earnings are preserved.
+  - **Teacher Waiver (`teacher`):** Teacher waives their cut; student owes only the school's share (`amount × school_pct / 100`). Teacher earnings remain 0 DZD.
+  - **Deferred "Pay Later" Support for Partial Pardons:** When a student is pardoned by one party (school or teacher), the remaining owed portion can be collected immediately or ticked as **Pay later (Pending Debt)**. The remaining amount is tracked as outstanding debt (`status = 'pending'`, `balance_status = 'owes'`, with `due_date`), while preserving the 0 DZD waiver for the pardoned party.
+- **Targeted Reduction Engine (`reduction` & `reduction_target`):**
+  - Ability to apply a custom reduction price in DZD to any payment, with precise absorption targeting:
+    - **Overall Total (`total`):** Reduction is shared proportionally between the school and teacher based on their respective commission splits.
+    - **Deduct from School Cut (`school`):** The school absorbs 100% of the discount; teacher earnings remain completely untouched.
+    - **Deduct from Teacher Cut (`teacher`):** The teacher absorbs 100% of the discount; school net revenue remains completely untouched.
+  - Real-time live net breakdown preview for both school and teacher before saving.
 - **Dynamic Cash Flow Tracking:** Real-time calculation of net revenue, operating expenses, unpaid pending debts, and teacher payouts due.
 - **Printable Invoices:** High-resolution PDF generation via WeasyPrint with custom typography, bilingual metadata, and Arabic RTL layout support.
 - **Algerian Payment Gateway Integration:** Chargily Pay integration supporting CIB and EDAHABIA cards with automatic webhook reconciliation.

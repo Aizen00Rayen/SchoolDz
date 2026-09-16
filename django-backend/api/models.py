@@ -655,6 +655,13 @@ class Payment(models.Model):
         ('teacher', 'teacher'),
     ]
     pardon_type = models.CharField(max_length=20, choices=PARDON_TYPE_CHOICES, null=True, blank=True)
+    REDUCTION_TARGET_CHOICES = [
+        ('total', 'total'),
+        ('school', 'school'),
+        ('teacher', 'teacher'),
+    ]
+    reduction = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0'), validators=[MinValueValidator(Decimal('0'))])
+    reduction_target = models.CharField(max_length=20, choices=REDUCTION_TARGET_CHOICES, default='total')
     due_date = models.DateField(null=True, blank=True)
     paid_at = models.DateTimeField(null=True, blank=True)
     reference = models.CharField(max_length=255, null=True, blank=True)
@@ -720,6 +727,8 @@ class PaymentItem(models.Model):
         ('teacher', 'teacher'),
     ]
     pardon_type = models.CharField(max_length=20, choices=PARDON_TYPE_CHOICES, null=True, blank=True)
+    reduction = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0'), validators=[MinValueValidator(Decimal('0'))])
+    reduction_target = models.CharField(max_length=20, choices=Payment.REDUCTION_TARGET_CHOICES, default='total')
     due_date = models.DateField(null=True, blank=True)
     # What share of THIS item's own amount goes to the teacher vs the
     # school — only ever meaningfully set on a 'course' item (auto-filled in

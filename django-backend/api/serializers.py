@@ -254,6 +254,11 @@ class PaymentItemSerializer(serializers.ModelSerializer):
             attrs['status'] = 'pardoned'
         if attrs.get('status') == 'pardoned' and not attrs.get('pardon_type'):
             attrs['pardon_type'] = 'both'
+        if attrs.get('reduction') is not None and attrs['reduction'] < 0:
+            raise serializers.ValidationError('Reduction cannot be negative.')
+        target = attrs.get('reduction_target') or 'total'
+        if target not in ('total', 'school', 'teacher'):
+            attrs['reduction_target'] = 'total'
         if not attrs.get('course'):
             attrs['teacher_percentage'] = None
             attrs['school_percentage'] = None
@@ -297,18 +302,22 @@ class PaymentSerializer(serializers.ModelSerializer):
         return None
 
     def get_paid_amount(self, obj):
+        from .views import _payment_item_discount
         paid_items = [
             it for it in obj.items.all()
-            if (getattr(it, 'status', None) == 'paid' or (not getattr(it, 'status', None) and obj.status in ('paid', 'partial')))
+            if (getattr(it, 'status', None) in ('paid', 'partial') or
+                (not getattr(it, 'status', None) and obj.status in ('paid', 'partial')) or
+                (getattr(it, 'status', None) in ('pardoned', 'pardonned') and obj.paid_at))
         ]
-        return round(sum(float(it.amount or 0) for it in paid_items), 2)
+        return round(sum(max(0.0, float(it.amount or 0) - _payment_item_discount(it)) for it in paid_items), 2)
 
     def get_pending_amount(self, obj):
+        from .views import _payment_item_discount
         pending_items = [
             it for it in obj.items.all()
             if (getattr(it, 'status', None) == 'pending' or (not getattr(it, 'status', None) and obj.status == 'pending'))
         ]
-        return round(sum(float(it.amount or 0) for it in pending_items), 2)
+        return round(sum(max(0.0, float(it.amount or 0) - _payment_item_discount(it)) for it in pending_items), 2)
 
     class Meta:
         model = Payment
@@ -322,6 +331,11 @@ class PaymentSerializer(serializers.ModelSerializer):
             attrs['status'] = 'pardoned'
         if attrs.get('status') == 'pardoned' and not attrs.get('pardon_type'):
             attrs['pardon_type'] = 'both'
+        if attrs.get('reduction') is not None and attrs['reduction'] < 0:
+            raise serializers.ValidationError('Reduction cannot be negative.')
+        target = attrs.get('reduction_target') or 'total'
+        if target not in ('total', 'school', 'teacher'):
+            attrs['reduction_target'] = 'total'
         if not self.instance and not attrs.get('student'):
             raise serializers.ValidationError({'student_id': 'يرجى اختيار تلميذ أولاً.'})
         return attrs

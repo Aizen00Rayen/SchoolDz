@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Percent } from "lucide-react";
 import CrudPanel, { StatusPill } from "./CrudPanel";
 import { AlertTriangle, Wallet, FileDown, Info, Calendar } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -35,12 +35,14 @@ const BALANCE_CLS = {
 const EMPTY_ITEM = {
   item_type: "course", kind: "monthly", course_id: "", group_id: "", trip_id: "", book_id: "", amount: 0,
   teacher_percentage: null, school_percentage: null,
-  status: "paid", pardon_type: "both", due_date: "",
+  status: "paid", pardon_type: "both", pay_later: false, due_date: "",
+  reduction: 0, reduction_target: "total",
 };
 
 const DEFAULT_FORM = {
   student_id: "", items: [{ ...EMPTY_ITEM }],
   method: "cash", status: "paid", pardon_type: null, notes: "",
+  reduction: "", reduction_target: "total",
   paid_at: new Date().toISOString().slice(0, 10),
   due_date: "",
 };
@@ -52,6 +54,10 @@ function InfoRow({ label, value }) {
       <span className="font-mono font-medium">{value}</span>
     </div>
   );
+}
+
+function subtotalOf(items) {
+  return items.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
 }
 
 /** A bill's line-item titles, joined — "Test Course + Museum Trip". Reads
@@ -70,7 +76,7 @@ function itemAmount(item) {
 /** How much of one item's own amount is waived — mirrors the backend's
  * _payment_item_discount exactly (see views.py), so the live preview here
  * always matches what the server will actually charge.
- * When status is 'pardoned':
+ * When status is 'pardoned' or item has pardon_type:
  *   - 'both': 100% waived (discount = amount, pays 0 DZD).
  *   - 'school': school part waived (discount = amount * school_pct/100, student pays teacher_pct).
  *   - 'teacher': teacher part waived (discount = amount * teacher_pct/100, student pays school_pct).
@@ -78,7 +84,8 @@ function itemAmount(item) {
 function itemDiscount(item) {
   if (item.status === "cancelled") return 0;
   const amt = itemAmount(item);
-  if (item.status === "pardoned" || item.status === "pardonned") {
+  const red = parseFloat(item.reduction) || 0;
+  if (item.status === "pardoned" || item.status === "pardonned" || (item.pardon_type && item.pay_later)) {
     const pType = item.pardon_type || "both";
     if (pType === "both") {
       return amt;
@@ -88,18 +95,22 @@ function itemDiscount(item) {
       ? parseFloat(item.school_percentage)
       : Math.max(0, 100 - teacherPct);
     if (pType === "school") {
-      return Math.round(amt * (schoolPct / 100) * 100) / 100;
+      return Math.min(amt, Math.round((amt * (schoolPct / 100) + red) * 100) / 100);
     }
     if (pType === "teacher") {
-      return Math.round(amt * (teacherPct / 100) * 100) / 100;
+      return Math.min(amt, Math.round((amt * (teacherPct / 100) + red) * 100) / 100);
     }
     return amt;
   }
-  if (item.item_type !== "course") return 0;
-  const teacherPct = item.teacher_percentage;
-  const schoolPct = item.school_percentage;
-  if (teacherPct == null || teacherPct === "" || schoolPct == null || schoolPct === "") return 0;
-  return Math.max(0, amt * (1 - (parseFloat(teacherPct) + parseFloat(schoolPct)) / 100));
+  let disc = 0;
+  if (item.item_type === "course") {
+    const teacherPct = item.teacher_percentage;
+    const schoolPct = item.school_percentage;
+    if (teacherPct != null && teacherPct !== "" && schoolPct != null && schoolPct !== "") {
+      disc = Math.max(0, amt * (1 - (parseFloat(teacherPct) + parseFloat(schoolPct)) / 100));
+    }
+  }
+  return Math.min(amt, disc + red);
 }
 
 /** An existing item off the API has no `item_type` (that's a frontend-only
@@ -272,14 +283,21 @@ export default function PaymentsPage() {
       prepareEditForm={(row) => ({
         ...row,
         pardon_type: row.pardon_type || null,
+        reduction: row.reduction != null && parseFloat(row.reduction) > 0 ? String(row.reduction) : "",
+        reduction_target: row.reduction_target || "total",
         paid_at: row.paid_at ? row.paid_at.slice(0, 10) : "",
         due_date: row.due_date ? row.due_date.slice(0, 10) : "",
-        items: (row.items || []).map((it) => ({
-          ...it,
-          item_type: deriveItemType(it),
-          status: it.status || row.status || "paid",
-          pardon_type: it.pardon_type || row.pardon_type || "both",
-        })),
+        items: (row.items || []).map((it) => {
+          const isPendingPardon = it.status === "pending" && Boolean(it.pardon_type);
+          return {
+            ...it,
+            item_type: deriveItemType(it),
+            status: isPendingPardon ? "pardoned" : (it.status || row.status || "paid"),
+            pardon_type: it.pardon_type || row.pardon_type || "both",
+            pay_later: isPendingPardon,
+            due_date: it.due_date ? it.due_date.slice(0, 10) : "",
+          };
+        }),
       })}
       // The item rows carry frontend-only bookkeeping (item_type) and, on
       // create, only the one FK relevant to their type — cleanPayload's
@@ -293,15 +311,22 @@ export default function PaymentsPage() {
       // server-side (see PaymentViewSet.update) — how a bill billed under
       // an earlier price/percentage rule gets corrected in place.
       preparePayload={(form) => {
-        const { items: rawItems, ...rest } = form;
+        const { items: rawItems, reduction, reduction_target, ...rest } = form;
+        const reductionVal = Math.max(0, parseFloat(reduction) || 0);
+        const reductionTarget = reduction_target || "total";
+
         const items = (rawItems || []).map((it) => {
+          let itemStatus = it.status || form.status || "paid";
+          if (it.pay_later && (it.status === "pardoned" || it.status === "pardonned")) {
+            itemStatus = "pending";
+          }
           const out = {
             kind: it.item_type === "book" ? "book" : it.kind,
             amount: itemAmount(it),
-            status: it.status || form.status || "paid",
+            status: itemStatus,
           };
           if (it.due_date) out.due_date = it.due_date;
-          if (it.status === "pardoned" || it.status === "pardonned") {
+          if (it.pardon_type && (it.status === "pardoned" || it.status === "pardonned" || it.pay_later)) {
             out.pardon_type = it.pardon_type || "both";
           }
           if (it.item_type === "course" && it.course_id) {
@@ -318,13 +343,18 @@ export default function PaymentsPage() {
           if (it.item_type === "book" && it.book_id) out.book_id = it.book_id;
           return out;
         });
-        const firstPardon = items.find((it) => (it.status === "pardoned" || it.status === "pardonned") && it.pardon_type);
+        const firstPardon = items.find((it) => it.pardon_type);
         if (firstPardon) {
           rest.pardon_type = firstPardon.pardon_type;
         } else if (rest.status === "pardoned") {
           rest.pardon_type = rest.pardon_type || "both";
         }
-        return { ...rest, items };
+        return {
+          ...rest,
+          reduction: reductionVal,
+          reduction_target: reductionTarget,
+          items,
+        };
       }}
       onBeforeSubmit={(form) => {
         if (!form.student_id) {
@@ -586,16 +616,68 @@ export default function PaymentsPage() {
         const items = form.items || [];
         const nonCancelledItems = items.filter((it) => it.status !== "cancelled");
         const subtotal = subtotalOf(nonCancelledItems);
-        const discount = nonCancelledItems.reduce((sum, it) => sum + itemDiscount(it), 0);
-        const total = Math.max(0, subtotal - discount);
+        const pardonDiscount = nonCancelledItems.reduce((sum, it) => sum + itemDiscount(it), 0);
+        const reductionVal = Math.max(0, parseFloat(form.reduction) || 0);
+        const totalDiscount = Math.min(subtotal, pardonDiscount + reductionVal);
+        const total = Math.max(0, subtotal - totalDiscount);
         const currency = tenant?.currency || "DZD";
 
-        const paidItems = items.filter((it) => (it.status || "paid") === "paid");
-        const pendingItems = items.filter((it) => it.status === "pending");
+        const effectiveStatus = (it) => (it.pay_later && (it.status === "pardoned" || it.status === "pardonned")) ? "pending" : (it.status || "paid");
+        const paidItems = items.filter((it) => effectiveStatus(it) === "paid" || (effectiveStatus(it) === "pardoned" && !it.pay_later));
+        const pendingItems = items.filter((it) => effectiveStatus(it) === "pending");
         const isMixed = !isEditing && paidItems.length > 0 && pendingItems.length > 0;
-        const allPending = !isEditing && items.length > 0 && items.every((it) => it.status === "pending");
+        const allPending = !isEditing && items.length > 0 && items.every((it) => effectiveStatus(it) === "pending");
         const paidNetTotal = paidItems.reduce((sum, it) => sum + Math.max(0, itemAmount(it) - itemDiscount(it)), 0);
         const pendingNetTotal = pendingItems.reduce((sum, it) => sum + Math.max(0, itemAmount(it) - itemDiscount(it)), 0);
+
+        let baseTeacherCut = 0;
+        let baseSchoolCut = 0;
+        for (const it of nonCancelledItems) {
+          const amt = itemAmount(it);
+          const pType = (it.status === "pardoned" || it.status === "pardonned" || (it.pardon_type && it.pay_later))
+            ? (it.pardon_type || "both")
+            : null;
+          const tPct = parseFloat(it.teacher_percentage) || 0;
+          const sPct = it.school_percentage != null && it.school_percentage !== ""
+            ? parseFloat(it.school_percentage)
+            : Math.max(0, 100 - tPct);
+
+          let itemTeacher = Math.round(amt * (tPct / 100) * 100) / 100;
+          let itemSchool = Math.round(amt * (sPct / 100) * 100) / 100;
+
+          if (pType === "both") {
+            itemTeacher = 0;
+            itemSchool = 0;
+          } else if (pType === "school") {
+            itemSchool = 0;
+          } else if (pType === "teacher") {
+            itemTeacher = 0;
+          }
+          baseTeacherCut += itemTeacher;
+          baseSchoolCut += itemSchool;
+        }
+
+        const reductionTarget = form.reduction_target || "total";
+        let schoolShareNet = baseSchoolCut;
+        let teacherShareNet = baseTeacherCut;
+        if (reductionVal > 0) {
+          if (reductionTarget === "school") {
+            schoolShareNet = Math.max(0, baseSchoolCut - reductionVal);
+          } else if (reductionTarget === "teacher") {
+            teacherShareNet = Math.max(0, baseTeacherCut - reductionVal);
+          } else {
+            const sumCuts = baseTeacherCut + baseSchoolCut;
+            if (sumCuts > 0) {
+              const teacherDeduction = Math.round(reductionVal * (baseTeacherCut / sumCuts) * 100) / 100;
+              const schoolDeduction = Math.round((reductionVal - teacherDeduction) * 100) / 100;
+              teacherShareNet = Math.max(0, baseTeacherCut - teacherDeduction);
+              schoolShareNet = Math.max(0, baseSchoolCut - schoolDeduction);
+            } else {
+              schoolShareNet = 0;
+              teacherShareNet = 0;
+            }
+          }
+        }
 
         const updateItem = (idx, patch) => {
           setForm({ ...form, items: items.map((it, i) => (i === idx ? { ...it, ...patch } : it)) });
@@ -805,6 +887,42 @@ export default function PaymentsPage() {
                               );
                             })}
                           </div>
+
+                          {(item.pardon_type === "school" || item.pardon_type === "teacher") && (
+                            <div className="pt-2 border-t border-purple-500/20 space-y-2">
+                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                <label className="flex items-center gap-2 cursor-pointer select-none">
+                                  <input
+                                    type="checkbox"
+                                    checked={Boolean(item.pay_later)}
+                                    onChange={(e) => updateItem(idx, { pay_later: e.target.checked })}
+                                    className="rounded border-purple-400 text-purple-600 focus:ring-purple-500 w-4 h-4 cursor-pointer"
+                                    data-testid={`payments-item-${idx}-pay-later`}
+                                  />
+                                  <span className="font-semibold text-purple-950 dark:text-purple-100">
+                                    {t("payments.pay_later")}
+                                  </span>
+                                </label>
+                                {item.pay_later && (
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-muted-foreground">{t("payments.due")}:</span>
+                                    <Input
+                                      type="date"
+                                      value={item.due_date || ""}
+                                      onChange={(e) => updateItem(idx, { due_date: e.target.value })}
+                                      className="h-7 w-36 text-xs bg-background"
+                                      data-testid={`payments-item-${idx}-pardon-due-date`}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                              {item.pay_later && (
+                                <p className="text-[11px] text-purple-700 dark:text-purple-300">
+                                  {t("payments.pay_later_hint")}
+                                </p>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -997,6 +1115,71 @@ export default function PaymentsPage() {
             </div>
           </div>
 
+          {/* Reduction card */}
+          <div className="rounded-lg border border-border bg-card p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-semibold flex items-center gap-1.5">
+                <Percent className="w-3.5 h-3.5 text-accent-foreground" />
+                {t("payments.reduction")}
+              </Label>
+              {reductionVal > 0 && (
+                <span className="text-xs font-mono font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded">
+                  &minus;{reductionVal.toLocaleString()} {currency}
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label={t("payments.reduction_amount")}>
+                <div className="relative">
+                  <Input
+                    type="number"
+                    min="0"
+                    step="any"
+                    placeholder="0"
+                    value={form.reduction ?? ""}
+                    onChange={(e) => setForm({ ...form, reduction: e.target.value })}
+                    className="bg-background pe-12 font-mono"
+                    data-testid="payments-reduction-input"
+                  />
+                  <span className="absolute end-3 top-2.5 text-xs text-muted-foreground pointer-events-none">
+                    {currency}
+                  </span>
+                </div>
+              </Field>
+
+              <Field label={t("payments.reduction_target")}>
+                <Select
+                  value={form.reduction_target || "total"}
+                  onValueChange={(v) => setForm({ ...form, reduction_target: v })}
+                >
+                  <SelectTrigger className="bg-background" data-testid="payments-reduction-target-select">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-popover">
+                    <SelectItem value="total">{t("payments.reduction_target_total")}</SelectItem>
+                    <SelectItem value="school">{t("payments.reduction_target_school")}</SelectItem>
+                    <SelectItem value="teacher">{t("payments.reduction_target_teacher")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+
+            {reductionVal > 0 && (
+              <div className="text-[11px] rounded bg-muted/60 p-2 text-muted-foreground flex flex-wrap items-center justify-between gap-2">
+                <span>{t(`payments.reduction_hint_${reductionTarget}`)}</span>
+                <div className="flex items-center gap-3 font-mono text-xs">
+                  <span className="text-blue-600 dark:text-blue-400 font-medium">
+                    {t("payments.school_net")}: {Math.round(schoolShareNet).toLocaleString()} {currency}
+                  </span>
+                  <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                    {t("payments.teacher_net")}: {Math.round(teacherShareNet).toLocaleString()} {currency}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
           {isEditing ? (
             <>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1135,10 +1318,16 @@ export default function PaymentsPage() {
               <span>{t("payments.subtotal")}</span>
               <span className="font-mono">{Math.round(subtotal).toLocaleString()} {currency}</span>
             </div>
-            {discount > 0 && (
-              <div className="flex justify-between text-muted-foreground">
-                <span>{t("field.discount")}</span>
-                <span className="font-mono">&minus;{Math.round(discount).toLocaleString()} {currency}</span>
+            {pardonDiscount > 0 && (
+              <div className="flex justify-between text-purple-700 dark:text-purple-400 text-xs font-medium">
+                <span>{t("field.discount")} ({t("status.pardoned")})</span>
+                <span className="font-mono">&minus;{Math.round(pardonDiscount).toLocaleString()} {currency}</span>
+              </div>
+            )}
+            {reductionVal > 0 && (
+              <div className="flex justify-between text-amber-700 dark:text-amber-400 text-xs font-medium">
+                <span>{t("payments.reduction")} ({t(`payments.reduction_target_${reductionTarget}`)})</span>
+                <span className="font-mono">&minus;{Math.round(reductionVal).toLocaleString()} {currency}</span>
               </div>
             )}
             {isMixed && (
@@ -1155,7 +1344,7 @@ export default function PaymentsPage() {
             )}
             <div className="flex justify-between font-semibold pt-1 border-t border-border">
               <span>{t("payments.total")}</span>
-              <span className="font-mono">{Math.round(total).toLocaleString()} {currency}</span>
+              <span className="font-mono text-base">{Math.round(total).toLocaleString()} {currency}</span>
             </div>
           </div>
         </div>
