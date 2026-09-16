@@ -19,6 +19,10 @@
 # =============================================================================
 set -euo pipefail
 
+if [[ -S /var/run/docker.sock ]] && [[ "${DOCKER_HOST:-}" =~ podman ]]; then
+  unset DOCKER_HOST
+fi
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND_DIR="$ROOT/frontend"
 BACKEND_DIR="$ROOT/django-backend"

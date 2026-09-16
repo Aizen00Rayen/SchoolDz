@@ -35,12 +35,12 @@ const BALANCE_CLS = {
 const EMPTY_ITEM = {
   item_type: "course", kind: "monthly", course_id: "", group_id: "", trip_id: "", book_id: "", amount: 0,
   teacher_percentage: null, school_percentage: null,
-  status: "paid", due_date: "",
+  status: "paid", pardon_type: "both", due_date: "",
 };
 
 const DEFAULT_FORM = {
   student_id: "", items: [{ ...EMPTY_ITEM }],
-  method: "cash", status: "paid", notes: "",
+  method: "cash", status: "paid", pardon_type: null, notes: "",
   paid_at: new Date().toISOString().slice(0, 10),
   due_date: "",
 };
@@ -69,18 +69,37 @@ function itemAmount(item) {
 
 /** How much of one item's own amount is waived — mirrors the backend's
  * _payment_item_discount exactly (see views.py), so the live preview here
- * always matches what the server will actually charge. Only a course item
- * ever carries a split; a trip/book item is never discounted this way. */
+ * always matches what the server will actually charge.
+ * When status is 'pardoned':
+ *   - 'both': 100% waived (discount = amount, pays 0 DZD).
+ *   - 'school': school part waived (discount = amount * school_pct/100, student pays teacher_pct).
+ *   - 'teacher': teacher part waived (discount = amount * teacher_pct/100, student pays school_pct).
+ */
 function itemDiscount(item) {
-  if (item.status === "pardoned" || item.status === "pardonned") {
-    return itemAmount(item);
-  }
   if (item.status === "cancelled") return 0;
+  const amt = itemAmount(item);
+  if (item.status === "pardoned" || item.status === "pardonned") {
+    const pType = item.pardon_type || "both";
+    if (pType === "both") {
+      return amt;
+    }
+    const teacherPct = parseFloat(item.teacher_percentage) || 0;
+    const schoolPct = item.school_percentage != null && item.school_percentage !== ""
+      ? parseFloat(item.school_percentage)
+      : Math.max(0, 100 - teacherPct);
+    if (pType === "school") {
+      return Math.round(amt * (schoolPct / 100) * 100) / 100;
+    }
+    if (pType === "teacher") {
+      return Math.round(amt * (teacherPct / 100) * 100) / 100;
+    }
+    return amt;
+  }
   if (item.item_type !== "course") return 0;
   const teacherPct = item.teacher_percentage;
   const schoolPct = item.school_percentage;
   if (teacherPct == null || teacherPct === "" || schoolPct == null || schoolPct === "") return 0;
-  return Math.max(0, itemAmount(item) * (1 - (parseFloat(teacherPct) + parseFloat(schoolPct)) / 100));
+  return Math.max(0, amt * (1 - (parseFloat(teacherPct) + parseFloat(schoolPct)) / 100));
 }
 
 /** An existing item off the API has no `item_type` (that's a frontend-only
@@ -252,12 +271,14 @@ export default function PaymentsPage() {
       // render with the same editable cards create() uses.
       prepareEditForm={(row) => ({
         ...row,
+        pardon_type: row.pardon_type || null,
         paid_at: row.paid_at ? row.paid_at.slice(0, 10) : "",
         due_date: row.due_date ? row.due_date.slice(0, 10) : "",
         items: (row.items || []).map((it) => ({
           ...it,
           item_type: deriveItemType(it),
           status: it.status || row.status || "paid",
+          pardon_type: it.pardon_type || row.pardon_type || "both",
         })),
       })}
       // The item rows carry frontend-only bookkeeping (item_type) and, on
@@ -280,6 +301,9 @@ export default function PaymentsPage() {
             status: it.status || form.status || "paid",
           };
           if (it.due_date) out.due_date = it.due_date;
+          if (it.status === "pardoned" || it.status === "pardonned") {
+            out.pardon_type = it.pardon_type || "both";
+          }
           if (it.item_type === "course" && it.course_id) {
             out.course_id = it.course_id;
             if (it.group_id) out.group_id = it.group_id;
@@ -294,6 +318,12 @@ export default function PaymentsPage() {
           if (it.item_type === "book" && it.book_id) out.book_id = it.book_id;
           return out;
         });
+        const firstPardon = items.find((it) => (it.status === "pardoned" || it.status === "pardonned") && it.pardon_type);
+        if (firstPardon) {
+          rest.pardon_type = firstPardon.pardon_type;
+        } else if (rest.status === "pardoned") {
+          rest.pardon_type = rest.pardon_type || "both";
+        }
         return { ...rest, items };
       }}
       onBeforeSubmit={(form) => {
@@ -534,7 +564,22 @@ export default function PaymentsPage() {
           },
         },
         { key: "method", label: t("field.method"), render: (r) => <span className="capitalize text-xs">{t(`method.${r.method}`)}</span> },
-        { key: "status", label: t("field.status"), render: (r) => <StatusPill status={r.status} /> },
+        {
+          key: "status", label: t("field.status"), render: (r) => {
+            const hasPardon = r.status === "pardoned" || (r.items || []).some((it) => it.status === "pardoned");
+            const pType = r.pardon_type || (r.items || []).find((it) => it.status === "pardoned")?.pardon_type;
+            return (
+              <div className="flex flex-col gap-0.5 items-start">
+                <StatusPill status={r.status} />
+                {hasPardon && pType && (
+                  <span className="text-[10px] font-semibold text-purple-700 dark:text-purple-300">
+                    ({t(`payments.pardon_${pType}_short`)})
+                  </span>
+                )}
+              </div>
+            );
+          },
+        },
       ]}
       renderForm={(form, setForm) => {
         const isEditing = Boolean(form.id);
@@ -637,13 +682,20 @@ export default function PaymentsPage() {
                                   onClick={() => {
                                     const patch = { status: st.key };
                                     if (st.key === "pardoned") {
-                                      patch.amount = 0;
-                                      patch.teacher_percentage = 0;
-                                      patch.school_percentage = 0;
-                                    } else if ((item.status === "pardoned" || item.status === "pardonned") && item.item_type === "course" && item.course_id) {
-                                      const course = courseMap[item.course_id];
-                                      if (course) patch.amount = parseFloat(course.price) || 0;
-                                      Object.assign(patch, pctFromCourse(item.course_id));
+                                      patch.pardon_type = item.pardon_type || "both";
+                                    }
+                                    if (!item.amount || parseFloat(item.amount) === 0) {
+                                      if (item.item_type === "course" && item.course_id) {
+                                        const course = courseMap[item.course_id];
+                                        if (course) patch.amount = parseFloat(course.price) || 0;
+                                        Object.assign(patch, pctFromCourse(item.course_id));
+                                      } else if (item.item_type === "trip" && item.trip_id) {
+                                        const trip = (trips?.items || []).find((tr) => tr.id === item.trip_id);
+                                        if (trip) patch.amount = parseFloat(trip.price) || 0;
+                                      } else if (item.item_type === "book" && item.book_id) {
+                                        const book = (books?.items || []).find((bk) => bk.id === item.book_id);
+                                        if (book) patch.amount = parseFloat(book.price) || 0;
+                                      }
                                     }
                                     updateItem(idx, patch);
                                   }}
@@ -711,8 +763,48 @@ export default function PaymentsPage() {
                       )}
 
                       {(item.status === "pardoned" || item.status === "pardonned") && (
-                        <div className="flex items-center gap-2 p-2 rounded-md bg-purple-500/10 border border-purple-500/25 text-xs text-purple-700 dark:text-purple-300 font-medium">
-                          <span>{t("payments.item_pardoned_hint")}</span>
+                        <div className="p-2.5 rounded-md bg-purple-500/10 border border-purple-500/25 text-xs space-y-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="font-semibold text-purple-900 dark:text-purple-200">
+                              {t("payments.pardon_type")}
+                            </span>
+                            {(() => {
+                              const amt = itemAmount(item);
+                              const disc = itemDiscount(item);
+                              const studentPays = Math.max(0, amt - disc);
+                              return (
+                                <span className="font-medium text-purple-950 dark:text-purple-100 bg-purple-500/20 px-2 py-0.5 rounded">
+                                  {t("payments.student_pays")}: <strong className="font-bold">{studentPays.toLocaleString()} DZD</strong>
+                                  {disc > 0 && <span className="ms-1 text-[11px] opacity-75">(-{disc.toLocaleString()} DZD)</span>}
+                                </span>
+                              );
+                            })()}
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
+                            {[
+                              { key: "both", label: t("payments.pardon_both_short"), title: t("payments.pardon_both") },
+                              { key: "school", label: t("payments.pardon_school_short"), title: t("payments.pardon_school") },
+                              { key: "teacher", label: t("payments.pardon_teacher_short"), title: t("payments.pardon_teacher") },
+                            ].map((pt) => {
+                              const isSel = (item.pardon_type || "both") === pt.key;
+                              return (
+                                <button
+                                  key={pt.key}
+                                  type="button"
+                                  title={pt.title}
+                                  onClick={() => updateItem(idx, { pardon_type: pt.key })}
+                                  className={`px-2 py-1.5 text-xs rounded font-medium transition-all text-center border ${
+                                    isSel
+                                      ? "bg-purple-600 text-white dark:bg-purple-500 border-purple-600 shadow-xs font-semibold"
+                                      : "bg-background/80 hover:bg-background border-border text-foreground hover:border-purple-300 dark:hover:border-purple-600"
+                                  }`}
+                                  data-testid={`payments-item-${idx}-pardon-type-${pt.key}`}
+                                >
+                                  {pt.label}
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
                       )}
 
@@ -941,6 +1033,31 @@ export default function PaymentsPage() {
                   </Field>
                 )}
               </div>
+
+              {form.status === "pardoned" && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <Field label={t("payments.pardon_type")}>
+                    <Select
+                      value={form.pardon_type || "both"}
+                      onValueChange={(v) => {
+                        const updatedItems = (form.items || []).map((it) =>
+                          it.status === "pardoned" || it.status === "pardonned"
+                            ? { ...it, pardon_type: v }
+                            : it
+                        );
+                        setForm({ ...form, pardon_type: v, items: updatedItems });
+                      }}
+                    >
+                      <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+                      <SelectContent className="bg-popover">
+                        <SelectItem value="both">{t("payments.pardon_both")}</SelectItem>
+                        <SelectItem value="school">{t("payments.pardon_school")}</SelectItem>
+                        <SelectItem value="teacher">{t("payments.pardon_teacher")}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+              )}
 
               {form.status === "partial" && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

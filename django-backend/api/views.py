@@ -1262,7 +1262,13 @@ def payment_invoice_pdf(request, payment_id):
             status_label = INVOICE_STATUS_AR.get('partial', 'جزئي')
             status_line = f"{status_label} — {payment.paid_at.strftime('%d/%m/%Y')}" if payment.paid_at else status_label
         elif payment.status in ('pardoned', 'pardonned'):
-            status_label = INVOICE_STATUS_AR.get('pardoned', 'معفى')
+            p_type = getattr(payment, 'pardon_type', None) or 'both'
+            if p_type == 'school':
+                status_label = 'معفى من المؤسسة'
+            elif p_type == 'teacher':
+                status_label = 'معفى من الأستاذ'
+            else:
+                status_label = INVOICE_STATUS_AR.get('pardoned', 'معفى')
             status_line = f"{status_label} — {payment.paid_at.strftime('%d/%m/%Y')}" if payment.paid_at else status_label
         elif is_overdue:
             status_label = INVOICE_STATUS_AR.get('overdue', 'متأخر')
@@ -1281,7 +1287,7 @@ def payment_invoice_pdf(request, payment_id):
             item_discount = _payment_item_discount(item)
             item_net = max(0.0, float(item.amount or 0) - item_discount)
             item_st = getattr(item, 'status', None) or ('paid' if payment.status in ('paid', 'partial', 'pardoned') else payment.status)
-            if item_st in ('paid', 'partial'):
+            if item_st in ('paid', 'partial') or (item_st in ('pardoned', 'pardonned') and payment.paid_at):
                 paid_sum += item_net
             elif item_st == 'pending':
                 pending_sum += item_net
@@ -1303,12 +1309,22 @@ def payment_invoice_pdf(request, payment_id):
                 due_str = item.due_date.strftime('%d/%m/%Y') if hasattr(item.due_date, 'strftime') else str(item.due_date)
                 sub_parts.append(f"{INVOICE_STATUS_AR.get('due_on', 'مستحق في')} {due_str}")
 
+            line_status_label = INVOICE_STATUS_AR.get(item_st, item_st)
+            if item_st in ('pardoned', 'pardonned'):
+                it_pt = getattr(item, 'pardon_type', None) or getattr(payment, 'pardon_type', None) or 'both'
+                if it_pt == 'school':
+                    line_status_label = 'معفى من المؤسسة'
+                elif it_pt == 'teacher':
+                    line_status_label = 'معفى من الأستاذ'
+                else:
+                    line_status_label = 'معفى'
+
             lines.append({
                 'title': item.trip.title if item.trip else (item.course.title if item.course else (item.book.title if item.book else kind_label_ar)),
                 'sub': ' · '.join(sub_parts),
                 'amount': f"{float(item.amount or 0):,.2f}",
                 'status': item_st,
-                'status_label': INVOICE_STATUS_AR.get(item_st, item_st),
+                'status_label': line_status_label,
             })
 
         subtotal = float(payment.amount or 0)
@@ -1495,8 +1511,8 @@ def owner_master_dashboard(request):
         Teacher.objects.filter(tenant_id__in=selected_ids).values('tenant_id').annotate(c=Count('id')).values_list('tenant_id', 'c')
     )
 
-    # 'partial' counts as collected money too (see compute_student_balances).
-    payments_qs = Payment.objects.filter(tenant_id__in=selected_ids, status__in=('paid', 'partial'))
+    # 'partial' and 'pardoned' count as collected money too (see compute_student_balances).
+    payments_qs = Payment.objects.filter(tenant_id__in=selected_ids, status__in=('paid', 'partial', 'pardoned'))
     payments_qs = filter_by_date_range(payments_qs, request, 'paid_at')
     # Sum(amount - discount), matching dashboard_summary/finance_report —
     # a plain Sum('amount') would overstate revenue on every discounted
@@ -2128,10 +2144,10 @@ def dashboard_summary(request):
     ).select_related('teacher', 'course', 'group', 'room_ref').order_by('start_at')[:20]
     
     # Calculate revenue today — 'partial' counts as collected money too
-    # (see compute_student_balances).
+    # (see compute_student_balances). 'pardoned' collects (amount - discount).
     rev_today_data = Payment.objects.filter(
         tenant_id=tid,
-        status__in=('paid', 'partial'),
+        status__in=('paid', 'partial', 'pardoned'),
         paid_at__range=(day_start, day_end)
     ).aggregate(total=Sum(F('amount') - F('discount')))
     revenue_today = float(rev_today_data['total'] or 0)
@@ -2139,7 +2155,7 @@ def dashboard_summary(request):
     # Calculate revenue month
     rev_month_data = Payment.objects.filter(
         tenant_id=tid,
-        status__in=('paid', 'partial'),
+        status__in=('paid', 'partial', 'pardoned'),
         paid_at__gte=month_start
     ).aggregate(total=Sum(F('amount') - F('discount')))
     revenue_month = float(rev_month_data['total'] or 0)
@@ -2227,7 +2243,7 @@ def dashboard_summary(request):
         
         m_rev_data = Payment.objects.filter(
             tenant_id=tid,
-            status__in=('paid', 'partial'),
+            status__in=('paid', 'partial', 'pardoned'),
             paid_at__range=(m_date, m_end)
         ).aggregate(total=Sum(F('amount') - F('discount')))
         m_exp_data = Expense.objects.filter(
@@ -4789,26 +4805,37 @@ def _next_sequence_code(tenant_id, model, field, prefix, width):
 
 
 def _payment_item_discount(item_payload):
-    """How much of one item's own amount is waived, from its own
-    teacher_percentage/school_percentage — 0 when either is missing (a
-    trip/book item, or a course item nobody set a split for). A pardoned
-    item (status='pardoned') is fully waived (discount = amount).
-    Payment.discount is the sum of this across every item on the bill, computed
-    server-side so the client never has to (and can't misreport it) — see
-    PaymentViewSet.create."""
+    """How much of one item's own amount is waived.
+    - For regular split items: amount * (1 - (teacher_pct + school_pct)/100).
+    - For pardoned items (status='pardoned'):
+        * pardon_type='both' (or unset): fully waived (discount = amount, pays 0 DZD).
+        * pardon_type='school': school part waived (discount = amount * school_pct/100, student pays teacher_pct).
+        * pardon_type='teacher': teacher part waived (discount = amount * teacher_pct/100, student pays school_pct).
+    """
     try:
         if isinstance(item_payload, dict):
             amount = float(item_payload.get('amount') or 0)
             teacher_pct = item_payload.get('teacher_percentage')
             school_pct = item_payload.get('school_percentage')
             status = item_payload.get('status')
+            pardon_type = item_payload.get('pardon_type')
         else:
             amount = float(getattr(item_payload, 'amount', 0) or 0)
             teacher_pct = getattr(item_payload, 'teacher_percentage', None)
             school_pct = getattr(item_payload, 'school_percentage', None)
             status = getattr(item_payload, 'status', None)
+            pardon_type = getattr(item_payload, 'pardon_type', None)
 
         if status in ('pardoned', 'pardonned'):
+            p_type = pardon_type or 'both'
+            if p_type == 'both':
+                return amount
+            t_pct = float(teacher_pct or 0)
+            s_pct = float(school_pct or (100.0 - t_pct))
+            if p_type == 'school':
+                return max(0.0, round(amount * (s_pct / 100.0), 2))
+            elif p_type == 'teacher':
+                return max(0.0, round(amount * (t_pct / 100.0), 2))
             return amount
 
         if teacher_pct is None or school_pct is None:
@@ -4967,6 +4994,10 @@ class PaymentViewSet(TenantScopedViewSet):
                     status_val = 'paid'
 
             bill_data['status'] = status_val
+            if status_val == 'pardoned':
+                bill_data['pardon_type'] = bill_data.get('pardon_type') or next((it.get('pardon_type') for it in items_payload if it.get('pardon_type')), 'both')
+            else:
+                bill_data['pardon_type'] = None
             try:
                 bill_data['amount'] = sum(float(item.get('amount') or 0) for item in items_payload)
             except (TypeError, AttributeError, ValueError):
@@ -5027,6 +5058,10 @@ class PaymentViewSet(TenantScopedViewSet):
             if not clean_item_status:
                 clean_item_status = 'paid' if payment.status in ('paid', 'partial', 'pardoned') else payment.status
             clean_item_payload['status'] = clean_item_status
+            if clean_item_status == 'pardoned':
+                clean_item_payload['pardon_type'] = clean_item_payload.get('pardon_type') or payment.pardon_type or 'both'
+            else:
+                clean_item_payload['pardon_type'] = None
             if not clean_item_payload.get('due_date'):
                 clean_item_payload['due_date'] = None
             for fk in ('course_id', 'group_id', 'trip_id', 'book_id'):
@@ -5391,12 +5426,14 @@ def compute_student_balances(tenant_id):
     course_items = PaymentItem.objects.filter(
         payment__tenant_id=tenant_id, course__isnull=False,
     ).filter(
-        Q(status='paid') |
-        Q(status__in=['', None], payment__status__in=('paid', 'partial'))
-    ).values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage')
+        Q(status__in=('paid', 'partial')) |
+        Q(status__in=('pardoned', 'pardonned'), payment__paid_at__isnull=False) |
+        Q(status__in=['', None], payment__status__in=('paid', 'partial', 'pardoned', 'pardonned'))
+    ).values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage', 'status', 'pardon_type')
     for row in course_items:
         net = float(row['amount']) - _payment_item_discount(row)
-        paid[row['payment__student_id']] = paid.get(row['payment__student_id'], 0.0) + net
+        if net > 0:
+            paid[row['payment__student_id']] = paid.get(row['payment__student_id'], 0.0) + net
 
     # A payment that's cancelled or refunded stops counting as money
     # received (see `paid` above), but cost here comes purely from
@@ -5449,11 +5486,24 @@ def compute_student_balances(tenant_id):
     active_discount = {}
     active_items = PaymentItem.objects.filter(
         payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial', 'pending', 'pardoned'),
-    ).exclude(status='cancelled').values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage', 'status', 'course_id')
+    ).exclude(status='cancelled').values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage', 'status', 'course_id', 'pardon_type')
     for row in active_items:
         if row.get('status') in ('pardoned', 'pardonned'):
+            p_type = row.get('pardon_type') or 'both'
             course_price = float(courses.get(row['course_id'], {}).get('price') or 0) if row.get('course_id') else 0.0
-            pardoned_amount = max(float(row['amount'] or 0), course_price)
+            item_amt = max(float(row['amount'] or 0), course_price)
+            if p_type == 'both':
+                pardoned_amount = item_amt
+            elif p_type == 'school':
+                t_pct = float(row.get('teacher_percentage') or 0)
+                s_pct = float(row.get('school_percentage') or (100.0 - t_pct))
+                pardoned_amount = round(item_amt * (s_pct / 100.0), 2)
+            elif p_type == 'teacher':
+                t_pct = float(row.get('teacher_percentage') or 0)
+                pardoned_amount = round(item_amt * (t_pct / 100.0), 2)
+            else:
+                pardoned_amount = item_amt
+
             if pardoned_amount:
                 active_discount[row['payment__student_id']] = active_discount.get(row['payment__student_id'], 0.0) + pardoned_amount
         else:
@@ -5532,8 +5582,8 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
     # once; netting it here too would double-subtract it (see
     # compute_student_balances's identical block for the worked example).
     billed_qs = PaymentItem.objects.filter(
-        payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial', 'pending'), course_id=course_id,
-    ).exclude(status__in=('cancelled', 'pardoned', 'pardonned'))
+        payment__tenant_id=tenant_id, payment__status__in=('paid', 'partial', 'pending', 'pardoned'), course_id=course_id,
+    ).exclude(status='cancelled').exclude(Q(status__in=('pardoned', 'pardonned')) & Q(Q(pardon_type='both') | Q(pardon_type__isnull=True)))
     if student_ids is not None:
         billed_qs = billed_qs.filter(payment__student_id__in=student_ids)
     billed = {}
@@ -5551,14 +5601,16 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
     items_qs = PaymentItem.objects.filter(
         payment__tenant_id=tenant_id, course_id=course_id,
     ).filter(
-        Q(status='paid') |
-        Q(status__in=['', None], payment__status__in=('paid', 'partial'))
+        Q(status__in=('paid', 'partial')) |
+        Q(status__in=('pardoned', 'pardonned'), payment__paid_at__isnull=False) |
+        Q(status__in=['', None], payment__status__in=('paid', 'partial', 'pardoned', 'pardonned'))
     )
     if student_ids is not None:
         items_qs = items_qs.filter(payment__student_id__in=student_ids)
-    for row in items_qs.values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage'):
+    for row in items_qs.values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage', 'status', 'pardon_type'):
         net = float(row['amount']) - _payment_item_discount(row)
-        paid[row['payment__student_id']] = paid.get(row['payment__student_id'], 0.0) + net
+        if net > 0:
+            paid[row['payment__student_id']] = paid.get(row['payment__student_id'], 0.0) + net
 
     # Same write-off as compute_student_balances — cancelled/refunded, but
     # only for a bill that had genuinely collected money at some point
@@ -5582,10 +5634,23 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
     ).exclude(status='cancelled')
     if student_ids is not None:
         active_items_qs = active_items_qs.filter(payment__student_id__in=student_ids)
-    for row in active_items_qs.values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage', 'status'):
+    for row in active_items_qs.values('payment__student_id', 'amount', 'teacher_percentage', 'school_percentage', 'status', 'pardon_type'):
         if row.get('status') in ('pardoned', 'pardonned'):
+            p_type = row.get('pardon_type') or 'both'
             course_price = float(course['price'] or 0)
-            pardoned_amount = max(float(row['amount'] or 0), course_price)
+            item_amt = max(float(row['amount'] or 0), course_price)
+            if p_type == 'both':
+                pardoned_amount = item_amt
+            elif p_type == 'school':
+                t_pct = float(row.get('teacher_percentage') or 0)
+                s_pct = float(row.get('school_percentage') or (100.0 - t_pct))
+                pardoned_amount = round(item_amt * (s_pct / 100.0), 2)
+            elif p_type == 'teacher':
+                t_pct = float(row.get('teacher_percentage') or 0)
+                pardoned_amount = round(item_amt * (t_pct / 100.0), 2)
+            else:
+                pardoned_amount = item_amt
+
             if pardoned_amount:
                 active_discount[row['payment__student_id']] = active_discount.get(row['payment__student_id'], 0.0) + pardoned_amount
         else:
@@ -6470,7 +6535,19 @@ def _teacher_earnings_context(tenant_id):
         ).values_list('course_id', 'teacher_id'):
             by_course.setdefault(course_id, set()).add(teacher_id)
         standalone_course_teacher = {cid: next(iter(tids)) for cid, tids in by_course.items() if len(tids) == 1}
-    return session_info, price_per_session, teacher_pct, standalone_course_ids, standalone_course_teacher
+
+    teacher_pardoned_pairs = set(
+        PaymentItem.objects.filter(
+            payment__tenant_id=tenant_id,
+            course_id__isnull=False,
+        ).filter(
+            Q(status__in=('pardoned', 'pardonned'), pardon_type__in=('teacher', 'both')) |
+            Q(payment__status__in=('pardoned', 'pardonned'), payment__pardon_type__in=('teacher', 'both')) |
+            Q(status__in=('pardoned', 'pardonned'), pardon_type__isnull=True) |
+            Q(payment__status__in=('pardoned', 'pardonned'), payment__pardon_type__isnull=True)
+        ).exclude(payment__status='cancelled').values_list('payment__student_id', 'course_id')
+    )
+    return session_info, price_per_session, teacher_pct, standalone_course_ids, standalone_course_teacher, teacher_pardoned_pairs
 
 
 def compute_teacher_earned_total(tenant_id, date_from=None, date_to=None, _context=None):
@@ -6490,16 +6567,18 @@ def compute_teacher_earned_total(tenant_id, date_from=None, date_to=None, _conte
     if date_to:
         attendance = attendance.filter(session__start_at__date__lte=date_to)
 
-    session_info, price_per_session, teacher_pct, standalone_course_ids, standalone_course_teacher = _context or _teacher_earnings_context(tenant_id)
+    session_info, price_per_session, teacher_pct, standalone_course_ids, standalone_course_teacher, teacher_pardoned_pairs = _context or _teacher_earnings_context(tenant_id)
 
     total = 0.0
-    for a in attendance.values('session_id'):
+    for a in attendance.values('session_id', 'student_id'):
         info = session_info.get(a['session_id'])
         if not info or not info['teacher_id']:
             continue
         # Attendance never earns a standalone course's teacher anything —
         # its cut comes entirely from the fully-paid-bill stream below.
         if info['course_id'] in standalone_course_ids:
+            continue
+        if (a['student_id'], info['course_id']) in teacher_pardoned_pairs:
             continue
         pct = float(teacher_pct.get(info['teacher_id']) or 0)
         total += price_per_session.get(info['course_id'], 0.0) * pct / 100
@@ -6553,6 +6632,9 @@ def compute_teacher_earned_total(tenant_id, date_from=None, date_to=None, _conte
         tid = item.group.teacher_id if item.group_id else standalone_course_teacher.get(item.course_id)
         if not tid:
             continue
+        p_type = item.pardon_type or getattr(item.payment, 'pardon_type', None)
+        if (item.status in ('pardoned', 'pardonned') or item.payment.status in ('pardoned', 'pardonned')) and (p_type in ('teacher', 'both') or not p_type):
+            continue
         pct = float(item.teacher_percentage) if item.teacher_percentage is not None else float(teacher_pct.get(tid) or 0)
         total += float(item.amount or 0) * pct / 100
 
@@ -6588,7 +6670,7 @@ def compute_teacher_earnings(tenant_id, request, _context=None):
     # attendance row. Teacher falls back to the session's own teacher_id when
     # set (a substitute covering someone else's group), else the group's
     # regular teacher; course similarly falls back to the group's course.
-    session_info, price_per_session, teacher_pct, standalone_course_ids, standalone_course_teacher = _context or _teacher_earnings_context(tenant_id)
+    session_info, price_per_session, teacher_pct, standalone_course_ids, standalone_course_teacher, teacher_pardoned_pairs = _context or _teacher_earnings_context(tenant_id)
 
     present_count = {}
     base_value = {}
@@ -6602,7 +6684,8 @@ def compute_teacher_earnings(tenant_id, request, _context=None):
         if info['course_id'] in standalone_course_ids:
             continue
         present_count[tid] = present_count.get(tid, 0) + 1
-        base_value[tid] = base_value.get(tid, 0.0) + price_per_session.get(info['course_id'], 0.0)
+        if (a.student_id, info['course_id']) not in teacher_pardoned_pairs:
+            base_value[tid] = base_value.get(tid, 0.0) + price_per_session.get(info['course_id'], 0.0)
 
     payouts = TeacherPayout.objects.filter(tenant_id=tenant_id)
     payouts = filter_by_date_range(payouts, request, 'paid_at')
@@ -6657,7 +6740,10 @@ def compute_teacher_earnings(tenant_id, request, _context=None):
         tid = item.group.teacher_id if item.group_id else standalone_course_teacher.get(item.course_id)
         if not tid or (teacher_id and tid != teacher_id):
             continue
-        pct = float(item.teacher_percentage) if item.teacher_percentage is not None else float(teacher_pct.get(tid) or 0)
+        if item.status in ('pardoned', 'pardonned') and item.pardon_type in ('teacher', 'both'):
+            pct = 0.0
+        else:
+            pct = float(item.teacher_percentage) if item.teacher_percentage is not None else float(teacher_pct.get(tid) or 0)
         standalone_revenue[tid] = standalone_revenue.get(tid, 0.0) + float(item.amount or 0) * pct / 100
 
     rows = []
@@ -7218,7 +7304,7 @@ def _compute_finance_report_data(tid, request):
     # bills by it silently excluded every real invoice); a still-unpaid
     # pending bill has no paid_at at all, so due_date (matching
     # payments_overdue elsewhere) is the only date that means anything for it.
-    paid = list(filter_by_date_range(payments_base.filter(status__in=('paid', 'partial')), request, 'paid_at'))
+    paid = list(filter_by_date_range(payments_base.filter(status__in=('paid', 'partial', 'pardoned')), request, 'paid_at'))
     outstanding = list(filter_by_date_range(payments_base.filter(status='pending'), request, 'due_date'))
     # Cancelled/refunded bills don't count toward collected/outstanding
     # (see compute_student_balances's write-off comment), but still belong

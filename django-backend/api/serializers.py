@@ -237,6 +237,12 @@ class PaymentItemSerializer(serializers.ModelSerializer):
         default='paid',
         required=False,
     )
+    pardon_type = serializers.ChoiceField(
+        choices=['both', 'school', 'teacher'],
+        required=False,
+        allow_null=True,
+        allow_blank=True,
+    )
     due_date = serializers.DateField(allow_null=True, required=False)
 
     class Meta:
@@ -246,6 +252,8 @@ class PaymentItemSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         if attrs.get('status') == 'pardonned':
             attrs['status'] = 'pardoned'
+        if attrs.get('status') == 'pardoned' and not attrs.get('pardon_type'):
+            attrs['pardon_type'] = 'both'
         if not attrs.get('course'):
             attrs['teacher_percentage'] = None
             attrs['school_percentage'] = None
@@ -312,6 +320,8 @@ class PaymentSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         if attrs.get('status') == 'pardonned':
             attrs['status'] = 'pardoned'
+        if attrs.get('status') == 'pardoned' and not attrs.get('pardon_type'):
+            attrs['pardon_type'] = 'both'
         if not self.instance and not attrs.get('student'):
             raise serializers.ValidationError({'student_id': 'يرجى اختيار تلميذ أولاً.'})
         return attrs

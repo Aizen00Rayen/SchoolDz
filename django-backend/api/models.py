@@ -649,6 +649,12 @@ class Payment(models.Model):
         ('cancelled', 'cancelled'),
     ]
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='paid')
+    PARDON_TYPE_CHOICES = [
+        ('both', 'both'),
+        ('school', 'school'),
+        ('teacher', 'teacher'),
+    ]
+    pardon_type = models.CharField(max_length=20, choices=PARDON_TYPE_CHOICES, null=True, blank=True)
     due_date = models.DateField(null=True, blank=True)
     paid_at = models.DateTimeField(null=True, blank=True)
     reference = models.CharField(max_length=255, null=True, blank=True)
@@ -708,6 +714,12 @@ class PaymentItem(models.Model):
         ('cancelled', 'cancelled'),
     ]
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='paid')
+    PARDON_TYPE_CHOICES = [
+        ('both', 'both'),
+        ('school', 'school'),
+        ('teacher', 'teacher'),
+    ]
+    pardon_type = models.CharField(max_length=20, choices=PARDON_TYPE_CHOICES, null=True, blank=True)
     due_date = models.DateField(null=True, blank=True)
     # What share of THIS item's own amount goes to the teacher vs the
     # school — only ever meaningfully set on a 'course' item (auto-filled in
