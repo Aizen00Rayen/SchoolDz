@@ -228,103 +228,104 @@ export default function DebtsPage() {
 
       {/* Settle Debt Modal */}
       <Dialog open={!!payRow} onOpenChange={(open) => !open && setPayRow(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="font-display text-lg">
-              {t("debts.pay_title")}
-            </DialogTitle>
-            <DialogDescription>
-              {payRow?.student_name} — {t("debts.owed")}:{" "}
-              <span className="font-semibold text-destructive font-mono">
-                {totalPayRowOwed.toLocaleString()} {currency}
-              </span>
-            </DialogDescription>
-          </DialogHeader>
+        {payRow && (
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="font-display text-lg">
+                {t("debts.pay_title")}
+              </DialogTitle>
+              <DialogDescription>
+                {payRow.student_name} — {t("debts.owed")}:{" "}
+                <span className="font-semibold text-destructive font-mono">
+                  {totalPayRowOwed.toLocaleString()} {currency}
+                </span>
+              </DialogDescription>
+            </DialogHeader>
 
-          <form onSubmit={handlePaySubmit} className="space-y-4 pt-2">
-            <Field label={t("debts.pay_amount")} required>
-              <Input
-                type="number"
-                step="any"
-                min="0.01"
-                max={totalPayRowOwed}
-                value={payAmount}
-                onChange={(e) => setPayAmount(e.target.value)}
-                placeholder="0"
-                required
-                className="font-mono text-base"
-                autoFocus
-              />
-              <div className="flex items-center justify-between text-xs text-muted-foreground mt-1">
-                <button
+            <form onSubmit={handlePaySubmit} className="space-y-4 pt-2">
+              <Field label={t("debts.pay_amount")} required>
+                <Input
+                  type="number"
+                  step="any"
+                  min="0.01"
+                  max={totalPayRowOwed}
+                  value={payAmount}
+                  onChange={(e) => setPayAmount(e.target.value)}
+                  placeholder="0"
+                  required
+                  className="font-mono text-base"
+                />
+                <div className="flex items-center justify-between text-xs text-muted-foreground mt-1">
+                  <button
+                    type="button"
+                    onClick={() => setPayAmount(String(totalPayRowOwed))}
+                    className="text-accent underline hover:opacity-80"
+                  >
+                    {t("debts.owed")}: {totalPayRowOwed.toLocaleString()} {currency}
+                  </button>
+                  {parsedPayAmount > 0 && parsedPayAmount < totalPayRowOwed && (
+                    <span className="text-warning font-medium">
+                      {t("debts.remaining_debt")}: {remainingAfterPay.toLocaleString()} {currency}
+                    </span>
+                  )}
+                </div>
+              </Field>
+
+              <Field label={t("debts.pay_date")} required>
+                <Input
+                  type="date"
+                  value={payDate}
+                  onChange={(e) => setPayDate(e.target.value)}
+                  required
+                />
+                <span className="text-[11px] text-muted-foreground mt-0.5 block">
+                  {t("debts.pay_date_hint")}
+                </span>
+              </Field>
+
+              <Field label={t("field.payment_method")}>
+                <Select value={payMethod} onValueChange={setPayMethod}>
+                  <SelectTrigger className="bg-background">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-popover">
+                    {["cash", "card", "bank_transfer", "cheque", "other"].map((m) => (
+                      <SelectItem key={m} value={m}>
+                        {t(`method.${m}`, m)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              <Field label={t("field.notes")}>
+                <Input
+                  value={payNotes}
+                  onChange={(e) => setPayNotes(e.target.value)}
+                  placeholder={t("field.notes")}
+                />
+              </Field>
+
+              <DialogFooter className="pt-2">
+                <Button
                   type="button"
-                  onClick={() => setPayAmount(String(totalPayRowOwed))}
-                  className="text-accent underline hover:opacity-80"
+                  variant="outline"
+                  onClick={() => setPayRow(null)}
                 >
-                  {t("debts.owed")}: {totalPayRowOwed.toLocaleString()} {currency}
-                </button>
-                {parsedPayAmount > 0 && parsedPayAmount < totalPayRowOwed && (
-                  <span className="text-warning font-medium">
-                    {t("debts.remaining_debt")}: {remainingAfterPay.toLocaleString()} {currency}
-                  </span>
-                )}
-              </div>
-            </Field>
-
-            <Field label={t("debts.pay_date")} required>
-              <Input
-                type="date"
-                value={payDate}
-                onChange={(e) => setPayDate(e.target.value)}
-                required
-              />
-              <span className="text-[11px] text-muted-foreground mt-0.5 block">
-                {t("debts.pay_date_hint")}
-              </span>
-            </Field>
-
-            <Field label={t("field.payment_method")}>
-              <Select value={payMethod} onValueChange={setPayMethod}>
-                <SelectTrigger className="bg-background">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-popover">
-                  {["cash", "card", "bank_transfer", "cheque", "other"].map((m) => (
-                    <SelectItem key={m} value={m}>
-                      {t(`method.${m}`, m)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-
-            <Field label={t("field.notes")}>
-              <Input
-                value={payNotes}
-                onChange={(e) => setPayNotes(e.target.value)}
-                placeholder={t("field.notes")}
-              />
-            </Field>
-
-            <DialogFooter className="pt-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setPayRow(null)}
-              >
-                {t("actions.cancel")}
-              </Button>
-              <Button
-                type="submit"
-                disabled={payMut.isPending || !parsedPayAmount}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
-              >
-                <Banknote className="w-4 h-4" />
-                <span>{payMut.isPending ? t("actions.saving") : t("debts.pay_action")}</span>
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
+                  {t("actions.cancel")}
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={payMut.isPending || !parsedPayAmount}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
+                >
+                  <Banknote className="w-4 h-4" />
+                  <span>{payMut.isPending ? t("actions.saving") : t("debts.pay_action")}</span>
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        )}
       </Dialog>
     </div>
   );

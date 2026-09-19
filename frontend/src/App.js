@@ -1,6 +1,44 @@
+import React from "react";
 import "@/App.css";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
+
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error("ErrorBoundary caught an error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: "1rem", padding: "2rem", color: "#f8fafc", background: "#0a0a0b", fontFamily: "sans-serif", textAlign: "center" }}>
+          <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: "#ef444420", color: "#ef4444", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.5rem" }}>⚠️</div>
+          <h2 style={{ fontSize: "1.25rem", fontWeight: "bold" }}>حدث خطأ أثناء عرض الصفحة / Something went wrong</h2>
+          <p style={{ fontSize: "0.875rem", color: "#94a3b8", maxWidth: "500px", wordBreak: "break-word" }}>
+            {String(this.state.error?.message || "An unexpected error occurred.")}
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            style={{ padding: "0.5rem 1.25rem", borderRadius: "0.5rem", background: "#6366f1", color: "#fff", border: "none", cursor: "pointer", fontWeight: "500" }}
+          >
+            إعادة تحميل الصفحة / Reload
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { I18nProvider } from "@/lib/i18n";
@@ -114,10 +152,11 @@ function RequirePortalAccess({ children }) {
 
 function App() {
   return (
-    <div className="App">
-      <ThemeProvider>
-        <I18nProvider>
-          <BrowserRouter>
+    <ErrorBoundary>
+      <div className="App">
+        <ThemeProvider>
+          <I18nProvider>
+            <BrowserRouter>
             <AuthProvider>
               <ConfirmProvider>
                 <Routes>
@@ -222,6 +261,7 @@ function App() {
         </I18nProvider>
       </ThemeProvider>
     </div>
+    </ErrorBoundary>
   );
 }
 

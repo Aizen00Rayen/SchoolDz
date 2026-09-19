@@ -35,13 +35,21 @@ const DEFAULT_FORM = {
 export function studentLabel(s, t, showGrade = true) {
   if (!s) return "";
   const latin = [s.first_name_latin, s.last_name_latin].filter(Boolean).join(" ");
-  const base = `${s.first_name} ${s.last_name}`;
+  const base = `${s.first_name || ""} ${s.last_name || ""}`.trim() || s.student_code || "";
   const nameLabel = latin ? `${base} (${latin})` : base;
   if (!showGrade) return nameLabel;
   const parts = [];
-  if (s.school_level) parts.push(t ? t(`school_level.${s.school_level}`, s.school_level) : s.school_level);
-  if (s.school_year) parts.push(t ? t("common.year_n", { n: s.school_year }) : `السنة ${s.school_year}`);
-  if (s.specialty) parts.push(t ? t(`specialty.${s.specialty}`, s.specialty) : s.specialty);
+  if (s.school_level) {
+    const lvlKey = `school_level.${s.school_level}`;
+    parts.push(typeof t === "function" ? t(lvlKey) : s.school_level);
+  }
+  if (s.school_year) {
+    parts.push(typeof t === "function" ? t("common.year_n", { n: s.school_year }) : `السنة ${s.school_year}`);
+  }
+  if (s.specialty) {
+    const spKey = `specialty.${s.specialty}`;
+    parts.push(typeof t === "function" ? t(spKey) : s.specialty);
+  }
   return parts.length ? `${nameLabel} — ${parts.join(" · ")}` : nameLabel;
 }
 
@@ -57,7 +65,7 @@ export function StudentPicker({ selected, onChange, max, showGrade = true }) {
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [labels, setLabels] = useState({});
-  const ids = selected || [];
+  const ids = Array.isArray(selected) ? selected : [];
   const hasMax = typeof max === "number" && !Number.isNaN(max);
   const atMax = hasMax && ids.length >= max;
 
@@ -75,14 +83,16 @@ export function StudentPicker({ selected, onChange, max, showGrade = true }) {
   // Chips need a label for every selected id, including ones picked in an
   // earlier session (editing an existing group/guardian) that never came
   // through a search result in this render.
-  const missingIds = ids.filter((id) => !labels[id]);
+  const missingIds = ids.filter((id) => id && !labels[id]);
   useQuery({
     queryKey: ["students-labels", missingIds.join(","), showGrade],
     queryFn: async () => {
       const { data } = await api.get("/students", { params: { ids: missingIds.join(",") } });
       setLabels((prev) => {
         const next = { ...prev };
-        for (const s of data.items) next[s.id] = studentLabel(s, t, showGrade);
+        for (const s of (data?.items || [])) {
+          if (s?.id) next[s.id] = studentLabel(s, t, showGrade);
+        }
         return next;
       });
       return data;
@@ -94,7 +104,9 @@ export function StudentPicker({ selected, onChange, max, showGrade = true }) {
     if (results?.items?.length) {
       setLabels((prev) => {
         const next = { ...prev };
-        for (const s of results.items) next[s.id] = studentLabel(s, t, showGrade);
+        for (const s of results.items) {
+          if (s?.id) next[s.id] = studentLabel(s, t, showGrade);
+        }
         return next;
       });
     }
