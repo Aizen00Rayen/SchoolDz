@@ -3075,10 +3075,11 @@ export function I18nProvider({ children }) {
 
   const t = useCallback(
     (key, params) => {
-      let str = TRANSLATIONS[lang]?.[key] || TRANSLATIONS.en[key] || key;
-      if (params) {
+      const fallback = typeof params === "string" ? params : key;
+      let str = TRANSLATIONS[lang]?.[key] || TRANSLATIONS.en[key] || fallback;
+      if (params && typeof params === "object" && !Array.isArray(params)) {
         for (const [k, v] of Object.entries(params)) {
-          str = str.replace(new RegExp(`{${k}}`, "g"), v);
+          str = str.replaceAll(`{${k}}`, v);
         }
       }
       return str;

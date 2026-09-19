@@ -80,7 +80,7 @@ export default function DebtsPage() {
     if (!payRow) return;
     const amountNum = parseFloat(payAmount);
     if (!amountNum || amountNum <= 0) {
-      toast.error(t("validation.required", "المبلغ مطلوب"));
+      toast.error(t("validation.required") || "المبلغ مطلوب");
       return;
     }
     payMut.mutate({
@@ -291,7 +291,7 @@ export default function DebtsPage() {
                   <SelectContent className="bg-popover">
                     {["cash", "card", "bank_transfer", "cheque", "other"].map((m) => (
                       <SelectItem key={m} value={m}>
-                        {t(`method.${m}`, m)}
+                        {t(`method.${m}`) || m}
                       </SelectItem>
                     ))}
                   </SelectContent>
