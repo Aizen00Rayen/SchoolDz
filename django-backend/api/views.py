@@ -5973,7 +5973,7 @@ def debts_pay(request, student_id):
     if not user.is_super_admin() and not user.can_modify('debts') and not user.can_add('payments') and not user.can_modify('payments'):
         raise PermissionDenied('Forbidden')
 
-    student = Student.objects.filter(id=student_id, tenant_id=tid).first()
+    student = Student.objects.filter(id=student_id, tenant_id=tid).select_related('tenant').first()
     if not student:
         raise NotFound('Student not found')
 
@@ -6014,6 +6014,8 @@ def debts_pay(request, student_id):
         method = 'cash'
     notes = (request.data.get('notes') or '').strip()
 
+    tenant_prefix = (getattr(student.tenant, 'invoice_prefix', 'INV-') if getattr(student, 'tenant', None) else 'INV-') or 'INV-'
+
     remaining_to_settle = pay_amount
     paid_payments = []
 
@@ -6035,17 +6037,19 @@ def debts_pay(request, student_id):
                 # Fully covers this pending bill
                 p.status = 'paid'
                 p.paid_at = paid_at_dt
+                p.due_date = paid_at_dt.date()
                 p.method = method
+                if not p.invoice_number:
+                    p.invoice_number = _next_sequence_code(tid, Payment, 'invoice_number', tenant_prefix, 6)
                 if notes:
                     p.notes = f"{p.notes}\n{notes}".strip() if p.notes else notes
                 p.save()
-                p.items.exclude(status='cancelled').update(status='paid')
+                p.items.exclude(status='cancelled').update(status='paid', due_date=paid_at_dt.date())
                 remaining_to_settle = max(0.0, round(remaining_to_settle - bill_net, 2))
                 paid_payments.append(p)
             else:
                 # Partially covers this bill: split it
                 portion = round(remaining_to_settle, 2)
-                tenant_prefix = getattr(user.tenant, 'invoice_prefix', 'INV-') or 'INV-'
                 inv_code = _next_sequence_code(tid, Payment, 'invoice_number', tenant_prefix, 6)
 
                 paid_p = Payment.objects.create(
@@ -6053,12 +6057,15 @@ def debts_pay(request, student_id):
                     student_id=student_id,
                     course_id=p.course_id,
                     group_id=p.group_id,
-                    kind=p.kind,
+                    trip_id=p.trip_id,
+                    book_id=p.book_id,
+                    kind=p.kind or 'course',
                     amount=Decimal(str(portion)),
                     discount=Decimal('0'),
                     method=method,
                     status='paid',
                     paid_at=paid_at_dt,
+                    due_date=paid_at_dt.date(),
                     notes=notes or f"دفعة من الفاتورة {p.invoice_number or p.id}",
                     invoice_number=inv_code,
                 )
@@ -6066,20 +6073,24 @@ def debts_pay(request, student_id):
                 first_item = p.items.first()
                 c_id = first_item.course_id if first_item else p.course_id
                 g_id = first_item.group_id if first_item else p.group_id
+                trip_id = first_item.trip_id if first_item else p.trip_id
+                book_id = first_item.book_id if first_item else p.book_id
                 t_pct = first_item.teacher_percentage if first_item else Decimal('0')
                 s_pct = first_item.school_percentage if first_item else Decimal('100')
 
                 PaymentItem.objects.create(
-                    tenant_id=tid,
                     payment=paid_p,
                     course_id=c_id,
                     group_id=g_id,
+                    trip_id=trip_id,
+                    book_id=book_id,
                     amount=Decimal(str(portion)),
                     reduction=Decimal('0'),
+                    due_date=paid_at_dt.date(),
                     teacher_percentage=t_pct,
                     school_percentage=s_pct,
                     status='paid',
-                    kind=p.kind,
+                    kind=p.kind or 'course',
                 )
 
                 # Reduce original pending bill and its items
@@ -6108,7 +6119,6 @@ def debts_pay(request, student_id):
         # If still remaining (e.g. debt originated directly from attendance cost without a bill)
         if remaining_to_settle > 0.001:
             portion = round(remaining_to_settle, 2)
-            tenant_prefix = getattr(user.tenant, 'invoice_prefix', 'INV-') or 'INV-'
             inv_code = _next_sequence_code(tid, Payment, 'invoice_number', tenant_prefix, 6)
 
             primary_group = student.groups.first()
@@ -6117,7 +6127,7 @@ def debts_pay(request, student_id):
             if not c_id:
                 last_att = Attendance.objects.filter(tenant_id=tid, student_id=student_id).select_related('session').last()
                 if last_att and last_att.session:
-                    c_id = last_att.session.course_id
+                    c_id = last_att.session.course_id or getattr(last_att.session.group, 'course_id', None)
                     g_id = last_att.session.group_id
             if not c_id:
                 c_id = Course.objects.filter(tenant_id=tid).values_list('id', flat=True).first()
@@ -6133,16 +6143,17 @@ def debts_pay(request, student_id):
                 method=method,
                 status='paid',
                 paid_at=paid_at_dt,
+                due_date=paid_at_dt.date(),
                 notes=notes or "تسديد دين",
                 invoice_number=inv_code,
             )
             PaymentItem.objects.create(
-                tenant_id=tid,
                 payment=paid_p,
                 course_id=c_id,
                 group_id=g_id,
                 amount=Decimal(str(portion)),
                 reduction=Decimal('0'),
+                due_date=paid_at_dt.date(),
                 teacher_percentage=Decimal('0'),
                 school_percentage=Decimal('100'),
                 status='paid',

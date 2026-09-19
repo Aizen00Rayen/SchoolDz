@@ -345,7 +345,9 @@ class DebtPayTestCase(SimpleTestCase):
         mock_user.tenant.invoice_prefix = 'INV-'
 
         student = MagicMock(id='s1', first_name='Walid', last_name='Ben')
+        student.tenant.invoice_prefix = 'INV-'
         mock_student.objects.filter.return_value.first.return_value = student
+        mock_student.objects.filter.return_value.select_related.return_value.first.return_value = student
 
         mock_balances.side_effect = [
             {'s1': {'balance': -5000.0, 'status': 'owes'}},
@@ -390,7 +392,9 @@ class DebtPayTestCase(SimpleTestCase):
         mock_user.tenant.invoice_prefix = 'INV-'
 
         student = MagicMock(id='s1', first_name='Walid', last_name='Ben')
+        student.tenant.invoice_prefix = 'INV-'
         mock_student.objects.filter.return_value.first.return_value = student
+        mock_student.objects.filter.return_value.select_related.return_value.first.return_value = student
 
         mock_balances.side_effect = [
             {'s1': {'balance': -5000.0, 'status': 'owes'}},
@@ -423,6 +427,13 @@ class DebtPayTestCase(SimpleTestCase):
         self.assertEqual(resp.data['paid_amount'], 2000.0)
         self.assertEqual(resp.data['remaining_debt'], 3000.0)
         self.assertEqual(resp.data['status'], 'owes')
+        pi_kwargs = mock_pi.objects.create.call_args[1]
+        self.assertNotIn('tenant_id', pi_kwargs)
+        # Validate that kwargs are accepted by real PaymentItem model
+        from api.models import PaymentItem as RealPaymentItem
+        real_fields = {f.name for f in RealPaymentItem._meta.get_fields()}
+        for k in pi_kwargs.keys():
+            self.assertTrue(k in real_fields or k.endswith('_id'), f"Invalid field {k} passed to PaymentItem")
 
     @patch('api.views.transaction.atomic')
     @patch('api.views._next_sequence_code', return_value='INV-000101')
@@ -447,7 +458,9 @@ class DebtPayTestCase(SimpleTestCase):
         group = MagicMock(id='g1', course_id='c1')
         student = MagicMock(id='s2', first_name='Sami', last_name='K')
         student.groups.first.return_value = group
+        student.tenant.invoice_prefix = 'INV-'
         mock_student.objects.filter.return_value.first.return_value = student
+        mock_student.objects.filter.return_value.select_related.return_value.first.return_value = student
 
         mock_balances.side_effect = [
             {'s2': {'balance': -1500.0, 'status': 'owes'}},
@@ -470,6 +483,13 @@ class DebtPayTestCase(SimpleTestCase):
         self.assertEqual(resp.data['paid_amount'], 1500.0)
         self.assertEqual(resp.data['status'], 'settled')
 
+        pi_kwargs = mock_pi.objects.create.call_args[1]
+        self.assertNotIn('tenant_id', pi_kwargs)
+        from api.models import PaymentItem as RealPaymentItem
+        real_fields = {f.name for f in RealPaymentItem._meta.get_fields()}
+        for k in pi_kwargs.keys():
+            self.assertTrue(k in real_fields or k.endswith('_id'), f"Invalid field {k} passed to PaymentItem")
+
     @patch('api.views.Student')
     @patch('api.views.require_staff_tenant')
     def test_debts_pay_student_not_found(self, mock_tenant, mock_student):
@@ -482,6 +502,7 @@ class DebtPayTestCase(SimpleTestCase):
         mock_user.is_authenticated = True
         mock_user.is_super_admin.return_value = True
         mock_student.objects.filter.return_value.first.return_value = None
+        mock_student.objects.filter.return_value.select_related.return_value.first.return_value = None
 
         req = self.factory.post('/debts/unknown/pay', {'amount': 500}, format='json')
         force_authenticate(req, user=mock_user)
@@ -503,7 +524,9 @@ class DebtPayTestCase(SimpleTestCase):
         mock_user.is_super_admin.return_value = True
 
         student = MagicMock(id='s1')
+        student.tenant.invoice_prefix = 'INV-'
         mock_student.objects.filter.return_value.first.return_value = student
+        mock_student.objects.filter.return_value.select_related.return_value.first.return_value = student
         mock_balances.return_value = {'s1': {'balance': -1000.0, 'status': 'owes'}}
 
         # Zero or negative amount
@@ -517,6 +540,52 @@ class DebtPayTestCase(SimpleTestCase):
         force_authenticate(req2, user=mock_user)
         resp2 = debts_pay(req2, 's1')
         self.assertEqual(resp2.status_code, 400)
+
+    def test_payment_and_payment_item_fields_valid(self):
+        from api.models import Payment, PaymentItem
+        from decimal import Decimal
+        import datetime
+
+        # Test Payment instantiation with debts_pay fields
+        p = Payment(
+            tenant_id='t1',
+            student_id='s1',
+            course_id='c1',
+            group_id='g1',
+            trip_id=None,
+            book_id=None,
+            kind='course',
+            amount=Decimal('1000.0'),
+            discount=Decimal('0'),
+            method='cash',
+            status='paid',
+            paid_at=datetime.datetime.now(),
+            due_date=datetime.date.today(),
+            notes='test note',
+            invoice_number='INV-000001',
+        )
+        self.assertEqual(p.amount, Decimal('1000.0'))
+
+        # Test PaymentItem instantiation with debts_pay fields (NO tenant_id)
+        pi = PaymentItem(
+            payment=p,
+            course_id='c1',
+            group_id='g1',
+            trip_id=None,
+            book_id=None,
+            amount=Decimal('1000.0'),
+            reduction=Decimal('0'),
+            due_date=datetime.date.today(),
+            teacher_percentage=Decimal('0'),
+            school_percentage=Decimal('100'),
+            status='paid',
+            kind='course',
+        )
+        self.assertEqual(pi.amount, Decimal('1000.0'))
+
+        # Ensure tenant_id is NOT a valid field on PaymentItem
+        with self.assertRaises(TypeError):
+            PaymentItem(tenant_id='t1', payment=p, amount=Decimal('1000.0'))
 
     def test_debts_pay_urls_routing(self):
         from django.urls import resolve
