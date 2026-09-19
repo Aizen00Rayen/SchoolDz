@@ -31,12 +31,18 @@ const DEFAULT_FORM = {
 };
 
 /** Shows the student's Latin-script name alongside the Arabic one when set,
- * so a school that enters names in Arabic can still recognize the right
- * student in a search result or selection chip. */
-function studentLabel(s) {
+ * plus their academic level, school year, and specialty if showGrade is enabled. */
+export function studentLabel(s, t, showGrade = true) {
+  if (!s) return "";
   const latin = [s.first_name_latin, s.last_name_latin].filter(Boolean).join(" ");
   const base = `${s.first_name} ${s.last_name}`;
-  return latin ? `${base} (${latin})` : base;
+  const nameLabel = latin ? `${base} (${latin})` : base;
+  if (!showGrade) return nameLabel;
+  const parts = [];
+  if (s.school_level) parts.push(t ? t(`school_level.${s.school_level}`, s.school_level) : s.school_level);
+  if (s.school_year) parts.push(t ? t("common.year_n", { n: s.school_year }) : `السنة ${s.school_year}`);
+  if (s.specialty) parts.push(t ? t(`specialty.${s.specialty}`, s.specialty) : s.specialty);
+  return parts.length ? `${nameLabel} — ${parts.join(" · ")}` : nameLabel;
 }
 
 /** Search-by-name-or-code picker — a tenant with thousands of students can't
@@ -46,7 +52,7 @@ function studentLabel(s) {
  * Selecting fewer is always fine; once at max, matches just can't be added
  * until something is removed. Omit `max` for unlimited pickers (e.g. linking
  * a guardian's own children, which has no such ceiling). */
-export function StudentPicker({ selected, onChange, max }) {
+export function StudentPicker({ selected, onChange, max, showGrade = true }) {
   const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
@@ -71,12 +77,12 @@ export function StudentPicker({ selected, onChange, max }) {
   // through a search result in this render.
   const missingIds = ids.filter((id) => !labels[id]);
   useQuery({
-    queryKey: ["students-labels", missingIds.join(",")],
+    queryKey: ["students-labels", missingIds.join(","), showGrade],
     queryFn: async () => {
       const { data } = await api.get("/students", { params: { ids: missingIds.join(",") } });
       setLabels((prev) => {
         const next = { ...prev };
-        for (const s of data.items) next[s.id] = studentLabel(s);
+        for (const s of data.items) next[s.id] = studentLabel(s, t, showGrade);
         return next;
       });
       return data;
@@ -88,11 +94,11 @@ export function StudentPicker({ selected, onChange, max }) {
     if (results?.items?.length) {
       setLabels((prev) => {
         const next = { ...prev };
-        for (const s of results.items) next[s.id] = studentLabel(s);
+        for (const s of results.items) next[s.id] = studentLabel(s, t, showGrade);
         return next;
       });
     }
-  }, [results]);
+  }, [results, showGrade, t]);
 
   const toggle = (studentId, label) => {
     if (ids.includes(studentId)) {
@@ -130,18 +136,19 @@ export function StudentPicker({ selected, onChange, max }) {
             results.items.map((s) => {
               const checked = ids.includes(s.id);
               const disabled = !checked && atMax;
+              const lbl = studentLabel(s, t, showGrade);
               return (
                 <button
                   key={s.id}
                   type="button"
                   disabled={disabled}
-                  onClick={() => toggle(s.id, studentLabel(s))}
+                  onClick={() => toggle(s.id, lbl)}
                   className={`w-full flex items-center gap-2 px-2 py-1.5 text-sm text-start ${
                     checked ? "bg-accent/10" : ""
                   } ${disabled ? "opacity-40 cursor-not-allowed" : "hover:bg-muted/60 cursor-pointer"}`}
                   data-testid={`student-picker-result-${s.id}`}
                 >
-                  <span className={checked ? "font-medium" : ""}>{studentLabel(s)}</span>
+                  <span className={checked ? "font-medium" : ""}>{lbl}</span>
                   <span className="text-[11px] font-mono text-muted-foreground ms-auto">{s.student_code}</span>
                 </button>
               );

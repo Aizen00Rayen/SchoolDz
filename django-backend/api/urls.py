@@ -129,6 +129,8 @@ urlpatterns = [
     # than deleting a stored row (there isn't one — see debts_waive).
     path('debts/<str:student_id>/waive/', views.debts_waive, name='debts_waive'),
     path('debts/<str:student_id>/waive', views.debts_waive, name='debts_waive_noslash'),
+    path('debts/<str:student_id>/pay/', views.debts_pay, name='debts_pay'),
+    path('debts/<str:student_id>/pay', views.debts_pay, name='debts_pay_noslash'),
 
     # Website builder — gallery photo delete/reorder (needs a second id
     # beyond the tenant pk, so it's a plain path rather than a router action)

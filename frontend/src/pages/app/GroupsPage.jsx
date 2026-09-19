@@ -196,6 +196,7 @@ export default function GroupsPage() {
               selected={form.student_ids}
               onChange={(ids) => setForm({ ...form, student_ids: ids })}
               max={parseInt(form.capacity, 10) || 0}
+              showGrade={true}
             />
           </div>
         </div>

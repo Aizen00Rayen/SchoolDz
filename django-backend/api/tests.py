@@ -280,6 +280,152 @@ class OtherIncomeFinanceCalculationTestCase(SimpleTestCase):
         self.assertEqual(len(created_items), len(DEFAULT_OTHER_INCOME_CATEGORIES))
 
 
+class DebtPayTestCase(SimpleTestCase):
+    def setUp(self):
+        from rest_framework.test import APIRequestFactory
+        self.factory = APIRequestFactory()
+
+    @patch('api.views.transaction.atomic')
+    @patch('api.views.log_activity')
+    @patch('api.views.compute_student_balances')
+    @patch('api.views.Payment')
+    @patch('api.views.Student')
+    @patch('api.views.require_staff_tenant')
+    def test_debts_pay_validation(self, mock_tenant, mock_student, mock_payment, mock_balances, mock_log, mock_atomic):
+        from rest_framework.test import force_authenticate
+        from api.views import debts_pay
+        from unittest.mock import MagicMock
+
+        mock_tenant.return_value = 't1'
+        mock_user = MagicMock()
+        mock_user.is_authenticated = True
+        mock_user.is_super_admin.return_value = True
+        mock_user.tenant.invoice_prefix = 'INV-'
+
+        student = MagicMock()
+        student.id = 's1'
+        student.first_name = 'Walid'
+        student.last_name = 'Ben'
+        mock_student.objects.filter.return_value.first.return_value = student
+
+        mock_balances.return_value = {'s1': {'balance': -5000.0, 'status': 'owes'}}
+
+        # Zero amount -> 400
+        req = self.factory.post('/debts/s1/pay', {'amount': 0}, format='json')
+        force_authenticate(req, user=mock_user)
+        resp = debts_pay(req, 's1')
+        self.assertEqual(resp.status_code, 400)
+
+        # Negative amount -> 400
+        req = self.factory.post('/debts/s1/pay', {'amount': -100}, format='json')
+        force_authenticate(req, user=mock_user)
+        resp = debts_pay(req, 's1')
+        self.assertEqual(resp.status_code, 400)
+
+        # Amount exceeding debt -> 400
+        req = self.factory.post('/debts/s1/pay', {'amount': 6000}, format='json')
+        force_authenticate(req, user=mock_user)
+        resp = debts_pay(req, 's1')
+        self.assertEqual(resp.status_code, 400)
+
+    @patch('api.views.transaction.atomic')
+    @patch('api.views.log_activity')
+    @patch('api.views.compute_student_balances')
+    @patch('api.views.Payment')
+    @patch('api.views.Student')
+    @patch('api.views.require_staff_tenant')
+    def test_debts_pay_full_settlement(self, mock_tenant, mock_student, mock_payment, mock_balances, mock_log, mock_atomic):
+        from api.views import debts_pay
+        from unittest.mock import MagicMock
+
+        mock_tenant.return_value = 't1'
+        mock_user = MagicMock()
+        mock_user.is_authenticated = True
+        mock_user.is_super_admin.return_value = True
+        mock_user.tenant.invoice_prefix = 'INV-'
+
+        student = MagicMock(id='s1', first_name='Walid', last_name='Ben')
+        mock_student.objects.filter.return_value.first.return_value = student
+
+        mock_balances.side_effect = [
+            {'s1': {'balance': -5000.0, 'status': 'owes'}},
+            {'s1': {'balance': 0.0, 'status': 'settled'}},
+        ]
+
+        bill = MagicMock(amount=5000, discount=0, status='pending', notes='')
+        bill.items.exclude.return_value.update = MagicMock()
+        mock_payment.objects.filter.return_value.order_by.return_value = [bill]
+
+        req = self.factory.post('/debts/s1/pay', {'amount': 5000, 'paid_at': '2026-09-19', 'method': 'cash'}, format='json')
+        from rest_framework.test import force_authenticate
+        force_authenticate(req, user=mock_user)
+        resp = debts_pay(req, 's1')
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(bill.status, 'paid')
+        self.assertEqual(bill.method, 'cash')
+        bill.save.assert_called()
+        self.assertEqual(resp.data['paid_amount'], 5000.0)
+        self.assertEqual(resp.data['status'], 'settled')
+        self.assertEqual(resp.data['date'], '2026-09-19')
+
+    @patch('api.views.transaction.atomic')
+    @patch('api.views._next_sequence_code', return_value='INV-000100')
+    @patch('api.views.PaymentItem')
+    @patch('api.views.log_activity')
+    @patch('api.views.compute_student_balances')
+    @patch('api.views.Payment')
+    @patch('api.views.Student')
+    @patch('api.views.require_staff_tenant')
+    def test_debts_pay_partial_settlement(self, mock_tenant, mock_student, mock_payment, mock_balances, mock_log, mock_pi, mock_seq, mock_atomic):
+        from api.views import debts_pay
+        from rest_framework.test import force_authenticate
+        from unittest.mock import MagicMock
+        from decimal import Decimal
+
+        mock_tenant.return_value = 't1'
+        mock_user = MagicMock()
+        mock_user.is_authenticated = True
+        mock_user.is_super_admin.return_value = True
+        mock_user.tenant.invoice_prefix = 'INV-'
+
+        student = MagicMock(id='s1', first_name='Walid', last_name='Ben')
+        mock_student.objects.filter.return_value.first.return_value = student
+
+        mock_balances.side_effect = [
+            {'s1': {'balance': -5000.0, 'status': 'owes'}},
+            {'s1': {'balance': -3000.0, 'status': 'owes'}},
+        ]
+
+        first_item = MagicMock(amount=Decimal('5000'), course_id='c1', group_id='g1', teacher_percentage=0, school_percentage=100)
+        bill = MagicMock(
+            amount=Decimal('5000'), discount=Decimal('0'), status='pending',
+            course_id='c1', group_id='g1', kind='course', id='bill-1', invoice_number='INV-000050'
+        )
+        bill.items.first.return_value = first_item
+        bill.items.order_by.return_value = [first_item]
+        bill.items.filter.return_value.delete = MagicMock()
+        mock_payment.objects.filter.return_value.order_by.return_value = [bill]
+
+        req = self.factory.post('/debts/s1/pay', {'amount': 2000, 'paid_at': '2026-09-19', 'method': 'cash'}, format='json')
+        force_authenticate(req, user=mock_user)
+        resp = debts_pay(req, 's1')
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(bill.amount, Decimal('3000.0'))
+        bill.save.assert_called()
+
+        mock_payment.objects.create.assert_called_once()
+        create_kwargs = mock_payment.objects.create.call_args[1]
+        self.assertEqual(create_kwargs['amount'], Decimal('2000.0'))
+        self.assertEqual(create_kwargs['status'], 'paid')
+
+        self.assertEqual(resp.data['paid_amount'], 2000.0)
+        self.assertEqual(resp.data['remaining_debt'], 3000.0)
+        self.assertEqual(resp.data['status'], 'owes')
+
+
+
 
 
 
