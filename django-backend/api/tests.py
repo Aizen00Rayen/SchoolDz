@@ -194,12 +194,21 @@ class StudentBalancePardonDebtTestCase(SimpleTestCase):
 
 
 class OtherIncomeFinanceCalculationTestCase(SimpleTestCase):
+    @patch('api.views.compute_realized_revenue')
     @patch('api.views.StudentInsurance')
     @patch('api.views.compute_teacher_earnings')
     @patch('api.views.OtherIncome')
     @patch('api.views.Expense')
     @patch('api.views.Payment')
-    def test_finance_report_includes_other_income(self, mock_payment, mock_expense, mock_other_income, mock_cte, mock_insurance):
+    def test_finance_report_includes_other_income(self, mock_payment, mock_expense, mock_other_income, mock_cte, mock_insurance, mock_crr):
+        mock_crr.return_value = {
+            'realized_tuition': 0.0,
+            'realized_teacher': 0.0,
+            'deferred_tuition': 0.0,
+            'realized_sessions_count': 0,
+            'session_realizations': [],
+            'course_breakdown': [],
+        }
         from api.views import _compute_finance_report_data
         from unittest.mock import MagicMock
         from datetime import date
