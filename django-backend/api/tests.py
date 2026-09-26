@@ -672,3 +672,15 @@ class ReportsAndArchiveTestCase(SimpleTestCase):
         self.assertIsNotNone(q)
         self.assertEqual(len(q.children), 2)
 
+    def test_course_archive_details_url_routing(self):
+        from django.urls import resolve
+        res_slash = resolve('/api/v1/courses/course-uuid-1/archive-details/')
+        res_noslash = resolve('/api/v1/courses/course-uuid-1/archive-details')
+        self.assertEqual(res_slash.kwargs['pk'], 'course-uuid-1')
+        self.assertEqual(res_noslash.kwargs['pk'], 'course-uuid-1')
+
+    def test_student_groups_relation(self):
+        from .models import Student
+        self.assertTrue(hasattr(Student, 'groups'))
+        self.assertFalse(hasattr(Student, 'group_memberships'))
+

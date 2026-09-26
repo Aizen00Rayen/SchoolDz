@@ -4416,6 +4416,14 @@ class CourseViewSet(TenantScopedViewSet):
         course = self.get_object()
         tid = course.tenant_id
         groups = list(Group.objects.filter(tenant_id=tid, course_id=course.id).select_related('teacher'))
+        group_ids = [g.id for g in groups]
+
+        sessions = list(ClassSession.objects.filter(
+            Q(course_id=course.id) | (Q(group_id__in=group_ids) if group_ids else Q(pk__in=[])),
+            tenant_id=tid,
+        ).select_related('teacher', 'group', 'room_ref').order_by('-start_at'))
+        session_ids = [s.id for s in sessions]
+
         teachers = []
         seen_tids = set()
         for g in groups:
@@ -4423,22 +4431,46 @@ class CourseViewSet(TenantScopedViewSet):
                 seen_tids.add(g.teacher.id)
                 teachers.append({
                     'id': g.teacher.id,
-                    'name': f"{g.teacher.first_name} {g.teacher.last_name}",
+                    'name': f"{g.teacher.first_name} {g.teacher.last_name}".strip(),
                     'phone': g.teacher.phone,
                     'payment_percentage': float(g.teacher.payment_percentage or 0),
                 })
+        for s in sessions:
+            if s.teacher and s.teacher.id not in seen_tids:
+                seen_tids.add(s.teacher.id)
+                teachers.append({
+                    'id': s.teacher.id,
+                    'name': f"{s.teacher.first_name} {s.teacher.last_name}".strip(),
+                    'phone': s.teacher.phone,
+                    'payment_percentage': float(s.teacher.payment_percentage or 0),
+                })
 
-        group_ids = [g.id for g in groups]
+        # Gather all students linked to this course via groups, payments, or attendance
+        student_ids = set()
+        if group_ids:
+            group_student_ids = Student.objects.filter(
+                tenant_id=tid,
+                groups__id__in=group_ids
+            ).values_list('id', flat=True)
+            student_ids.update(group_student_ids)
+
+        payment_student_ids = PaymentItem.objects.filter(
+            Q(course_id=course.id) | (Q(group_id__in=group_ids) if group_ids else Q(pk__in=[])),
+            payment__tenant_id=tid,
+        ).values_list('payment__student_id', flat=True)
+        student_ids.update(filter(None, payment_student_ids))
+
+        if session_ids:
+            att_student_ids = Attendance.objects.filter(
+                tenant_id=tid,
+                session_id__in=session_ids
+            ).values_list('student_id', flat=True)
+            student_ids.update(filter(None, att_student_ids))
+
         enrolled_students = list(Student.objects.filter(
+            id__in=student_ids,
             tenant_id=tid,
-            group_memberships__group_id__in=group_ids
-        ).distinct().order_by('first_name', 'last_name'))
-
-        sessions = list(ClassSession.objects.filter(
-            Q(course_id=course.id) | Q(group_id__in=group_ids),
-            tenant_id=tid,
-        ).select_related('teacher', 'group', 'room_ref').order_by('-start_at'))
-        session_ids = [s.id for s in sessions]
+        ).select_related('parent').order_by('first_name', 'last_name'))
 
         attendances = list(Attendance.objects.filter(
             tenant_id=tid,
@@ -4459,9 +4491,9 @@ class CourseViewSet(TenantScopedViewSet):
                 student_att[sid]['excused'] += 1
 
         items = list(PaymentItem.objects.filter(
+            Q(course_id=course.id) | (Q(group_id__in=group_ids) if group_ids else Q(pk__in=[])),
             payment__tenant_id=tid,
-            course_id=course.id
-        ).select_related('payment'))
+        ).select_related('payment', 'group'))
         total_revenue = 0.0
         for it in items:
             if it.status in ('paid', 'partial') or (not it.status and it.payment and it.payment.status in ('paid', 'partial')):
@@ -4509,7 +4541,14 @@ class CourseViewSet(TenantScopedViewSet):
                     student_payments[s_id]['paid'] += it_net
                 if it.status == 'pending' or (not it.status and it.payment and it.payment.status == 'pending'):
                     student_payments[s_id]['pending'] += it_net
-                student_payments[s_id]['status'] = it.status or (it.payment.status if it.payment else 'paid')
+                if student_payments[s_id]['pending'] > 0 and student_payments[s_id]['paid'] > 0:
+                    student_payments[s_id]['status'] = 'partial'
+                elif student_payments[s_id]['paid'] > 0:
+                    student_payments[s_id]['status'] = 'paid'
+                elif student_payments[s_id]['pending'] > 0:
+                    student_payments[s_id]['status'] = 'pending'
+                else:
+                    student_payments[s_id]['status'] = it.status or (it.payment.status if it.payment else 'not_billed')
 
         students_data = []
         for stu in enrolled_students:
@@ -4536,10 +4575,10 @@ class CourseViewSet(TenantScopedViewSet):
         for s in sessions[:100]:
             sessions_data.append({
                 'id': s.id,
-                'title': s.title or (s.group.name if s.group else course.title),
+                'title': getattr(s, 'topic', None) or (s.group.name if s.group else course.title),
                 'start_at': s.start_at.isoformat() if s.start_at else None,
                 'group_name': s.group.name if s.group else '—',
-                'teacher_name': f"{s.teacher.first_name} {s.teacher.last_name}" if s.teacher else (f"{s.group.teacher.first_name} {s.group.teacher.last_name}" if s.group and s.group.teacher else '—'),
+                'teacher_name': f"{s.teacher.first_name} {s.teacher.last_name}".strip() if s.teacher else (f"{s.group.teacher.first_name} {s.group.teacher.last_name}".strip() if s.group and s.group.teacher else '—'),
                 'room_name': s.room_ref.name if s.room_ref else (s.room or '—'),
                 'status': s.status,
             })

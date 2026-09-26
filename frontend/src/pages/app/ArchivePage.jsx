@@ -629,7 +629,7 @@ export default function ArchivePage() {
   });
 
   // Fetch detailed dossier for a selected archived course
-  const { data: courseDossier, isLoading: dossierLoading } = useQuery({
+  const { data: courseDossier, isLoading: dossierLoading, error: dossierError, refetch: refetchDossier } = useQuery({
     queryKey: ["archived-course-detail", selectedCourseId],
     queryFn: async () => (await api.get(`/courses/${selectedCourseId}/archive-details`)).data,
     enabled: Boolean(selectedCourseId),
@@ -1265,7 +1265,30 @@ export default function ArchivePage() {
                 )}
               </div>
             </div>
-          ) : null}
+          ) : (
+            <div className="surface-card p-8 text-center space-y-4 max-w-md mx-auto my-8 border-destructive/30">
+              <div className="w-12 h-12 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mx-auto">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div>
+                <h4 className="font-bold text-base text-foreground mb-1">
+                  {t("archive.load_error", "حدث خطأ أثناء تحميل بيانات الدورة المؤرشفة")}
+                </h4>
+                <p className="text-xs text-muted-foreground">
+                  {dossierError ? extractError(dossierError) : t("errors.unknown", "يرجى المحاولة مرة أخرى")}
+                </p>
+              </div>
+              <div className="flex items-center justify-center gap-2 pt-2">
+                <Button variant="outline" size="sm" onClick={() => setSelectedCourseId(null)}>
+                  {t("actions.back", "رجوع")}
+                </Button>
+                <Button size="sm" onClick={() => refetchDossier()}>
+                  <RotateCcw className="w-3.5 h-3.5 me-1.5" />
+                  {t("actions.retry", "إعادة المحاولة")}
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
