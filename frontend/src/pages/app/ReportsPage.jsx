@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -95,17 +95,74 @@ export default function ReportsPage() {
     queryFn: async () => (await api.get("/courses")).data,
   });
   const courseMap = Object.fromEntries((courses?.items || []).map((c) => [c.id, c]));
-  const { data: teachers } = useQuery({
+  const { data: teachersResponse } = useQuery({
     queryKey: ["teachers"],
     queryFn: async () => (await api.get("/teachers")).data,
   });
 
-  // Autocomplete / summon search query
-  const { data: searchResults, isFetching: searchLoading } = useQuery({
-    queryKey: ["reports-search", searchQuery],
-    queryFn: async () => (await api.get(`/reports/search?q=${encodeURIComponent(searchQuery)}`)).data,
+  // Query students from standard /students endpoint
+  const { data: studentsResponse, isFetching: studentsLoading } = useQuery({
+    queryKey: ["reports-students-search", searchQuery],
+    queryFn: async () => {
+      try {
+        const res = await api.get("/students", {
+          params: { q: searchQuery.trim(), limit: 40 }
+        });
+        return res.data?.items || [];
+      } catch (e) {
+        return [];
+      }
+    },
     enabled: isSearchFocused || Boolean(searchQuery.trim().length > 0),
   });
+
+  const summonedStudents = useMemo(() => {
+    return (studentsResponse || []).map((s) => ({
+      id: s.id,
+      name: `${s.first_name || ""} ${s.last_name || ""}`.trim() || s.name || s.student_code,
+      first_name: s.first_name,
+      last_name: s.last_name,
+      first_name_latin: s.first_name_latin,
+      last_name_latin: s.last_name_latin,
+      code: s.student_code,
+      phone: s.phone,
+      school_level: s.school_level,
+      school_year: s.school_year,
+      specialty: s.specialty,
+      status: s.status,
+    }));
+  }, [studentsResponse]);
+
+  const summonedTeachers = useMemo(() => {
+    const raw = teachersResponse?.items || (Array.isArray(teachersResponse) ? teachersResponse : []);
+    if (!searchQuery.trim()) {
+      return raw.slice(0, 30).map((t) => ({
+        id: t.id,
+        name: `${t.first_name || ""} ${t.last_name || ""}`.trim() || t.name,
+        subject: t.subject,
+        phone: t.phone,
+        status: t.status,
+      }));
+    }
+    const q = searchQuery.toLowerCase().trim();
+    return raw
+      .filter((t) => {
+        const name = `${t.first_name || ""} ${t.last_name || ""}`.toLowerCase();
+        const subject = (t.subject || "").toLowerCase();
+        const phone = (t.phone || "").toLowerCase();
+        return name.includes(q) || subject.includes(q) || phone.includes(q);
+      })
+      .slice(0, 30)
+      .map((t) => ({
+        id: t.id,
+        name: `${t.first_name || ""} ${t.last_name || ""}`.trim() || t.name,
+        subject: t.subject,
+        phone: t.phone,
+        status: t.status,
+      }));
+  }, [teachersResponse, searchQuery]);
+
+  const searchLoading = studentsLoading;
 
   // Comprehensive Student Report query
   const { data: studentReport, isLoading: studentReportLoading } = useQuery({
@@ -201,10 +258,10 @@ export default function ReportsPage() {
                 if (e.key === "Enter") {
                   e.preventDefault();
                   setIsSearchFocused(true);
-                  if (searchResults?.students?.length > 0) {
-                    handleSelectStudent(searchResults.students[0].id);
-                  } else if (searchResults?.teachers?.length > 0) {
-                    handleSelectTeacher(searchResults.teachers[0].id);
+                  if (summonedStudents.length > 0) {
+                    handleSelectStudent(summonedStudents[0].id);
+                  } else if (summonedTeachers.length > 0) {
+                    handleSelectTeacher(summonedTeachers[0].id);
                   }
                 }
               }}
@@ -250,16 +307,16 @@ export default function ReportsPage() {
                       {t("menu.students", "التلاميذ")}
                     </span>
                     <span className="font-mono bg-background/80 px-1.5 py-0.2 rounded border border-border/50">
-                      {searchResults?.students?.length || 0}
+                      {summonedStudents.length}
                     </span>
                   </div>
-                  {(searchResults?.students || []).length === 0 ? (
+                  {summonedStudents.length === 0 ? (
                     <div className="px-3.5 py-2.5 text-xs text-muted-foreground">
                       {searchQuery ? t("common.no_results", "لا توجد نتائج مطابقة") : t("reports.no_students_found", "لا يوجد تلاميذ")}
                     </div>
                   ) : (
                     <div className="max-h-56 overflow-y-auto">
-                      {searchResults.students.map((s) => {
+                      {summonedStudents.map((s) => {
                         const gradeText = formatStudentGrade(s, t);
                         return (
                           <div
@@ -317,16 +374,16 @@ export default function ReportsPage() {
                       {t("menu.teachers", "الأساتذة")}
                     </span>
                     <span className="font-mono bg-background/80 px-1.5 py-0.2 rounded border border-border/50">
-                      {searchResults?.teachers?.length || 0}
+                      {summonedTeachers.length}
                     </span>
                   </div>
-                  {(searchResults?.teachers || []).length === 0 ? (
+                  {summonedTeachers.length === 0 ? (
                     <div className="px-3.5 py-2.5 text-xs text-muted-foreground">
                       {searchQuery ? t("common.no_results", "لا توجد نتائج مطابقة") : t("reports.no_teachers_found", "لا يوجد أساتذة")}
                     </div>
                   ) : (
                     <div className="max-h-56 overflow-y-auto">
-                      {searchResults.teachers.map((tch) => (
+                      {summonedTeachers.map((tch) => (
                         <div
                           key={tch.id}
                           onMouseDown={(e) => {

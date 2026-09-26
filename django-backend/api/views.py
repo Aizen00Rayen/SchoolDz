@@ -134,6 +134,10 @@ def require_staff_tenant(user):
     on the role itself rather than on a per-module default.
     """
     tenant_id = getattr(user, 'tenant_id', None)
+    if not tenant_id and user.is_super_admin():
+        first_tenant = Tenant.objects.first()
+        if first_tenant:
+            tenant_id = first_tenant.id
     if not tenant_id:
         raise PermissionDenied('User has no tenant')
     if not user.is_super_admin() and user.role not in STAFF_ROLES:
