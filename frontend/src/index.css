@@ -242,6 +242,36 @@ html[dir="rtl"] .animate-marquee {
 
 /* Print Stylesheet — hides app shell chrome, sidebars, headers, and inputs */
 @media print {
+    html, body {
+        background: #ffffff !important;
+        color: #0f172a !important;
+        font-size: 11pt !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 100% !important;
+        height: auto !important;
+        min-height: auto !important;
+        overflow: visible !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+
+    #root,
+    #root > div,
+    .min-h-screen,
+    [class*="lg:grid"],
+    [class*="grid-cols"] {
+        display: block !important;
+        grid-template-columns: none !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        min-height: auto !important;
+        height: auto !important;
+        overflow: visible !important;
+    }
+
     aside,
     header,
     nav,
@@ -255,19 +285,21 @@ html[dir="rtl"] .animate-marquee {
     .no-print,
     button,
     input,
-    select {
+    select,
+    .dialog-overlay,
+    .dialog-content {
         display: none !important;
-    }
-
-    body, html {
-        background: #ffffff !important;
-        color: #0f172a !important;
-        font-size: 11pt !important;
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
+        visibility: hidden !important;
+        width: 0 !important;
+        height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        position: absolute !important;
+        left: -9999px !important;
     }
 
     main {
+        display: block !important;
         margin: 0 !important;
         padding: 0 !important;
         width: 100% !important;
@@ -282,8 +314,18 @@ html[dir="rtl"] .animate-marquee {
         color: #0f172a !important;
     }
 
+    table {
+        width: 100% !important;
+        max-width: 100% !important;
+        border-collapse: collapse !important;
+    }
+
+    tr {
+        page-break-inside: avoid !important;
+    }
+
     @page {
         size: A4 portrait;
-        margin: 12mm 15mm;
+        margin: 12mm 14mm;
     }
 }

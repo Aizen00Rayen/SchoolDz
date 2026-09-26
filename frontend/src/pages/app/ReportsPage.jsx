@@ -821,22 +821,60 @@ function generateTeacherDossierHtml({ teacherReport, tenant, user, currency, t, 
 }
 
 function openPrintDossier(htmlContent, title) {
-  const printWin = window.open("", "_blank");
-  if (!printWin) {
-    window.print();
-    return;
-  }
-  printWin.document.open();
-  printWin.document.write(htmlContent);
-  printWin.document.close();
-  setTimeout(() => {
-    try {
-      printWin.focus();
-      printWin.print();
-    } catch (e) {
-      console.error("Print popup error", e);
+  try {
+    let iframe = document.getElementById("print-dossier-iframe");
+    if (!iframe) {
+      iframe = document.createElement("iframe");
+      iframe.id = "print-dossier-iframe";
+      iframe.style.position = "fixed";
+      iframe.style.right = "0";
+      iframe.style.bottom = "0";
+      iframe.style.width = "0";
+      iframe.style.height = "0";
+      iframe.style.border = "0";
+      iframe.style.visibility = "hidden";
+      document.body.appendChild(iframe);
     }
-  }, 350);
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(htmlContent);
+    doc.close();
+
+    setTimeout(() => {
+      try {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      } catch (err) {
+        console.warn("Iframe print failed, falling back to window.open", err);
+        const printWin = window.open("", "_blank");
+        if (printWin) {
+          printWin.document.open();
+          printWin.document.write(htmlContent);
+          printWin.document.close();
+          setTimeout(() => {
+            printWin.focus();
+            printWin.print();
+          }, 350);
+        } else {
+          window.print();
+        }
+      }
+    }, 350);
+  } catch (e) {
+    console.error("Print error:", e);
+    const printWin = window.open("", "_blank");
+    if (printWin) {
+      printWin.document.open();
+      printWin.document.write(htmlContent);
+      printWin.document.close();
+      setTimeout(() => {
+        printWin.focus();
+        printWin.print();
+      }, 350);
+    } else {
+      window.print();
+    }
+  }
 }
 
 export default function ReportsPage() {
