@@ -33,6 +33,23 @@ const BALANCE_CLS = {
   overpaid: "text-success font-bold",
 };
 
+export function formatStudentGrade(s, t) {
+  if (!s) return "";
+  const parts = [];
+  if (s.school_level) {
+    const lvlKey = `school_level.${s.school_level}`;
+    parts.push(typeof t === "function" ? t(lvlKey) : s.school_level);
+  }
+  if (s.school_year) {
+    parts.push(typeof t === "function" ? t("common.year_n", { n: s.school_year }) : `السنة ${s.school_year}`);
+  }
+  if (s.specialty) {
+    const spKey = `specialty.${s.specialty}`;
+    parts.push(typeof t === "function" ? t(spKey) : s.specialty);
+  }
+  return parts.join(" · ");
+}
+
 export default function ReportsPage() {
   const { t, dir } = useI18n();
   const { tenant } = useAuth();
@@ -83,11 +100,11 @@ export default function ReportsPage() {
     queryFn: async () => (await api.get("/teachers")).data,
   });
 
-  // Autocomplete search query
+  // Autocomplete / summon search query
   const { data: searchResults, isFetching: searchLoading } = useQuery({
     queryKey: ["reports-search", searchQuery],
     queryFn: async () => (await api.get(`/reports/search?q=${encodeURIComponent(searchQuery)}`)).data,
-    enabled: Boolean(searchQuery.trim().length >= 1),
+    enabled: isSearchFocused || Boolean(searchQuery.trim().length > 0),
   });
 
   // Comprehensive Student Report query
@@ -216,7 +233,7 @@ export default function ReportsPage() {
         </div>
 
         {/* Autocomplete Dropdown */}
-        {isSearchFocused && searchQuery.trim().length >= 1 && (
+        {isSearchFocused && (
           <div className="absolute start-0 end-0 top-full mt-1.5 z-50 bg-popover border border-border rounded-lg shadow-xl overflow-hidden divide-y divide-border">
             {searchLoading ? (
               <div className="p-4 text-center text-xs text-muted-foreground">
@@ -227,54 +244,88 @@ export default function ReportsPage() {
               <>
                 {/* Students Section */}
                 <div>
-                  <div className="px-3 py-1.5 bg-muted/60 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+                  <div className="px-3.5 py-2 bg-muted/60 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
                     <span className="flex items-center gap-1.5">
-                      <GraduationCap className="w-3.5 h-3.5 text-accent" />
+                      <GraduationCap className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                       {t("menu.students", "التلاميذ")}
                     </span>
-                    <span className="font-mono">{searchResults?.students?.length || 0}</span>
+                    <span className="font-mono bg-background/80 px-1.5 py-0.2 rounded border border-border/50">
+                      {searchResults?.students?.length || 0}
+                    </span>
                   </div>
                   {(searchResults?.students || []).length === 0 ? (
-                    <div className="px-3 py-2 text-xs text-muted-foreground">{t("common.no_results", "لا توجد نتائج")}</div>
+                    <div className="px-3.5 py-2.5 text-xs text-muted-foreground">
+                      {searchQuery ? t("common.no_results", "لا توجد نتائج مطابقة") : t("reports.no_students_found", "لا يوجد تلاميذ")}
+                    </div>
                   ) : (
-                    <div className="max-h-48 overflow-y-auto">
-                      {searchResults.students.map((s) => (
-                        <div
-                          key={s.id}
-                          onMouseDown={(e) => {
-                            e.preventDefault();
-                            handleSelectStudent(s.id);
-                          }}
-                          className="px-3 py-2 text-xs hover:bg-muted/50 cursor-pointer flex items-center justify-between transition-colors"
-                        >
-                          <div>
-                            <div className="font-semibold text-foreground">{s.name}</div>
-                            <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
-                              {s.code || s.phone || "—"} {s.school_level ? `· ${s.school_level}` : ""}
+                    <div className="max-h-56 overflow-y-auto">
+                      {searchResults.students.map((s) => {
+                        const gradeText = formatStudentGrade(s, t);
+                        return (
+                          <div
+                            key={s.id}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              handleSelectStudent(s.id);
+                            }}
+                            className="px-3.5 py-2.5 hover:bg-muted/50 cursor-pointer flex items-center justify-between gap-3 transition-colors border-b border-border/40 last:border-0"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="font-semibold text-foreground flex items-center gap-2 flex-wrap">
+                                <span>{s.name}</span>
+                                {(s.first_name_latin || s.last_name_latin) && (
+                                  <span className="text-[11px] text-muted-foreground font-normal">
+                                    ({[s.first_name_latin, s.last_name_latin].filter(Boolean).join(" ")})
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                {gradeText && (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-800 dark:text-amber-300 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/25">
+                                    <GraduationCap className="w-3 h-3 flex-shrink-0" />
+                                    {gradeText}
+                                  </span>
+                                )}
+                                {s.code && (
+                                  <span className="text-[11px] text-muted-foreground font-mono">
+                                    #{s.code}
+                                  </span>
+                                )}
+                                {s.phone && (
+                                  <span className="text-[11px] text-muted-foreground font-mono">
+                                    {s.phone}
+                                  </span>
+                                )}
+                              </div>
                             </div>
+                            <Badge variant="outline" className="text-[11px] font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 flex-shrink-0 px-2.5 py-0.5">
+                              <GraduationCap className="w-3.5 h-3.5 me-1" />
+                              {t("menu.students", "تلميذ")}
+                            </Badge>
                           </div>
-                          <Badge variant="outline" className="text-[10px] font-mono">
-                            {t("menu.students")}
-                          </Badge>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
 
                 {/* Teachers Section */}
                 <div>
-                  <div className="px-3 py-1.5 bg-muted/60 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+                  <div className="px-3.5 py-2 bg-muted/60 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
                     <span className="flex items-center gap-1.5">
-                      <UserRound className="w-3.5 h-3.5 text-blue-500" />
+                      <UserRound className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                       {t("menu.teachers", "الأساتذة")}
                     </span>
-                    <span className="font-mono">{searchResults?.teachers?.length || 0}</span>
+                    <span className="font-mono bg-background/80 px-1.5 py-0.2 rounded border border-border/50">
+                      {searchResults?.teachers?.length || 0}
+                    </span>
                   </div>
                   {(searchResults?.teachers || []).length === 0 ? (
-                    <div className="px-3 py-2 text-xs text-muted-foreground">{t("common.no_results", "لا توجد نتائج")}</div>
+                    <div className="px-3.5 py-2.5 text-xs text-muted-foreground">
+                      {searchQuery ? t("common.no_results", "لا توجد نتائج مطابقة") : t("reports.no_teachers_found", "لا يوجد أساتذة")}
+                    </div>
                   ) : (
-                    <div className="max-h-48 overflow-y-auto">
+                    <div className="max-h-56 overflow-y-auto">
                       {searchResults.teachers.map((tch) => (
                         <div
                           key={tch.id}
@@ -282,16 +333,29 @@ export default function ReportsPage() {
                             e.preventDefault();
                             handleSelectTeacher(tch.id);
                           }}
-                          className="px-3 py-2 text-xs hover:bg-muted/50 cursor-pointer flex items-center justify-between transition-colors"
+                          className="px-3.5 py-2.5 hover:bg-muted/50 cursor-pointer flex items-center justify-between gap-3 transition-colors border-b border-border/40 last:border-0"
                         >
-                          <div>
-                            <div className="font-semibold text-foreground">{tch.name}</div>
-                            <div className="text-[11px] text-muted-foreground mt-0.5">
-                              {tch.subject || "—"} {tch.phone ? `· ${tch.phone}` : ""}
+                          <div className="min-w-0 flex-1">
+                            <div className="font-semibold text-foreground">
+                              {tch.name}
+                            </div>
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              {tch.subject && (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-800 dark:text-blue-300 bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/25">
+                                  <BookOpen className="w-3 h-3 flex-shrink-0" />
+                                  {tch.subject}
+                                </span>
+                              )}
+                              {tch.phone && (
+                                <span className="text-[11px] text-muted-foreground font-mono">
+                                  {tch.phone}
+                                </span>
+                              )}
                             </div>
                           </div>
-                          <Badge variant="outline" className="text-[10px] font-mono border-blue-500/40 text-blue-600 dark:text-blue-400">
-                            {t("menu.teachers")}
+                          <Badge variant="outline" className="text-[11px] font-semibold bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30 flex-shrink-0 px-2.5 py-0.5">
+                            <UserRound className="w-3.5 h-3.5 me-1" />
+                            {t("menu.teachers", "أستاذ")}
                           </Badge>
                         </div>
                       ))}
@@ -333,17 +397,24 @@ export default function ReportsPage() {
               <div className="surface-card p-5">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div className="space-y-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="font-display font-bold text-xl text-foreground">{studentReport.student.name}</h3>
+                      <Badge variant="outline" className="text-xs font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30">
+                        <GraduationCap className="w-3.5 h-3.5 me-1" />
+                        {t("menu.students", "تلميذ")}
+                      </Badge>
                       <StatusPill status={studentReport.student.status} />
                     </div>
-                    <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground mt-1">
                       {studentReport.student.code && (
-                        <span className="font-mono bg-muted px-1.5 py-0.5 rounded text-foreground">{studentReport.student.code}</span>
+                        <span className="font-mono bg-muted px-1.5 py-0.5 rounded text-foreground">#{studentReport.student.code}</span>
                       )}
-                      {studentReport.student.school_level && <span>{studentReport.student.school_level}</span>}
-                      {studentReport.student.school_year && <span>السنة {studentReport.student.school_year}</span>}
-                      {studentReport.student.specialty && <span>{studentReport.student.specialty}</span>}
+                      {formatStudentGrade(studentReport.student, t) && (
+                        <span className="inline-flex items-center gap-1 font-medium text-amber-800 dark:text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/25">
+                          <GraduationCap className="w-3.5 h-3.5 flex-shrink-0" />
+                          {formatStudentGrade(studentReport.student, t)}
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -601,8 +672,12 @@ export default function ReportsPage() {
               <div className="surface-card p-5">
                 <div className="flex flex-wrap items-start justify-between gap-4">
                   <div className="space-y-1">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="font-display font-bold text-xl text-foreground">{teacherReport.teacher.name}</h3>
+                      <Badge variant="outline" className="text-xs font-semibold bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/30">
+                        <UserRound className="w-3.5 h-3.5 me-1" />
+                        {t("menu.teachers", "أستاذ")}
+                      </Badge>
                       <StatusPill status={teacherReport.teacher.status} />
                     </div>
                     <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">

@@ -8423,45 +8423,55 @@ def reports_search(request):
 
     q = (request.GET.get('q') or '').strip()
     if not q:
-        return Response({'students': [], 'teachers': []})
+        students = Student.objects.filter(tenant_id=tid).order_by('-created_at')[:25]
+        teachers = Teacher.objects.filter(tenant_id=tid).order_by('-created_at')[:25]
+    else:
+        student_name_q = name_search_q(q, 'first_name', 'last_name', 'first_name_latin', 'last_name_latin')
+        student_q = (
+            student_name_q |
+            Q(student_code__icontains=q) |
+            Q(phone__icontains=q) |
+            Q(email__icontains=q)
+        )
+        # Arabic normalization fallback (e.g. أ / إ / آ -> ا, ة -> ه, ى -> ي)
+        alt_q = q.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ة', 'ه').replace('ى', 'ي')
+        if alt_q != q:
+            student_q |= name_search_q(alt_q, 'first_name', 'last_name', 'first_name_latin', 'last_name_latin')
 
-    student_q = (
-        name_search_q(q, 'first_name', 'last_name', 'first_name_latin', 'last_name_latin') |
-        Q(student_code__icontains=q) |
-        Q(phone__icontains=q) |
-        Q(email__icontains=q)
-    )
-    # Arabic normalization fallback (e.g. أ / إ / آ -> ا, ة -> ه, ى -> ي)
-    alt_q = q.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ة', 'ه').replace('ى', 'ي')
-    if alt_q != q:
-        student_q |= name_search_q(alt_q, 'first_name', 'last_name', 'first_name_latin', 'last_name_latin')
+        students = Student.objects.filter(tenant_id=tid).filter(student_q)[:30]
 
-    students = Student.objects.filter(tenant_id=tid).filter(student_q)[:30]
+        teacher_name_q = name_search_q(q, 'first_name', 'last_name')
+        teacher_q = (
+            teacher_name_q |
+            Q(phone__icontains=q) |
+            Q(subject__icontains=q) |
+            Q(email__icontains=q)
+        )
+        if alt_q != q:
+            teacher_q |= name_search_q(alt_q, 'first_name', 'last_name')
 
-    teacher_q = (
-        name_search_q(q, 'first_name', 'last_name') |
-        Q(phone__icontains=q) |
-        Q(subject__icontains=q) |
-        Q(email__icontains=q)
-    )
-    if alt_q != q:
-        teacher_q |= name_search_q(alt_q, 'first_name', 'last_name')
-
-    teachers = Teacher.objects.filter(tenant_id=tid).filter(teacher_q)[:30]
+        teachers = Teacher.objects.filter(tenant_id=tid).filter(teacher_q)[:30]
 
     return Response({
         'students': [{
             'id': s.id,
             'name': f"{s.first_name} {s.last_name}".strip(),
+            'first_name': s.first_name,
+            'last_name': s.last_name,
+            'first_name_latin': s.first_name_latin,
+            'last_name_latin': s.last_name_latin,
             'code': s.student_code,
             'phone': s.phone,
             'school_level': s.school_level,
             'school_year': s.school_year,
+            'specialty': s.specialty,
             'status': s.status,
         } for s in students],
         'teachers': [{
             'id': t.id,
             'name': f"{t.first_name} {t.last_name}".strip(),
+            'first_name': t.first_name,
+            'last_name': t.last_name,
             'phone': t.phone,
             'subject': t.subject,
             'status': t.status,
