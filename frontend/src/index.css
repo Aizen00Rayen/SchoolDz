@@ -239,3 +239,51 @@ html[dir="rtl"] .animate-marquee {
     }
     .logo-reveal-accent { fill: hsl(var(--accent)) !important; }
 }
+
+/* Print Stylesheet — hides app shell chrome, sidebars, headers, and inputs */
+@media print {
+    aside,
+    header,
+    nav,
+    .mobile-drawer,
+    .glass-nav,
+    [data-testid="sidebar"],
+    [data-testid="header"],
+    [data-testid="user-menu"],
+    [data-testid="theme-toggle"],
+    [data-testid="lang-switcher"],
+    .no-print,
+    button,
+    input,
+    select {
+        display: none !important;
+    }
+
+    body, html {
+        background: #ffffff !important;
+        color: #0f172a !important;
+        font-size: 11pt !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+
+    main {
+        margin: 0 !important;
+        padding: 0 !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        overflow: visible !important;
+    }
+
+    .surface-card {
+        box-shadow: none !important;
+        border: 1px solid #cbd5e1 !important;
+        background: #ffffff !important;
+        color: #0f172a !important;
+    }
+
+    @page {
+        size: A4 portrait;
+        margin: 12mm 15mm;
+    }
+}

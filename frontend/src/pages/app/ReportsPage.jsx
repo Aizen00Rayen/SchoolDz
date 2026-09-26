@@ -3,10 +3,10 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Download, FileDown, TrendingUp, TrendingDown, Receipt, Wallet, TriangleAlert, HandCoins, Loader2, ShieldCheck, Coins,
-  Search, ArrowLeft, Printer, UserRound, GraduationCap, X, CheckCircle2, Clock, CalendarDays, BookOpen, Layers, Phone
+  Search, ArrowLeft, Printer, UserRound, GraduationCap, X, CheckCircle2, Clock, CalendarDays, BookOpen, Layers, Phone, CalendarClock
 } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
-import { api, downloadFrom, extractError, openFinanceReportPdf } from "@/lib/api";
+import { api, downloadFrom, extractError, openFinanceReportPdf, resolveFileUrl } from "@/lib/api";
 import { PageHeader, Field, StatusPill, groupOptionLabel } from "./_shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,9 +50,798 @@ export function formatStudentGrade(s, t) {
   return parts.join(" · ");
 }
 
+function escapeHtml(str) {
+  if (str == null) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function formatPrintDate(d) {
+  if (!d) return "—";
+  try {
+    return String(d).slice(0, 16).replace("T", " ");
+  } catch {
+    return String(d);
+  }
+}
+
+function getSharedDossierStyles(isRtl) {
+  return `
+    @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap');
+    @page {
+      size: A4 portrait;
+      margin: 12mm 14mm 12mm 14mm;
+    }
+    * {
+      box-sizing: border-box;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+    }
+    body {
+      font-family: 'Cairo', 'IBM Plex Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: #0f172a;
+      background: #ffffff;
+      margin: 0;
+      padding: 0;
+      font-size: 11px;
+      line-height: 1.45;
+      direction: ${isRtl ? "rtl" : "ltr"};
+    }
+    .report-wrap {
+      max-width: 100%;
+      margin: 0 auto;
+    }
+    .school-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 12px;
+      border-bottom: 2px solid #0f172a;
+      margin-bottom: 12px;
+    }
+    .header-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .school-logo {
+      width: 58px;
+      height: 58px;
+      object-fit: cover;
+      border-radius: 8px;
+      border: 1px solid #cbd5e1;
+    }
+    .school-logo-fallback {
+      width: 54px;
+      height: 54px;
+      border-radius: 8px;
+      background: #0f172a;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 22px;
+      font-weight: 800;
+    }
+    .school-info h1 {
+      margin: 0 0 2px 0;
+      font-size: 17px;
+      font-weight: 800;
+      color: #0f172a;
+    }
+    .school-info p {
+      margin: 0;
+      font-size: 9.5px;
+      color: #64748b;
+    }
+    .header-meta {
+      text-align: ${isRtl ? "left" : "right"};
+    }
+    .doc-badge {
+      display: inline-block;
+      background: #f1f5f9;
+      border: 1px solid #cbd5e1;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-weight: 700;
+      font-size: 9.5px;
+      color: #0f172a;
+      margin-bottom: 3px;
+      font-family: monospace, sans-serif;
+    }
+    .doc-date {
+      font-size: 9.5px;
+      color: #64748b;
+      font-family: monospace, sans-serif;
+    }
+    .title-banner {
+      text-align: center;
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin-bottom: 12px;
+    }
+    .title-banner h2 {
+      margin: 0;
+      font-size: 14.5px;
+      font-weight: 800;
+      color: #0f172a;
+    }
+    .title-banner p {
+      margin: 2px 0 0 0;
+      font-size: 9px;
+      color: #64748b;
+    }
+    .profile-card {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #ffffff;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 9px 12px;
+      margin-bottom: 12px;
+    }
+    .profile-name {
+      font-size: 13.5px;
+      font-weight: 800;
+      color: #0f172a;
+    }
+    .profile-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      margin-top: 3px;
+    }
+    .chip {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 9px;
+      font-weight: 700;
+      border: 1px solid transparent;
+    }
+    .chip-emerald { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+    .chip-blue { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+    .chip-amber { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+    .chip-muted { background: #f1f5f9; color: #334155; border-color: #cbd5e1; }
+    .profile-contact {
+      text-align: ${isRtl ? "left" : "right"};
+      font-size: 9.5px;
+      color: #475569;
+      line-height: 1.5;
+    }
+    .profile-contact strong {
+      font-family: monospace, sans-serif;
+      color: #0f172a;
+    }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .kpi-item {
+      border: 1px solid #cbd5e1;
+      background: #f8fafc;
+      border-radius: 6px;
+      padding: 7px;
+      text-align: center;
+    }
+    .kpi-title {
+      font-size: 8.5px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: #64748b;
+    }
+    .kpi-val {
+      font-size: 13.5px;
+      font-weight: 800;
+      font-family: monospace, sans-serif;
+      margin-top: 2px;
+    }
+    .text-emerald { color: #059669; }
+    .text-amber { color: #d97706; }
+    .text-blue { color: #2563eb; }
+    .text-destructive { color: #e11d48; }
+    .section-block {
+      margin-bottom: 12px;
+      page-break-inside: auto;
+    }
+    .section-head {
+      font-size: 11px;
+      font-weight: 800;
+      color: #0f172a;
+      margin: 0 0 5px 0;
+      padding-bottom: 3px;
+      border-bottom: 1px solid #cbd5e1;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .section-count {
+      font-size: 9px;
+      color: #64748b;
+      font-family: monospace, sans-serif;
+      font-weight: 600;
+    }
+    .report-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9.5px;
+    }
+    .report-table th {
+      background: #f1f5f9;
+      color: #1e293b;
+      font-weight: 700;
+      padding: 5px 6px;
+      border: 1px solid #cbd5e1;
+      text-align: ${isRtl ? "right" : "left"};
+    }
+    .report-table th.text-center, .report-table td.text-center { text-align: center; }
+    .report-table th.text-end, .report-table td.text-end { text-align: ${isRtl ? "left" : "right"}; }
+    .report-table td {
+      padding: 5px 6px;
+      border: 1px solid #e2e8f0;
+      vertical-align: middle;
+    }
+    .report-table tr:nth-child(even) td {
+      background: #fbfcfe;
+    }
+    .report-table tr {
+      page-break-inside: avoid;
+    }
+    .badge-present { background: #dcfce7; color: #15803d; padding: 2px 4px; border-radius: 3px; font-weight: 700; font-size: 8.5px; }
+    .badge-absent { background: #fee2e2; color: #b91c1c; padding: 2px 4px; border-radius: 3px; font-weight: 700; font-size: 8.5px; }
+    .badge-late { background: #fef3c7; color: #b45309; padding: 2px 4px; border-radius: 3px; font-weight: 700; font-size: 8.5px; }
+    .badge-excused { background: #e0e7ff; color: #3730a3; padding: 2px 4px; border-radius: 3px; font-weight: 700; font-size: 8.5px; }
+    .signatures-row {
+      margin-top: 18px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      page-break-inside: avoid;
+    }
+    .sig-card {
+      border: 1px dashed #94a3b8;
+      border-radius: 6px;
+      padding: 9px;
+      min-height: 75px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .sig-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #1e293b;
+    }
+    .sig-sub {
+      font-size: 8.5px;
+      color: #94a3b8;
+    }
+    .footer-notice {
+      margin-top: 12px;
+      border-top: 1px solid #f1f5f9;
+      padding-top: 5px;
+      text-align: center;
+      font-size: 8px;
+      color: #94a3b8;
+    }
+  `;
+}
+
+function generateStudentDossierHtml({ studentReport, tenant, user, currency, t, dir }) {
+  const isRtl = dir === "rtl";
+  const s = studentReport.student || {};
+  const f = studentReport.financial_summary || {};
+  const courses = studentReport.courses || [];
+  const invoices = studentReport.invoices || [];
+  const sessions = studentReport.sessions_history || [];
+
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const refCode = `STU-${s.code || s.student_code || (s.id ? s.id.slice(0, 8).toUpperCase() : "DOC")}`;
+
+  const schoolName = tenant?.name || "Scolaris Academy";
+  const schoolLogo = tenant?.logo_url ? resolveFileUrl(tenant.logo_url) : null;
+  const schoolPhone = tenant?.phone || "";
+  const schoolAddress = tenant?.address || "";
+  const gradeStr = formatStudentGrade(s, t);
+
+  const balanceNum = Number(f.balance || 0);
+  let balanceHtml = `<span class="kpi-val font-mono">${balanceNum.toLocaleString()} ${currency}</span>`;
+  if (f.balance_status === "owes") {
+    balanceHtml = `<span class="kpi-val font-mono text-destructive">${balanceNum.toLocaleString()} ${currency}</span><div style="font-size: 8.5px; color: #e11d48; font-weight: 700;">${escapeHtml(t("debts.owes", "مستحق عليه"))}</div>`;
+  } else if (f.balance_status === "overpaid") {
+    balanceHtml = `<span class="kpi-val font-mono text-emerald">+${balanceNum.toLocaleString()} ${currency}</span><div style="font-size: 8.5px; color: #059669; font-weight: 700;">${escapeHtml(t("debts.overpaid", "رصيد دائن"))}</div>`;
+  } else {
+    balanceHtml = `<span class="kpi-val font-mono">${balanceNum.toLocaleString()} ${currency}</span><div style="font-size: 8.5px; color: #64748b; font-weight: 600;">${escapeHtml(t("debts.settled", "حساب خالص"))}</div>`;
+  }
+
+  const coursesRows = courses.length === 0
+    ? `<tr><td colspan="8" class="text-center" style="color: #94a3b8; padding: 12px;">${escapeHtml(t("payments.no_courses", "لا توجد دورات مسجلة"))}</td></tr>`
+    : courses.map(c => `
+      <tr>
+        <td><strong>${escapeHtml(c.course_title)}</strong><div style="font-size: 8.5px; color: #64748b;">${escapeHtml(c.group_name)}</div></td>
+        <td style="color: #475569;">${escapeHtml(c.teacher_name || "—")}</td>
+        <td class="text-end font-mono">${Number(c.cost_per_session || 0).toLocaleString()} ${currency}</td>
+        <td class="text-center font-mono"><strong>${c.sessions_covered || 0}</strong></td>
+        <td class="text-center font-mono text-emerald"><strong>${c.sessions_attended || 0}</strong></td>
+        <td class="text-center font-mono text-destructive"><strong>${c.sessions_absent || 0}</strong></td>
+        <td class="text-center font-mono text-blue"><strong>${c.sessions_remaining || 0}</strong></td>
+        <td class="text-end font-mono" style="font-weight: 700; color: #7c3aed;">${Number(c.credit_remaining || 0).toLocaleString()} ${currency}</td>
+      </tr>
+    `).join("");
+
+  const invoicesRows = invoices.length === 0
+    ? `<tr><td colspan="7" class="text-center" style="color: #94a3b8; padding: 12px;">${escapeHtml(t("reports.no_transactions", "لا توجد وصولات مسجلة"))}</td></tr>`
+    : invoices.map(inv => {
+      const itemsText = inv.items && inv.items.length > 0
+        ? inv.items.map(it => `${escapeHtml(it.title)} (${Number(it.net_amount).toLocaleString()} ${currency})`).join(" · ")
+        : escapeHtml(inv.notes || "—");
+      let statusBadge = `<span class="chip chip-muted">${escapeHtml(inv.status || "—")}</span>`;
+      if (inv.status === "paid") statusBadge = `<span class="badge-present">${escapeHtml(t("status.paid", "مدفوع"))}</span>`;
+      else if (inv.status === "partial") statusBadge = `<span class="badge-late">${escapeHtml(t("status.partial", "جزئي"))}</span>`;
+      else if (inv.status === "pending") statusBadge = `<span class="badge-absent">${escapeHtml(t("status.pending", "معلق"))}</span>`;
+
+      return `
+        <tr>
+          <td class="font-mono"><strong>${escapeHtml(inv.invoice_number || inv.id?.slice(0, 8))}</strong></td>
+          <td class="font-mono" style="color: #64748b;">${formatPrintDate(inv.paid_at || inv.created_at)}</td>
+          <td>${itemsText}</td>
+          <td class="text-center">${statusBadge}</td>
+          <td class="text-center" style="text-transform: capitalize; color: #475569;">${escapeHtml(inv.method || "cash")}</td>
+          <td class="text-end font-mono text-emerald" style="font-weight: 700;">${Number(inv.paid_amount || 0).toLocaleString()} ${currency}</td>
+          <td class="text-end font-mono" style="color: ${inv.pending_amount > 0 ? '#d97706' : '#94a3b8'}; font-weight: ${inv.pending_amount > 0 ? '700' : 'normal'};">
+            ${inv.pending_amount > 0 ? `${Number(inv.pending_amount).toLocaleString()} ${currency}` : "—"}
+          </td>
+        </tr>
+      `;
+    }).join("");
+
+  const sessionsRows = sessions.length === 0
+    ? `<tr><td colspan="5" class="text-center" style="color: #94a3b8; padding: 12px;">${escapeHtml(t("attendance.no_records", "لا توجد سجلات حضور مسجلة"))}</td></tr>`
+    : sessions.slice(0, 35).map(sn => {
+      let stBadge = `<span class="chip chip-muted">${escapeHtml(sn.status || "—")}</span>`;
+      if (sn.status === "present") stBadge = `<span class="badge-present">${escapeHtml(t("attendance.present", "حاضر"))}</span>`;
+      else if (sn.status === "absent") stBadge = `<span class="badge-absent">${escapeHtml(t("attendance.absent", "غائب"))}</span>`;
+      else if (sn.status === "late") stBadge = `<span class="badge-late">${escapeHtml(t("attendance.late", "متأخر"))}</span>`;
+      else if (sn.status === "excused") stBadge = `<span class="badge-excused">${escapeHtml(t("attendance.excused", "مبرر"))}</span>`;
+
+      return `
+        <tr>
+          <td class="font-mono" style="color: #64748b;">${formatPrintDate(sn.date)}</td>
+          <td><strong>${escapeHtml(sn.course_title)}</strong></td>
+          <td style="color: #475569;">${escapeHtml(sn.group_name)}</td>
+          <td style="color: #475569;">${escapeHtml(sn.teacher_name || "—")}</td>
+          <td class="text-end">${stBadge}</td>
+        </tr>
+      `;
+    }).join("");
+
+  return `<!DOCTYPE html>
+<html dir="${isRtl ? "rtl" : "ltr"}" lang="${isRtl ? "ar" : "en"}">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(s.name)} - ${escapeHtml(t("reports.student_all_time_report", "تقرير التلميذ الشامل"))}</title>
+  <style>
+    ${getSharedDossierStyles(isRtl)}
+  </style>
+</head>
+<body>
+  <div class="report-wrap">
+    <!-- School Header -->
+    <header class="school-header">
+      <div class="header-brand">
+        ${schoolLogo
+          ? `<img src="${schoolLogo}" alt="Logo" class="school-logo" />`
+          : `<div class="school-logo-fallback">${escapeHtml(schoolName[0]?.toUpperCase() || "S")}</div>`
+        }
+        <div class="school-info">
+          <h1>${escapeHtml(schoolName)}</h1>
+          ${schoolAddress ? `<p>${escapeHtml(schoolAddress)}</p>` : ""}
+          ${schoolPhone ? `<p>${escapeHtml(t("field.phone", "الهاتف"))}: ${escapeHtml(schoolPhone)}</p>` : ""}
+        </div>
+      </div>
+      <div class="header-meta">
+        <div class="doc-badge">${escapeHtml(refCode)}</div>
+        <div class="doc-date">${escapeHtml(t("reports.date", "تاريخ الإصدار"))}: ${dateStr}</div>
+      </div>
+    </header>
+
+    <!-- Document Title -->
+    <div class="title-banner">
+      <h2>${escapeHtml(t("reports.student_dossier_title", "كشف الحساب والمسار الدراسي الشامل للتلميذ"))}</h2>
+      <p>${escapeHtml(t("reports.student_dossier_subtitle", "وثيقة إدارية ومالية رسمية تشمل كافة العمليات والحصص منذ التسجيل"))}</p>
+    </div>
+
+    <!-- Student Profile -->
+    <div class="profile-card">
+      <div>
+        <div class="profile-name">${escapeHtml(s.name)}</div>
+        <div class="profile-chips">
+          <span class="chip chip-emerald">${escapeHtml(t("menu.students", "تلميذ"))}</span>
+          ${s.code ? `<span class="chip chip-muted font-mono">#${escapeHtml(s.code)}</span>` : ""}
+          ${gradeStr ? `<span class="chip chip-amber">${escapeHtml(gradeStr)}</span>` : ""}
+          ${s.status ? `<span class="chip chip-muted">${escapeHtml(t(`status.${s.status}`, s.status))}</span>` : ""}
+        </div>
+      </div>
+      <div class="profile-contact">
+        ${s.phone ? `<div>${escapeHtml(t("field.phone", "الهاتف"))}: <strong>${escapeHtml(s.phone)}</strong></div>` : ""}
+        ${s.parent_phone ? `<div>${escapeHtml(t("field.parent_phone", "ولي الأمر"))}: <strong>${escapeHtml(s.parent_phone)}</strong></div>` : ""}
+      </div>
+    </div>
+
+    <!-- Financial KPIs -->
+    <div class="kpi-grid">
+      <div class="kpi-item">
+        <div class="kpi-title">${escapeHtml(t("payments.total_paid", "إجمالي المدفوعات"))}</div>
+        <div class="kpi-val text-emerald">${Number(f.total_paid || 0).toLocaleString()} ${currency}</div>
+      </div>
+      <div class="kpi-item">
+        <div class="kpi-title">${escapeHtml(t("debts.total_debt", "مجموع الديون المتبقية"))}</div>
+        <div class="kpi-val text-amber">${Number(f.total_debt || 0).toLocaleString()} ${currency}</div>
+      </div>
+      <div class="kpi-item">
+        <div class="kpi-title">${escapeHtml(t("payments.total_cost", "التكلفة الإجمالية"))}</div>
+        <div class="kpi-val">${Number(f.total_cost || 0).toLocaleString()} ${currency}</div>
+      </div>
+      <div class="kpi-item">
+        <div class="kpi-title">${escapeHtml(t("payments.balance_label", "الرصيد المتبقي"))}</div>
+        ${balanceHtml}
+      </div>
+    </div>
+
+    <!-- Section 1: Courses & Deductions -->
+    <div class="section-block">
+      <div class="section-head">
+        <span>${escapeHtml(t("payments.enrolled_courses", "الدورات المسجلة والحصص المقتطعة"))}</span>
+        <span class="section-count">${courses.length} ${escapeHtml(t("menu.courses", "دورات"))}</span>
+      </div>
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>${escapeHtml(t("field.course_title", "الدورة والفوج"))}</th>
+            <th>${escapeHtml(t("field.teacher", "الأستاذ"))}</th>
+            <th class="text-end">${escapeHtml(t("field.pricing", "سعر الحصة"))}</th>
+            <th class="text-center">${escapeHtml(t("payments.sessions_covered", "مدفوعة"))}</th>
+            <th class="text-center">${escapeHtml(t("attendance.present", "حاضر"))}</th>
+            <th class="text-center">${escapeHtml(t("attendance.absent", "غائب"))}</th>
+            <th class="text-center">${escapeHtml(t("payments.sessions_remaining", "متبقية"))}</th>
+            <th class="text-end">${escapeHtml(t("payments.credit_remaining", "الرصيد المتبقي"))}</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${coursesRows}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Section 2: Invoices & Receipts -->
+    <div class="section-block">
+      <div class="section-head">
+        <span>${escapeHtml(t("reports.payments_history", "سجل الوصولات والمدفوعات"))}</span>
+        <span class="section-count">${invoices.length} ${escapeHtml(t("menu.payments", "عمليات"))}</span>
+      </div>
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>${escapeHtml(t("payments.invoice_number", "رقم الوصل"))}</th>
+            <th>${escapeHtml(t("reports.date", "التاريخ"))}</th>
+            <th>${escapeHtml(t("payments.items_label", "البيان / المواد"))}</th>
+            <th class="text-center">${escapeHtml(t("field.status", "الحالة"))}</th>
+            <th class="text-center">${escapeHtml(t("field.payment_method", "طريقة الدفع"))}</th>
+            <th class="text-end">${escapeHtml(t("payments.paid_now", "المدفوع"))}</th>
+            <th class="text-end">${escapeHtml(t("payments.pending_debt", "المتبقي"))}</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${invoicesRows}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Section 3: Attendance History -->
+    <div class="section-block">
+      <div class="section-head">
+        <span>${escapeHtml(t("attendance.history", "سجل حضور الحصص"))}</span>
+        <span class="section-count">${sessions.length} ${escapeHtml(t("menu.sessions", "حصص"))}</span>
+      </div>
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>${escapeHtml(t("reports.date", "التاريخ"))}</th>
+            <th>${escapeHtml(t("field.course_title", "الدورة"))}</th>
+            <th>${escapeHtml(t("field.group", "الفوج"))}</th>
+            <th>${escapeHtml(t("field.teacher", "الأستاذ"))}</th>
+            <th class="text-end">${escapeHtml(t("field.status", "الحالة"))}</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sessionsRows}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Signatures & Stamp -->
+    <div class="signatures-row">
+      <div class="sig-card">
+        <div class="sig-label">${escapeHtml(t("reports.guardian_signature", "توقيع ولي الأمر / المعني"))}</div>
+        <div class="sig-sub">${escapeHtml(t("reports.signature_mention", "قرئ وصودق عليه"))}</div>
+      </div>
+      <div class="sig-card">
+        <div class="sig-label">${escapeHtml(t("reports.admin_stamp", "توقيع وختم إدارة المؤسسة"))}</div>
+        <div class="sig-sub">${escapeHtml(schoolName)}</div>
+      </div>
+    </div>
+
+    <!-- Footer Notice -->
+    <div class="footer-notice">
+      ${escapeHtml(t("reports.official_notice", "وثيقة رسمية صادرة آلياً عن نظام إدارة المدرسة Scolaris — يرجى الاحتفاظ بها كإثبات رسمي"))}
+    </div>
+  </div>
+
+  <script>
+    window.addEventListener('afterprint', () => {
+      window.close();
+    });
+  </script>
+</body>
+</html>`;
+}
+
+function generateTeacherDossierHtml({ teacherReport, tenant, user, currency, t, dir }) {
+  const isRtl = dir === "rtl";
+  const tch = teacherReport.teacher || {};
+  const f = teacherReport.financial_summary || {};
+  const groups = teacherReport.groups || [];
+  const sessions = teacherReport.sessions || [];
+  const payouts = teacherReport.payouts || [];
+
+  const now = new Date();
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const refCode = `TCH-${tch.id ? tch.id.slice(0, 8).toUpperCase() : "DOC"}`;
+
+  const schoolName = tenant?.name || "Scolaris Academy";
+  const schoolLogo = tenant?.logo_url ? resolveFileUrl(tenant.logo_url) : null;
+  const schoolPhone = tenant?.phone || "";
+  const schoolAddress = tenant?.address || "";
+
+  const balanceDue = Number(f.balance_due || 0);
+
+  const groupsRows = groups.length === 0
+    ? `<tr><td colspan="5" class="text-center" style="color: #94a3b8; padding: 12px;">${escapeHtml(t("common.no_data", "لا توجد أفواج مسندة"))}</td></tr>`
+    : groups.map(g => `
+      <tr>
+        <td><strong>${escapeHtml(g.name)}</strong></td>
+        <td style="color: #475569;">${escapeHtml(g.course_title)}</td>
+        <td class="text-center font-mono">${g.students_count || 0}</td>
+        <td class="text-center font-mono">${g.sessions_count || 0}</td>
+        <td class="text-end"><span class="chip chip-muted">${escapeHtml(t(`status.${g.status}`, g.status || "active"))}</span></td>
+      </tr>
+    `).join("");
+
+  const sessionsRows = sessions.length === 0
+    ? `<tr><td colspan="7" class="text-center" style="color: #94a3b8; padding: 12px;">${escapeHtml(t("attendance.no_records", "لا توجد حصص مسجلة"))}</td></tr>`
+    : sessions.slice(0, 40).map(sn => `
+      <tr>
+        <td class="font-mono" style="color: #64748b;">${formatPrintDate(sn.start_at)}</td>
+        <td><strong>${escapeHtml(sn.group_name)}</strong></td>
+        <td style="color: #475569;">${escapeHtml(sn.course_title)}</td>
+        <td style="color: #475569;">${escapeHtml(sn.room_name || "—")}</td>
+        <td class="text-center font-mono text-emerald"><strong>${sn.present_count || 0}</strong></td>
+        <td class="text-center font-mono text-destructive"><strong>${sn.absent_count || 0}</strong></td>
+        <td class="text-end"><span class="chip chip-muted">${escapeHtml(t(`status.${sn.status}`, sn.status || "conducted"))}</span></td>
+      </tr>
+    `).join("");
+
+  const payoutsRows = payouts.length === 0
+    ? `<tr><td colspan="4" class="text-center" style="color: #94a3b8; padding: 12px;">${escapeHtml(t("reports.no_transactions", "لا توجد دفعات مسجلة"))}</td></tr>`
+    : payouts.map(p => `
+      <tr>
+        <td class="font-mono" style="color: #64748b;">${formatPrintDate(p.payment_date || p.created_at)}</td>
+        <td style="text-transform: capitalize; color: #475569;">${escapeHtml(p.method || "cash")}</td>
+        <td style="color: #475569;">${escapeHtml(p.notes || "—")}</td>
+        <td class="text-end font-mono text-emerald" style="font-weight: 700;">${Number(p.amount || 0).toLocaleString()} ${currency}</td>
+      </tr>
+    `).join("");
+
+  return `<!DOCTYPE html>
+<html dir="${isRtl ? "rtl" : "ltr"}" lang="${isRtl ? "ar" : "en"}">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtml(tch.name)} - ${escapeHtml(t("reports.teacher_all_time_report", "تقرير الأستاذ الشامل"))}</title>
+  <style>
+    ${getSharedDossierStyles(isRtl)}
+  </style>
+</head>
+<body>
+  <div class="report-wrap">
+    <!-- School Header -->
+    <header class="school-header">
+      <div class="header-brand">
+        ${schoolLogo
+          ? `<img src="${schoolLogo}" alt="Logo" class="school-logo" />`
+          : `<div class="school-logo-fallback">${escapeHtml(schoolName[0]?.toUpperCase() || "S")}</div>`
+        }
+        <div class="school-info">
+          <h1>${escapeHtml(schoolName)}</h1>
+          ${schoolAddress ? `<p>${escapeHtml(schoolAddress)}</p>` : ""}
+          ${schoolPhone ? `<p>${escapeHtml(t("field.phone", "الهاتف"))}: ${escapeHtml(schoolPhone)}</p>` : ""}
+        </div>
+      </div>
+      <div class="header-meta">
+        <div class="doc-badge">${escapeHtml(refCode)}</div>
+        <div class="doc-date">${escapeHtml(t("reports.date", "تاريخ الإصدار"))}: ${dateStr}</div>
+      </div>
+    </header>
+
+    <!-- Document Title -->
+    <div class="title-banner">
+      <h2>${escapeHtml(t("reports.teacher_dossier_title", "كشف المستحقات والنشاط التعليمي للأستاذ"))}</h2>
+      <p>${escapeHtml(t("reports.teacher_dossier_subtitle", "بيان إداري ومالي شامل للحصص والأفواج والمستحقات المسددة والمتبقية"))}</p>
+    </div>
+
+    <!-- Teacher Profile -->
+    <div class="profile-card">
+      <div>
+        <div class="profile-name">${escapeHtml(tch.name)}</div>
+        <div class="profile-chips">
+          <span class="chip chip-blue">${escapeHtml(t("menu.teachers", "أستاذ"))}</span>
+          ${tch.subject ? `<span class="chip chip-muted">${escapeHtml(tch.subject)}</span>` : ""}
+          <span class="chip chip-emerald">${escapeHtml(t("field.percentage", "النسبة"))}: ${tch.payment_percentage || 0}%</span>
+          ${tch.status ? `<span class="chip chip-muted">${escapeHtml(t(`status.${tch.status}`, tch.status))}</span>` : ""}
+        </div>
+      </div>
+      <div class="profile-contact">
+        ${tch.phone ? `<div>${escapeHtml(t("field.phone", "الهاتف"))}: <strong>${escapeHtml(tch.phone)}</strong></div>` : ""}
+      </div>
+    </div>
+
+    <!-- Financial KPIs -->
+    <div class="kpi-grid">
+      <div class="kpi-item">
+        <div class="kpi-title">${escapeHtml(t("reports.revenue_generated", "مداخيل الحصص الإجمالية"))}</div>
+        <div class="kpi-val">${Number(f.total_revenue_generated || 0).toLocaleString()} ${currency}</div>
+      </div>
+      <div class="kpi-item">
+        <div class="kpi-title">${escapeHtml(t("reports.teacher_earned", "مستحقات الأستاذ المحتسبة"))}</div>
+        <div class="kpi-val text-blue">${Number(f.total_earned || 0).toLocaleString()} ${currency}</div>
+      </div>
+      <div class="kpi-item">
+        <div class="kpi-title">${escapeHtml(t("reports.total_paid_out", "الدفعات المستلمة"))}</div>
+        <div class="kpi-val text-emerald">${Number(f.total_paid_out || 0).toLocaleString()} ${currency}</div>
+      </div>
+      <div class="kpi-item">
+        <div class="kpi-title">${escapeHtml(t("reports.balance_due", "المتبقي للأستاذ"))}</div>
+        <div class="kpi-val ${balanceDue > 0 ? "text-amber" : "text-emerald"}">${balanceDue.toLocaleString()} ${currency}</div>
+      </div>
+    </div>
+
+    <!-- Section 1: Groups Taught -->
+    <div class="section-block">
+      <div class="section-head">
+        <span>${escapeHtml(t("menu.groups", "الأفواج والدورات المسندة للأستاذ"))}</span>
+        <span class="section-count">${groups.length} ${escapeHtml(t("menu.groups", "أفواج"))}</span>
+      </div>
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>${escapeHtml(t("field.group_name", "اسم الفوج"))}</th>
+            <th>${escapeHtml(t("field.course_title", "الدورة"))}</th>
+            <th class="text-center">${escapeHtml(t("menu.students", "عدد التلاميذ"))}</th>
+            <th class="text-center">${escapeHtml(t("menu.sessions", "الحصص المقدمة"))}</th>
+            <th class="text-end">${escapeHtml(t("field.status", "الحالة"))}</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${groupsRows}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Section 2: Conducted Sessions -->
+    <div class="section-block">
+      <div class="section-head">
+        <span>${escapeHtml(t("reports.conducted_sessions", "سجل الحصص المقدمة"))}</span>
+        <span class="section-count">${sessions.length} ${escapeHtml(t("menu.sessions", "حصص"))}</span>
+      </div>
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>${escapeHtml(t("reports.date", "التاريخ"))}</th>
+            <th>${escapeHtml(t("field.group", "الفوج"))}</th>
+            <th>${escapeHtml(t("field.course_title", "الدورة"))}</th>
+            <th>${escapeHtml(t("field.room", "القاعة"))}</th>
+            <th class="text-center">${escapeHtml(t("attendance.present", "حاضر"))}</th>
+            <th class="text-center">${escapeHtml(t("attendance.absent", "غائب"))}</th>
+            <th class="text-end">${escapeHtml(t("field.status", "الحالة"))}</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sessionsRows}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Section 3: Payouts History -->
+    <div class="section-block">
+      <div class="section-head">
+        <span>${escapeHtml(t("reports.payouts_history", "سجل الدفعات والمستحقات المسددة"))}</span>
+        <span class="section-count">${payouts.length} ${escapeHtml(t("menu.payments", "دفعات"))}</span>
+      </div>
+      <table class="report-table">
+        <thead>
+          <tr>
+            <th>${escapeHtml(t("reports.date", "التاريخ"))}</th>
+            <th>${escapeHtml(t("field.payment_method", "طريقة الدفع"))}</th>
+            <th>${escapeHtml(t("field.notes", "ملاحظات"))}</th>
+            <th class="text-end">${escapeHtml(t("field.amount", "المبلغ المستلم"))}</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${payoutsRows}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Signatures & Stamp -->
+    <div class="signatures-row">
+      <div class="sig-card">
+        <div class="sig-label">${escapeHtml(t("reports.teacher_signature", "توقيع واستلام الأستاذ(ة)"))}</div>
+        <div class="sig-sub">${escapeHtml(t("reports.signature_mention", "قرئ وصودق عليه"))}</div>
+      </div>
+      <div class="sig-card">
+        <div class="sig-label">${escapeHtml(t("reports.admin_stamp", "توقيع وختم إدارة المؤسسة"))}</div>
+        <div class="sig-sub">${escapeHtml(schoolName)}</div>
+      </div>
+    </div>
+
+    <!-- Footer Notice -->
+    <div class="footer-notice">
+      ${escapeHtml(t("reports.official_notice", "وثيقة رسمية صادرة آلياً عن نظام إدارة المدرسة Scolaris — يرجى الاحتفاظ بها كإثبات رسمي"))}
+    </div>
+  </div>
+
+  <script>
+    window.addEventListener('afterprint', () => {
+      window.close();
+    });
+  </script>
+</body>
+</html>`;
+}
+
+function openPrintDossier(htmlContent, title) {
+  const printWin = window.open("", "_blank");
+  if (!printWin) {
+    window.print();
+    return;
+  }
+  printWin.document.open();
+  printWin.document.write(htmlContent);
+  printWin.document.close();
+  setTimeout(() => {
+    try {
+      printWin.focus();
+      printWin.print();
+    } catch (e) {
+      console.error("Print popup error", e);
+    }
+  }, 350);
+}
+
 export default function ReportsPage() {
   const { t, dir } = useI18n();
-  const { tenant } = useAuth();
+  const { tenant, user } = useAuth();
   const [filters, setFilters] = useState({ from: "", to: "", group_id: "", teacher_id: "" });
   const [pdfDialogOpen, setPdfDialogOpen] = useState(false);
   const [pdfMonth, setPdfMonth] = useState(currentMonthValue());
@@ -217,13 +1006,44 @@ export default function ReportsPage() {
     setSearchQuery("");
   };
 
+  const handlePrintReport = () => {
+    try {
+      if (selectedStudentId && studentReport) {
+        const html = generateStudentDossierHtml({
+          studentReport,
+          tenant,
+          user,
+          currency,
+          t,
+          dir,
+        });
+        openPrintDossier(html, `Student-Report-${studentReport.student?.name || selectedStudentId}`);
+      } else if (selectedTeacherId && teacherReport) {
+        const html = generateTeacherDossierHtml({
+          teacherReport,
+          tenant,
+          user,
+          currency,
+          t,
+          dir,
+        });
+        openPrintDossier(html, `Teacher-Report-${teacherReport.teacher?.name || selectedTeacherId}`);
+      } else {
+        window.print();
+      }
+    } catch (e) {
+      console.error("Print error:", e);
+      window.print();
+    }
+  };
+
   return (
     <div>
       <PageHeader
         title={t("menu.reports")}
         subtitle={t("reports.subtitle")}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 no-print">
             {!selectedStudentId && !selectedTeacherId ? (
               <>
                 <Button variant="outline" onClick={() => setPdfDialogOpen(true)} data-testid="reports-export-pdf">
@@ -234,7 +1054,7 @@ export default function ReportsPage() {
                 </Button>
               </>
             ) : (
-              <Button variant="outline" onClick={() => window.print()}>
+              <Button variant="outline" onClick={handlePrintReport} data-testid="reports-print-btn">
                 <Printer className="w-4 h-4 me-2" /> {t("actions.print", "طباعة التقرير")}
               </Button>
             )}
@@ -243,7 +1063,7 @@ export default function ReportsPage() {
       />
 
       {/* Global Student & Teacher Search Bar */}
-      <div ref={searchContainerRef} className="surface-card p-3 mb-6 relative z-30">
+      <div ref={searchContainerRef} className="surface-card p-3 mb-6 relative z-30 no-print">
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
             <Search className="w-4 h-4 absolute start-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -428,7 +1248,7 @@ export default function ReportsPage() {
       {/* RENDER VIEW 1: STUDENT ALL-TIME REPORT */}
       {selectedStudentId ? (
         <div className="space-y-6">
-          <div className="flex items-center justify-between p-3 rounded-lg bg-accent/10 border border-accent/20">
+          <div className="flex items-center justify-between p-3 rounded-lg bg-accent/10 border border-accent/20 no-print">
             <div className="flex items-center gap-2">
               <Button
                 variant="ghost"
@@ -703,7 +1523,7 @@ export default function ReportsPage() {
       {/* RENDER VIEW 2: TEACHER ALL-TIME REPORT */}
       {selectedTeacherId ? (
         <div className="space-y-6">
-          <div className="flex items-center justify-between p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+          <div className="flex items-center justify-between p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 no-print">
             <div className="flex items-center gap-2">
               <Button
                 variant="ghost"
