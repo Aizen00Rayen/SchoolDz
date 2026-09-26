@@ -4469,29 +4469,67 @@ class CourseViewSet(TenantScopedViewSet):
 
         teacher_earnings = 0.0
         session_price = course_per_session_price(course.price, course.pricing_type, course.sessions_count)
+        teacher_earned_map = {t['id']: 0.0 for t in teachers}
+
         if course.kind in ('package', 'standalone'):
             for it in items:
                 if it.status in ('paid', 'partial', 'pending', 'pardoned'):
                     pct = float(it.teacher_percentage or 0)
-                    teacher_earnings += (float(it.amount or 0) * (pct / 100.0))
+                    share = float(it.amount or 0) * (pct / 100.0)
+                    teacher_earnings += share
+                    if it.group and it.group.teacher_id in teacher_earned_map:
+                        teacher_earned_map[it.group.teacher_id] += share
+                    elif teachers:
+                        teacher_earned_map[teachers[0]['id']] += share
         else:
             for s in sessions:
                 t_pct = float(s.teacher.payment_percentage or 0) if s.teacher else 0.0
+                t_id = s.teacher_id if s.teacher else None
                 if not t_pct and s.group and s.group.teacher:
                     t_pct = float(s.group.teacher.payment_percentage or 0)
+                    t_id = s.group.teacher_id
                 pres_count = sum(1 for a in attendances if a['session_id'] == s.id and a['status'] in ('present', 'late'))
-                teacher_earnings += (pres_count * session_price * (t_pct / 100.0))
+                s_earned = pres_count * session_price * (t_pct / 100.0)
+                teacher_earnings += s_earned
+                if t_id and t_id in teacher_earned_map:
+                    teacher_earned_map[t_id] += s_earned
+
+        for t in teachers:
+            t['earned'] = round(teacher_earned_map.get(t['id'], 0.0), 2)
+
+        student_payments = {}
+        for it in items:
+            s_id = it.payment.student_id if it.payment else None
+            if s_id:
+                if s_id not in student_payments:
+                    student_payments[s_id] = {'paid': 0.0, 'pending': 0.0, 'status': 'not_billed'}
+                it_disc = _payment_item_discount(it)
+                it_net = max(0.0, float(it.amount or 0) - it_disc)
+                if it.status in ('paid', 'partial') or (not it.status and it.payment and it.payment.status in ('paid', 'partial')):
+                    student_payments[s_id]['paid'] += it_net
+                if it.status == 'pending' or (not it.status and it.payment and it.payment.status == 'pending'):
+                    student_payments[s_id]['pending'] += it_net
+                student_payments[s_id]['status'] = it.status or (it.payment.status if it.payment else 'paid')
 
         students_data = []
         for stu in enrolled_students:
             att = student_att.get(stu.id, {'present': 0, 'absent': 0, 'excused': 0, 'total': 0})
+            sp = student_payments.get(stu.id, {'paid': 0.0, 'pending': 0.0, 'status': 'not_billed'})
             students_data.append({
                 'id': stu.id,
-                'name': f"{stu.first_name} {stu.last_name}",
+                'name': f"{stu.first_name} {stu.last_name}".strip(),
+                'first_name': stu.first_name,
+                'last_name': stu.last_name,
                 'code': stu.student_code,
+                'school_level': stu.school_level,
+                'school_year': stu.school_year,
+                'specialty': stu.specialty,
                 'phone': stu.phone,
                 'parent_phone': stu.parent.phone if stu.parent else None,
                 'attendance': att,
+                'paid_amount': round(sp['paid'], 2),
+                'pending_amount': round(sp['pending'], 2),
+                'payment_status': sp['status'],
             })
 
         sessions_data = []
