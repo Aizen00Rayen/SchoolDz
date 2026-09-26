@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Download, FileDown, TrendingUp, TrendingDown, Receipt, Wallet, TriangleAlert, HandCoins, Loader2, ShieldCheck, Coins,
-  Search, ArrowLeft, Printer, UserRound, GraduationCap, X, CheckCircle2, Clock, CalendarDays, BookOpen, Layers, Phone, CalendarClock
+  Search, ArrowLeft, Printer, UserRound, GraduationCap, X, CheckCircle2, Clock, CalendarDays, BookOpen, Layers, Phone, CalendarClock, Sparkles
 } from "lucide-react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip } from "recharts";
 import { api, downloadFrom, extractError, openFinanceReportPdf, resolveFileUrl } from "@/lib/api";
@@ -884,6 +884,8 @@ export default function ReportsPage() {
   const [pdfDialogOpen, setPdfDialogOpen] = useState(false);
   const [pdfMonth, setPdfMonth] = useState(currentMonthValue());
   const [pdfDownloading, setPdfDownloading] = useState(false);
+  const [financeMode, setFinanceMode] = useState("realized");
+  const [sessionSearch, setSessionSearch] = useState("");
 
   // Search state for all-time student and teacher reports
   const [searchQuery, setSearchQuery] = useState("");
@@ -1008,6 +1010,17 @@ export default function ReportsPage() {
   const currency = tenant?.currency || "DZD";
   const money = (v) => `${Number(v || 0).toLocaleString()} ${currency}`;
   const byCategory = Object.entries(finance?.expenses_by_category || {});
+
+  const sessionRealizations = useMemo(() => {
+    const list = finance?.session_realizations || [];
+    if (!sessionSearch.trim()) return list;
+    const term = sessionSearch.trim().toLowerCase();
+    return list.filter((sr) =>
+      (sr.student_name || "").toLowerCase().includes(term) ||
+      (sr.course_title || "").toLowerCase().includes(term) ||
+      (sr.group_name || "").toLowerCase().includes(term)
+    );
+  }, [finance?.session_realizations, sessionSearch]);
 
   const downloadPdf = async () => {
     setPdfDownloading(true);
@@ -1815,64 +1828,222 @@ export default function ReportsPage() {
             </Field>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 mb-6">
-            <Card icon={Wallet} label={t("reports.collected")} value={money(finance?.collected)} />
-            <Card icon={ShieldCheck} label={t("reports.insurances_entered")} value={money(finance?.insurances)} />
-            <Card icon={Coins} label={t("reports.other_incomes")} value={money(finance?.other_income)} />
-            <Card icon={Receipt} label={t("reports.expenses")} value={money(finance?.expenses)} />
-            <Card icon={HandCoins} label={t("reports.teacher_earnings")} value={money(finance?.teacher_earnings)} />
-            <Card icon={TrendingUp} label={t("reports.net")} value={money(finance?.net)} />
-          </div>
-
-          {finance?.expenses_scoped_out && (
-            <p className="text-xs text-muted-foreground mb-6 -mt-3">{t("reports.expenses_scoped_out")}</p>
-          )}
-
-          <div className="surface-card p-4 sm:p-5 mb-6">
-            <div className="flex items-center justify-between mb-4 gap-2">
-              <h3 className="font-display font-semibold text-base sm:text-lg">{t("reports.transactions")}</h3>
-              <span className="text-xs font-mono text-muted-foreground">
-                {(finance?.transactions || []).length}
-              </span>
+          {/* Mode Switch: Realized Revenue vs Cash Flow */}
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+            <div className="inline-flex rounded-xl bg-muted p-1 border border-border">
+              <button
+                type="button"
+                onClick={() => setFinanceMode("realized")}
+                className={`px-3.5 py-1.5 text-xs sm:text-sm font-medium rounded-lg transition-all flex items-center gap-2 ${
+                  financeMode === "realized"
+                    ? "bg-background text-foreground shadow-sm font-semibold"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-emerald-500" />
+                <span>{t("reports.mode_realized")}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFinanceMode("cash")}
+                className={`px-3.5 py-1.5 text-xs sm:text-sm font-medium rounded-lg transition-all flex items-center gap-2 ${
+                  financeMode === "cash"
+                    ? "bg-background text-foreground shadow-sm font-semibold"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Wallet className="w-3.5 h-3.5 text-blue-500" />
+                <span>{t("reports.mode_cash")}</span>
+              </button>
             </div>
-            {!finance?.transactions || finance.transactions.length === 0 ? (
-              <div className="text-sm text-muted-foreground text-center py-8">{t("reports.no_transactions")}</div>
-            ) : (
-              <div className="overflow-x-auto max-h-96 overflow-y-auto">
-                <table className="w-full min-w-[640px] text-sm">
-                  <thead className="border-b border-border sticky top-0 bg-card">
-                    <tr>
-                      <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("reports.date")}</th>
-                      <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("reports.description")}</th>
-                      <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("field.kind")}</th>
-                      <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("field.status")}</th>
-                      <th className="text-end px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("field.amount")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {finance.transactions.map((tx, i) => (
-                      <tr key={i} className="border-b border-border last:border-0">
-                        <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{tx.date || "—"}</td>
-                        <td className="px-3 py-2">
-                          <div className="font-medium">{tx.description}</div>
-                          {tx.reference && <div className="text-[11px] font-mono text-muted-foreground">{tx.reference}</div>}
-                        </td>
-                        <td className="px-3 py-2 text-xs capitalize">
-                          {tx.type === "expense" ? categoryLabel(tx.kind, t) : tx.type === "other_income" ? otherIncomeCategoryLabel(tx.kind, t) : tx.type === "insurance" ? t("menu.insurances") : t(`kind.${tx.kind}`)}
-                        </td>
-                        <td className="px-3 py-2">
-                          {tx.status ? <StatusPill status={tx.status} /> : <span className="text-xs text-muted-foreground">—</span>}
-                        </td>
-                        <td className={`px-3 py-2 text-end font-mono font-semibold ${tx.type === "expense" ? "text-destructive" : "text-success"}`}>
-                          {tx.type === "expense" ? "−" : "+"}{money(tx.amount)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+
+            <div className="text-xs text-muted-foreground font-mono">
+              {financeMode === "realized"
+                ? `${finance?.realized_sessions_count || 0} ${t("reports.sessions_attended")}`
+                : `${finance?.payments_count || 0} ${t("menu.payments")}`}
+            </div>
           </div>
+
+          {financeMode === "realized" ? (
+            <>
+              {/* REALIZED REVENUE CARDS */}
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 mb-6">
+                <Card icon={GraduationCap} label={t("reports.realized_tuition")} value={money(finance?.realized_tuition)} />
+                <Card icon={Coins} label={t("reports.other_incomes")} value={money(finance?.other_income)} />
+                <Card icon={TrendingUp} label={t("reports.realized_total")} value={money(finance?.realized_total)} />
+                <Card icon={Receipt} label={t("reports.expenses")} value={money(finance?.expenses)} />
+                <Card icon={HandCoins} label={t("reports.realized_net")} value={money(finance?.realized_net)} />
+                <Card icon={Wallet} label={t("reports.deferred_tuition")} value={money(finance?.deferred_tuition)} />
+              </div>
+
+              {finance?.expenses_scoped_out && (
+                <p className="text-xs text-muted-foreground mb-6 -mt-3">{t("reports.expenses_scoped_out")}</p>
+              )}
+
+              {/* Course Realized Revenue Breakdown */}
+              {(finance?.course_breakdown || []).length > 0 && (
+                <div className="surface-card p-4 sm:p-5 mb-6">
+                  <h3 className="font-display font-semibold text-base sm:text-lg mb-4">
+                    {t("reports.course_breakdown")}
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {finance.course_breakdown.map((cb) => (
+                      <div key={cb.course_id} className="p-3.5 rounded-xl border border-border bg-card/60 space-y-2">
+                        <div className="font-semibold text-sm text-foreground truncate">{cb.title}</div>
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <span>{t("reports.sessions_attended")}</span>
+                          <span className="font-mono font-medium text-foreground">{cb.sessions_count}</span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground">{t("reports.school_revenue")}</span>
+                          <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                            +{money(cb.realized_revenue)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-muted-foreground border-t border-border/60 pt-1.5">
+                          <span>{t("reports.teacher_share")}</span>
+                          <span className="font-mono">{money(cb.teacher_payout)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Session Consumption Ledger */}
+              <div className="surface-card p-4 sm:p-5 mb-6">
+                <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+                  <div>
+                    <h3 className="font-display font-semibold text-base sm:text-lg">
+                      {t("reports.session_consumption")}
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {sessionRealizations.length} {t("reports.sessions_attended")}
+                    </p>
+                  </div>
+                  <div className="relative w-full sm:w-64">
+                    <Search className="w-3.5 h-3.5 absolute start-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder={t("crud.search")}
+                      value={sessionSearch}
+                      onChange={(e) => setSessionSearch(e.target.value)}
+                      className="ps-8 h-8 text-xs"
+                    />
+                  </div>
+                </div>
+
+                {sessionRealizations.length === 0 ? (
+                  <div className="text-sm text-muted-foreground text-center py-8">{t("reports.no_transactions")}</div>
+                ) : (
+                  <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                    <table className="w-full min-w-[700px] text-sm">
+                      <thead className="border-b border-border sticky top-0 bg-card">
+                        <tr>
+                          <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("reports.date")}</th>
+                          <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("field.student")}</th>
+                          <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("field.course")}</th>
+                          <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("reports.session_value")}</th>
+                          <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("reports.school_revenue")}</th>
+                          <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("reports.teacher_share")}</th>
+                          <th className="text-end px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("reports.funded_status")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sessionRealizations.map((sr) => (
+                          <tr key={sr.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+                            <td className="px-3 py-2 font-mono text-xs text-muted-foreground" dir="ltr">{sr.date || "—"}</td>
+                            <td className="px-3 py-2 font-medium text-foreground">{sr.student_name}</td>
+                            <td className="px-3 py-2 text-xs">
+                              <div>{sr.course_title}</div>
+                              {sr.group_name && <div className="text-[10px] text-muted-foreground">{sr.group_name}</div>}
+                            </td>
+                            <td className="px-3 py-2 font-mono text-xs text-foreground" dir="ltr">{money(sr.session_value)}</td>
+                            <td className="px-3 py-2 font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400" dir="ltr">
+                              +{money(sr.school_revenue)}
+                            </td>
+                            <td className="px-3 py-2 font-mono text-xs text-muted-foreground" dir="ltr">{money(sr.teacher_cut)}</td>
+                            <td className="px-3 py-2 text-end">
+                              {sr.funded ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                                  {t("reports.funded")}
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                                  {t("reports.unfunded_debt")}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              {/* CASH FLOW CARDS */}
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 mb-6">
+                <Card icon={Wallet} label={t("reports.collected")} value={money(finance?.collected)} />
+                <Card icon={ShieldCheck} label={t("reports.insurances_entered")} value={money(finance?.insurances)} />
+                <Card icon={Coins} label={t("reports.other_incomes")} value={money(finance?.other_income)} />
+                <Card icon={Receipt} label={t("reports.expenses")} value={money(finance?.expenses)} />
+                <Card icon={HandCoins} label={t("reports.teacher_earnings")} value={money(finance?.teacher_earnings)} />
+                <Card icon={TrendingUp} label={t("reports.net")} value={money(finance?.net)} />
+              </div>
+
+              {finance?.expenses_scoped_out && (
+                <p className="text-xs text-muted-foreground mb-6 -mt-3">{t("reports.expenses_scoped_out")}</p>
+              )}
+
+              <div className="surface-card p-4 sm:p-5 mb-6">
+                <div className="flex items-center justify-between mb-4 gap-2">
+                  <h3 className="font-display font-semibold text-base sm:text-lg">{t("reports.transactions")}</h3>
+                  <span className="text-xs font-mono text-muted-foreground">
+                    {(finance?.transactions || []).length}
+                  </span>
+                </div>
+                {!finance?.transactions || finance.transactions.length === 0 ? (
+                  <div className="text-sm text-muted-foreground text-center py-8">{t("reports.no_transactions")}</div>
+                ) : (
+                  <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                    <table className="w-full min-w-[640px] text-sm">
+                      <thead className="border-b border-border sticky top-0 bg-card">
+                        <tr>
+                          <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("reports.date")}</th>
+                          <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("reports.description")}</th>
+                          <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("field.kind")}</th>
+                          <th className="text-start px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("field.status")}</th>
+                          <th className="text-end px-3 py-2 font-medium text-[10px] uppercase tracking-widest text-muted-foreground">{t("field.amount")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {finance.transactions.map((tx, i) => (
+                          <tr key={i} className="border-b border-border last:border-0">
+                            <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{tx.date || "—"}</td>
+                            <td className="px-3 py-2">
+                              <div className="font-medium">{tx.description}</div>
+                              {tx.reference && <div className="text-[11px] font-mono text-muted-foreground">{tx.reference}</div>}
+                            </td>
+                            <td className="px-3 py-2 text-xs capitalize">
+                              {tx.type === "expense" ? categoryLabel(tx.kind, t) : tx.type === "other_income" ? otherIncomeCategoryLabel(tx.kind, t) : tx.type === "insurance" ? t("menu.insurances") : t(`kind.${tx.kind}`)}
+                            </td>
+                            <td className="px-3 py-2">
+                              {tx.status ? <StatusPill status={tx.status} /> : <span className="text-xs text-muted-foreground">—</span>}
+                            </td>
+                            <td className={`px-3 py-2 text-end font-mono font-semibold ${tx.type === "expense" ? "text-destructive" : "text-success"}`}>
+                              {tx.type === "expense" ? "−" : "+"}{money(tx.amount)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
 
           {byCategory.length > 0 && (
             <div className="surface-card p-5 mb-6">

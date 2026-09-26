@@ -261,6 +261,81 @@ class OtherIncomeFinanceCalculationTestCase(SimpleTestCase):
         self.assertEqual(oi_tx[0]['amount'], 3500.0)
         self.assertEqual(oi_tx[0]['description'], 'Exam papers printing')
 
+
+class RealizedRevenueCalculationTestCase(SimpleTestCase):
+    @patch('api.views.Attendance')
+    @patch('api.views.PaymentItem')
+    def test_compute_realized_revenue_attendance_deduction(self, mock_payment_item, mock_attendance):
+        from api.views import compute_realized_revenue
+        from unittest.mock import MagicMock
+        from datetime import datetime
+
+        # Request with no date filters
+        request = MagicMock()
+        request.GET = {}
+
+        # 1. Mock student payment: Student 's1' paid 4,000 DZD for course 'c1'
+        pi = MagicMock()
+        pi.amount = 4000.0
+        pi.reduction = 0
+        pi.teacher_percentage = None
+        pi.school_percentage = None
+        pi.course_id = 'c1'
+        pi.status = 'paid'
+        pi.pardon_type = None
+        pi.payment = MagicMock(student_id='s1', status='paid', pardon_type=None)
+
+        mock_payment_item.objects.filter.return_value.filter.return_value.exclude.return_value.exclude.return_value.select_related.return_value = [pi]
+        mock_payment_item.objects.filter.return_value.exclude.return_value.exclude.return_value.values.return_value = []
+
+        # 2. Mock course: 4000 DZD, per_month, 4 sessions -> 1000 DZD/session
+        course = MagicMock(id='c1', title='Mathematics Monthly', price=4000.0, pricing_type='per_month', sessions_count=4)
+
+        # 3. Mock teacher: 50% commission
+        teacher = MagicMock(id='t1', payment_percentage=50.0)
+
+        # 4. Mock group:
+        group = MagicMock(id='g1', name='Group A', course=course, teacher=teacher)
+
+        # 5. Mock 2 present attendance records for student 's1'
+        sess1 = MagicMock(
+            id='sess1', course=course, group=group, teacher=teacher,
+            status='completed', start_at=datetime(2026, 9, 10, 10, 0)
+        )
+        sess2 = MagicMock(
+            id='sess2', course=course, group=group, teacher=teacher,
+            status='completed', start_at=datetime(2026, 9, 17, 10, 0)
+        )
+
+        att1 = MagicMock(id='att1', session=sess1, student_id='s1', status='present', student=MagicMock(first_name='Ali', last_name='Ben'))
+        att2 = MagicMock(id='att2', session=sess2, student_id='s1', status='present', student=MagicMock(first_name='Ali', last_name='Ben'))
+
+        mock_attendance.objects.filter.return_value.exclude.return_value.select_related.return_value.order_by.return_value = [att1, att2]
+
+        result = compute_realized_revenue('tenant-1', request)
+
+        # 2 sessions * 1000 DZD session value = 2000 DZD total value
+        # 50% school cut = 1000 DZD Realized Revenue
+        # 50% teacher cut = 1000 DZD Teacher Share
+        self.assertEqual(result['realized_tuition'], 1000.0)
+        self.assertEqual(result['realized_teacher'], 1000.0)
+        self.assertEqual(result['realized_sessions_count'], 2)
+
+        # Deferred tuition = 4000 paid - 2000 consumed = 2000 DZD remaining
+        self.assertEqual(result['deferred_tuition'], 2000.0)
+
+        # Session realizations check
+        self.assertEqual(len(result['session_realizations']), 2)
+        self.assertEqual(result['session_realizations'][0]['session_value'], 1000.0)
+        self.assertEqual(result['session_realizations'][0]['school_revenue'], 500.0)
+        self.assertEqual(result['session_realizations'][0]['teacher_cut'], 500.0)
+        self.assertTrue(result['session_realizations'][0]['funded'])
+
+        # Course breakdown check
+        self.assertEqual(len(result['course_breakdown']), 1)
+        self.assertEqual(result['course_breakdown'][0]['realized_revenue'], 1000.0)
+        self.assertEqual(result['course_breakdown'][0]['teacher_payout'], 1000.0)
+
     @patch('api.views.OtherIncomeCategory')
     @patch('api.views.Tenant')
     def test_ensure_default_other_income_categories_seeding(self, mock_tenant, mock_oic):

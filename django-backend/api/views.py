@@ -8189,6 +8189,200 @@ def activity_logs(request):
 
 # ------------------------------------------------------------ Finance report
 
+def compute_realized_revenue(tid, request):
+    """
+    Computes accrual/realized revenue based on session attendance:
+    When a student pays upfront (e.g. 4000 DZD for 4 monthly sessions), the cash
+    is deferred until the student actually attends sessions (status='present').
+    Upon attendance, each session's value (e.g. 1000 DZD) is deducted from their
+    payment credit:
+      - Teacher's commission percentage (e.g. 50% = 500 DZD)
+      - Institute Realized Revenue (e.g. 50% = 500 DZD)
+    Unconsumed payments remain as Deferred Revenue.
+    """
+    student_course_paid = {}
+    try:
+        paid_items = PaymentItem.objects.filter(
+            payment__tenant_id=tid, course_id__isnull=False,
+        ).filter(
+            Q(status='paid') | Q(payment__status='paid') |
+            Q(status='partial') | Q(payment__status='partial')
+        ).exclude(status='cancelled').exclude(payment__status='cancelled').select_related('payment')
+
+        for it in paid_items:
+            net_paid = max(0.0, float(it.amount or 0) - _payment_item_discount(it))
+            if net_paid > 0 and it.payment and it.payment.student_id:
+                key = (it.payment.student_id, it.course_id)
+                student_course_paid[key] = student_course_paid.get(key, 0.0) + net_paid
+    except Exception as e:
+        logger.warning(f"Error computing student_course_paid: {e}")
+
+    try:
+        attendance_qs = Attendance.objects.filter(
+            tenant_id=tid, status='present'
+        ).exclude(session__status='cancelled').select_related(
+            'session', 'student', 'session__group', 'session__group__teacher',
+            'session__group__course', 'session__course', 'session__teacher'
+        )
+
+        group_id = request.GET.get('group_id')
+        if group_id:
+            attendance_qs = attendance_qs.filter(session__group_id=group_id)
+
+        teacher_id = request.GET.get('teacher_id')
+        if teacher_id:
+            attendance_qs = attendance_qs.filter(
+                Q(session__teacher_id=teacher_id) | (Q(session__teacher_id__isnull=True) & Q(session__group__teacher_id=teacher_id))
+            )
+
+        all_att = list(attendance_qs.order_by('session__start_at'))
+    except Exception as e:
+        logger.warning(f"Error querying attendance in compute_realized_revenue: {e}")
+        all_att = []
+
+    date_from_str = request.GET.get('from')
+    date_to_str = request.GET.get('to')
+    date_from = None
+    date_to = None
+    if date_from_str:
+        try:
+            date_from = datetime.strptime(date_from_str[:10], '%Y-%m-%d').date()
+        except Exception:
+            pass
+    if date_to_str:
+        try:
+            date_to = datetime.strptime(date_to_str[:10], '%Y-%m-%d').date()
+        except Exception:
+            pass
+
+    student_course_pardons = {}
+    try:
+        pardon_items = PaymentItem.objects.filter(
+            payment__tenant_id=tid, course_id__isnull=False,
+        ).exclude(status='cancelled').exclude(payment__status='cancelled').values(
+            'payment__student_id', 'course_id', 'pardon_type', 'payment__pardon_type'
+        )
+        for pi in pardon_items:
+            ptype = pi.get('pardon_type') or pi.get('payment__pardon_type')
+            if ptype:
+                student_course_pardons[(pi['payment__student_id'], pi['course_id'])] = ptype
+    except Exception:
+        pass
+
+    consumed_by_sc = {}
+    realized_tuition = 0.0
+    realized_teacher = 0.0
+    realized_sessions_count = 0
+    session_realizations = []
+    course_breakdown = {}
+
+    for att in all_att:
+        sess = getattr(att, 'session', None)
+        if not sess:
+            continue
+        course = sess.course or (sess.group.course if sess.group else None)
+        if not course:
+            continue
+
+        c_id = course.id
+        s_id = att.student_id
+
+        session_price = course_per_session_price(course.price, course.pricing_type, course.sessions_count)
+
+        teacher = sess.teacher or (sess.group.teacher if sess.group else None)
+        t_pct = float(teacher.payment_percentage or 50) if teacher else 50.0
+        s_pct = max(0.0, 100.0 - t_pct)
+
+        p_type = student_course_pardons.get((s_id, c_id))
+        if p_type == 'both':
+            s_pct = 0.0
+            t_pct = 0.0
+        elif p_type == 'school':
+            s_pct = 0.0
+        elif p_type == 'teacher':
+            t_pct = 0.0
+
+        school_cut = session_price * (s_pct / 100.0)
+        teacher_cut = session_price * (t_pct / 100.0)
+
+        total_paid = student_course_paid.get((s_id, c_id), 0.0)
+        prior_consumed = consumed_by_sc.get((s_id, c_id), 0.0)
+        available = max(0.0, total_paid - prior_consumed)
+
+        if available >= session_price and session_price > 0:
+            funded_ratio = 1.0
+            consumed_from_payment = session_price
+        elif available > 0 and session_price > 0:
+            funded_ratio = available / session_price
+            consumed_from_payment = available
+        else:
+            funded_ratio = 0.0
+            consumed_from_payment = 0.0
+
+        consumed_by_sc[(s_id, c_id)] = prior_consumed + session_price
+
+        sess_date = sess.start_at.date() if sess.start_at else None
+        if date_from and sess_date and sess_date < date_from:
+            continue
+        if date_to and sess_date and sess_date > date_to:
+            continue
+
+        actual_school_rev = round(school_cut * (funded_ratio if total_paid > 0 else 1.0), 2)
+        actual_teacher_earned = round(teacher_cut, 2)
+
+        realized_tuition += actual_school_rev
+        realized_teacher += actual_teacher_earned
+        realized_sessions_count += 1
+
+        student_name = f"{att.student.first_name} {att.student.last_name}".strip() if att.student else "—"
+        group_name = sess.group.name if sess.group else "—"
+
+        session_realizations.append({
+            'id': att.id,
+            'date': sess.start_at.strftime('%Y-%m-%d %H:%M') if sess.start_at else '',
+            'student_id': s_id,
+            'student_name': student_name,
+            'course_id': c_id,
+            'course_title': course.title,
+            'group_name': group_name,
+            'session_value': round(session_price, 2),
+            'school_revenue': actual_school_rev,
+            'teacher_cut': actual_teacher_earned,
+            'funded': funded_ratio >= 1.0,
+            'consumed_from_payment': round(consumed_from_payment, 2),
+        })
+
+        cb = course_breakdown.setdefault(c_id, {
+            'course_id': c_id,
+            'title': course.title,
+            'sessions_count': 0,
+            'realized_revenue': 0.0,
+            'teacher_payout': 0.0,
+            'total_value': 0.0,
+        })
+        cb['sessions_count'] += 1
+        cb['realized_revenue'] = round(cb['realized_revenue'] + actual_school_rev, 2)
+        cb['teacher_payout'] = round(cb['teacher_payout'] + actual_teacher_earned, 2)
+        cb['total_value'] = round(cb['total_value'] + session_price, 2)
+
+    session_realizations.sort(key=lambda x: x['date'] or '', reverse=True)
+
+    deferred_tuition = 0.0
+    for key, paid_amt in student_course_paid.items():
+        consumed = consumed_by_sc.get(key, 0.0)
+        remaining = max(0.0, paid_amt - consumed)
+        deferred_tuition += remaining
+
+    return {
+        'realized_tuition': round(realized_tuition, 2),
+        'deferred_tuition': round(deferred_tuition, 2),
+        'realized_teacher': round(realized_teacher, 2),
+        'realized_sessions_count': realized_sessions_count,
+        'session_realizations': session_realizations,
+        'course_breakdown': list(course_breakdown.values()),
+    }
+
+
 def _compute_finance_report_data(tid, request):
     """Payments + expenses + net for a date range, optionally narrowed to
     one group or teacher — the shared core behind finance_report (JSON +
@@ -8339,6 +8533,8 @@ def _compute_finance_report_data(tid, request):
             })
     transactions.sort(key=lambda t: t['date'] or '', reverse=True)
 
+    realized_info = compute_realized_revenue(tid, request)
+
     return {
         'collected': collected,
         'outstanding': pending_amount,
@@ -8353,6 +8549,16 @@ def _compute_finance_report_data(tid, request):
         'expenses_scoped_out': scoped_to_subset,
         'teachers': teacher_rows,
         'transactions': transactions,
+
+        # Realized (Accrual) Revenue Engine
+        'realized_tuition': realized_info.get('realized_tuition', 0.0),
+        'deferred_tuition': realized_info.get('deferred_tuition', 0.0),
+        'realized_total': round(realized_info.get('realized_tuition', 0.0) + other_income_total, 2),
+        'realized_net': round(realized_info.get('realized_tuition', 0.0) + other_income_total - expense_total, 2),
+        'realized_teacher': realized_info.get('realized_teacher', 0.0),
+        'realized_sessions_count': realized_info.get('realized_sessions_count', 0),
+        'session_realizations': realized_info.get('session_realizations', []),
+        'course_breakdown': realized_info.get('course_breakdown', []),
     }
 
 
