@@ -653,11 +653,22 @@ class ReportsAndArchiveTestCase(SimpleTestCase):
         self.assertEqual(sessions_remaining, 3)
         self.assertEqual(credit_remaining, 2250.0)
 
+    def test_course_archive_url_routing(self):
+        from django.urls import resolve
+        # Both with and without trailing slash must resolve successfully
+        res_slash = resolve('/api/v1/courses/course-uuid-1/archive/')
+        res_noslash = resolve('/api/v1/courses/course-uuid-1/archive')
+        self.assertEqual(res_slash.kwargs['pk'], 'course-uuid-1')
+        self.assertEqual(res_noslash.kwargs['pk'], 'course-uuid-1')
 
+        res_unarchive_slash = resolve('/api/v1/courses/course-uuid-1/unarchive/')
+        res_unarchive_noslash = resolve('/api/v1/courses/course-uuid-1/unarchive')
+        self.assertEqual(res_unarchive_slash.kwargs['pk'], 'course-uuid-1')
+        self.assertEqual(res_unarchive_noslash.kwargs['pk'], 'course-uuid-1')
 
-
-
-
-
-
+    def test_reports_search_name_q(self):
+        from .views import name_search_q
+        q = name_search_q("Mohamed Ali", "first_name", "last_name")
+        self.assertIsNotNone(q)
+        self.assertEqual(len(q.children), 2)
 

@@ -45,10 +45,11 @@ export default function CoursesPage() {
     if (!ok) return;
 
     try {
-      await api.post(`/courses/${course.id}/archive/`, { year: 2026 });
+      await api.post(`/courses/${course.id}/archive`, { year: 2026 });
       toast.success(t("archive.archived_success", "تم نقل الدورة إلى الأرشيف بنجاح"));
       qc.invalidateQueries({ queryKey: ["courses"] });
       qc.invalidateQueries({ queryKey: ["archive"] });
+      qc.invalidateQueries({ queryKey: ["archive-overview"] });
     } catch (err) {
       toast.error(err?.response?.data?.detail || err?.response?.data?.error || t("errors.generic"));
     }

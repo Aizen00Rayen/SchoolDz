@@ -155,6 +155,12 @@ urlpatterns = [
     path('reports/teacher/<str:teacher_id>', views.reports_teacher_detail, name='reports_teacher_detail_noslash'),
 
     # Archive
+    path('courses/<str:pk>/archive/', views.CourseViewSet.as_view({'post': 'archive_course'}), name='course_archive_slash'),
+    path('courses/<str:pk>/archive', views.CourseViewSet.as_view({'post': 'archive_course'}), name='course_archive_noslash'),
+    path('courses/<str:pk>/unarchive/', views.CourseViewSet.as_view({'post': 'unarchive_course'}), name='course_unarchive_slash'),
+    path('courses/<str:pk>/unarchive', views.CourseViewSet.as_view({'post': 'unarchive_course'}), name='course_unarchive_noslash'),
+    path('courses/<str:pk>/archive-details/', views.CourseViewSet.as_view({'get': 'archive_details'}), name='course_archive_details_slash'),
+    path('courses/<str:pk>/archive-details', views.CourseViewSet.as_view({'get': 'archive_details'}), name='course_archive_details_noslash'),
     *_both('archive/overview', views.archive_overview, 'archive_overview'),
     *_both('archive', views.archive_overview, 'archive_overview_root'),
 

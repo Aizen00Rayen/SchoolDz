@@ -8426,27 +8426,33 @@ def reports_search(request):
         return Response({'students': [], 'teachers': []})
 
     student_q = (
-        Q(first_name__icontains=q) |
-        Q(last_name__icontains=q) |
-        Q(first_name_latin__icontains=q) |
-        Q(last_name_latin__icontains=q) |
+        name_search_q(q, 'first_name', 'last_name', 'first_name_latin', 'last_name_latin') |
         Q(student_code__icontains=q) |
-        Q(phone__icontains=q)
+        Q(phone__icontains=q) |
+        Q(email__icontains=q)
     )
-    students = Student.objects.filter(tenant_id=tid).filter(student_q)[:20]
+    # Arabic normalization fallback (e.g. أ / إ / آ -> ا, ة -> ه, ى -> ي)
+    alt_q = q.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ة', 'ه').replace('ى', 'ي')
+    if alt_q != q:
+        student_q |= name_search_q(alt_q, 'first_name', 'last_name', 'first_name_latin', 'last_name_latin')
+
+    students = Student.objects.filter(tenant_id=tid).filter(student_q)[:30]
 
     teacher_q = (
-        Q(first_name__icontains=q) |
-        Q(last_name__icontains=q) |
+        name_search_q(q, 'first_name', 'last_name') |
         Q(phone__icontains=q) |
-        Q(subject__icontains=q)
+        Q(subject__icontains=q) |
+        Q(email__icontains=q)
     )
-    teachers = Teacher.objects.filter(tenant_id=tid).filter(teacher_q)[:20]
+    if alt_q != q:
+        teacher_q |= name_search_q(alt_q, 'first_name', 'last_name')
+
+    teachers = Teacher.objects.filter(tenant_id=tid).filter(teacher_q)[:30]
 
     return Response({
         'students': [{
             'id': s.id,
-            'name': f"{s.first_name} {s.last_name}",
+            'name': f"{s.first_name} {s.last_name}".strip(),
             'code': s.student_code,
             'phone': s.phone,
             'school_level': s.school_level,
@@ -8455,7 +8461,7 @@ def reports_search(request):
         } for s in students],
         'teachers': [{
             'id': t.id,
-            'name': f"{t.first_name} {t.last_name}",
+            'name': f"{t.first_name} {t.last_name}".strip(),
             'phone': t.phone,
             'subject': t.subject,
             'status': t.status,

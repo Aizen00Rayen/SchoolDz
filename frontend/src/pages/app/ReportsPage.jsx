@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -46,6 +46,17 @@ export default function ReportsPage() {
   const [selectedStudentId, setSelectedStudentId] = useState(null);
   const [selectedTeacherId, setSelectedTeacherId] = useState(null);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const searchContainerRef = useRef(null);
+
+  useEffect(() => {
+    const handleDocClick = (e) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target)) {
+        setIsSearchFocused(false);
+      }
+    };
+    document.addEventListener("mousedown", handleDocClick);
+    return () => document.removeEventListener("mousedown", handleDocClick);
+  }, []);
 
   const query = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
 
@@ -76,20 +87,20 @@ export default function ReportsPage() {
   const { data: searchResults, isFetching: searchLoading } = useQuery({
     queryKey: ["reports-search", searchQuery],
     queryFn: async () => (await api.get(`/reports/search?q=${encodeURIComponent(searchQuery)}`)).data,
-    enabled: searchQuery.trim().length >= 2,
+    enabled: Boolean(searchQuery.trim().length >= 1),
   });
 
   // Comprehensive Student Report query
   const { data: studentReport, isLoading: studentReportLoading } = useQuery({
     queryKey: ["reports-student", selectedStudentId],
-    queryFn: async () => (await api.get(`/reports/student/${selectedStudentId}/`)).data,
+    queryFn: async () => (await api.get(`/reports/student/${selectedStudentId}`)).data,
     enabled: Boolean(selectedStudentId),
   });
 
   // Comprehensive Teacher Report query
   const { data: teacherReport, isLoading: teacherReportLoading } = useQuery({
     queryKey: ["reports-teacher", selectedTeacherId],
-    queryFn: async () => (await api.get(`/reports/teacher/${selectedTeacherId}/`)).data,
+    queryFn: async () => (await api.get(`/reports/teacher/${selectedTeacherId}`)).data,
     enabled: Boolean(selectedTeacherId),
   });
 
@@ -129,6 +140,7 @@ export default function ReportsPage() {
   const handleClearSelection = () => {
     setSelectedStudentId(null);
     setSelectedTeacherId(null);
+    setSearchQuery("");
   };
 
   return (
@@ -157,109 +169,138 @@ export default function ReportsPage() {
       />
 
       {/* Global Student & Teacher Search Bar */}
-      <div className="surface-card p-3 mb-6 relative">
-        <div className="relative">
-          <Search className="w-4 h-4 absolute start-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onFocus={() => setIsSearchFocused(true)}
-            placeholder={t("reports.search_bar_placeholder", "ابحث عن تلميذ أو أستاذ لعرض التقرير الشامل لجميع الأوقات...")}
-            className="ps-9 pe-9 text-xs sm:text-sm bg-background h-10"
-          />
-          {searchQuery && (
-            <button
-              onClick={() => setSearchQuery("")}
-              className="absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
+      <div ref={searchContainerRef} className="surface-card p-3 mb-6 relative z-30">
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 absolute start-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setIsSearchFocused(true);
+              }}
+              onFocus={() => setIsSearchFocused(true)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  setIsSearchFocused(true);
+                  if (searchResults?.students?.length > 0) {
+                    handleSelectStudent(searchResults.students[0].id);
+                  } else if (searchResults?.teachers?.length > 0) {
+                    handleSelectTeacher(searchResults.teachers[0].id);
+                  }
+                }
+              }}
+              placeholder={t("reports.search_bar_placeholder", "ابحث عن تلميذ أو أستاذ لعرض التقرير الشامل لجميع الأوقات...")}
+              className="ps-9 pe-9 text-xs sm:text-sm bg-background h-10"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          <Button
+            type="button"
+            variant="default"
+            className="h-10 px-4 text-xs font-medium"
+            onClick={() => setIsSearchFocused(true)}
+          >
+            <Search className="w-4 h-4 me-1.5" />
+            {t("actions.search", "بحث")}
+          </Button>
         </div>
 
         {/* Autocomplete Dropdown */}
-        {isSearchFocused && searchQuery.trim().length >= 2 && (
-          <>
-            <div className="fixed inset-0 z-40" onClick={() => setIsSearchFocused(false)} />
-            <div className="absolute start-0 end-0 top-full mt-1.5 z-50 bg-popover border border-border rounded-lg shadow-xl overflow-hidden divide-y divide-border">
-              {searchLoading ? (
-                <div className="p-4 text-center text-xs text-muted-foreground">
-                  <Loader2 className="w-4 h-4 animate-spin inline-block me-1.5" />
-                  {t("actions.loading")}
+        {isSearchFocused && searchQuery.trim().length >= 1 && (
+          <div className="absolute start-0 end-0 top-full mt-1.5 z-50 bg-popover border border-border rounded-lg shadow-xl overflow-hidden divide-y divide-border">
+            {searchLoading ? (
+              <div className="p-4 text-center text-xs text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin inline-block me-1.5" />
+                {t("actions.loading")}
+              </div>
+            ) : (
+              <>
+                {/* Students Section */}
+                <div>
+                  <div className="px-3 py-1.5 bg-muted/60 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <GraduationCap className="w-3.5 h-3.5 text-accent" />
+                      {t("menu.students", "التلاميذ")}
+                    </span>
+                    <span className="font-mono">{searchResults?.students?.length || 0}</span>
+                  </div>
+                  {(searchResults?.students || []).length === 0 ? (
+                    <div className="px-3 py-2 text-xs text-muted-foreground">{t("common.no_results", "لا توجد نتائج")}</div>
+                  ) : (
+                    <div className="max-h-48 overflow-y-auto">
+                      {searchResults.students.map((s) => (
+                        <div
+                          key={s.id}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            handleSelectStudent(s.id);
+                          }}
+                          className="px-3 py-2 text-xs hover:bg-muted/50 cursor-pointer flex items-center justify-between transition-colors"
+                        >
+                          <div>
+                            <div className="font-semibold text-foreground">{s.name}</div>
+                            <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
+                              {s.code || s.phone || "—"} {s.school_level ? `· ${s.school_level}` : ""}
+                            </div>
+                          </div>
+                          <Badge variant="outline" className="text-[10px] font-mono">
+                            {t("menu.students")}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <>
-                  {/* Students Section */}
-                  <div>
-                    <div className="px-3 py-1.5 bg-muted/60 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
-                      <span className="flex items-center gap-1.5">
-                        <GraduationCap className="w-3.5 h-3.5 text-accent" />
-                        {t("menu.students", "التلاميذ")}
-                      </span>
-                      <span className="font-mono">{searchResults?.students?.length || 0}</span>
-                    </div>
-                    {(searchResults?.students || []).length === 0 ? (
-                      <div className="px-3 py-2 text-xs text-muted-foreground">{t("common.no_results", "لا توجد نتائج")}</div>
-                    ) : (
-                      <div className="max-h-48 overflow-y-auto">
-                        {searchResults.students.map((s) => (
-                          <div
-                            key={s.id}
-                            onClick={() => handleSelectStudent(s.id)}
-                            className="px-3 py-2 text-xs hover:bg-muted/50 cursor-pointer flex items-center justify-between transition-colors"
-                          >
-                            <div>
-                              <div className="font-semibold text-foreground">{s.name}</div>
-                              <div className="text-[11px] text-muted-foreground font-mono mt-0.5">
-                                {s.code || s.phone || "—"} {s.school_level ? `&middot; ${s.school_level}` : ""}
-                              </div>
-                            </div>
-                            <Badge variant="outline" className="text-[10px] font-mono">
-                              {t("menu.students")}
-                            </Badge>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
 
-                  {/* Teachers Section */}
-                  <div>
-                    <div className="px-3 py-1.5 bg-muted/60 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
-                      <span className="flex items-center gap-1.5">
-                        <UserRound className="w-3.5 h-3.5 text-blue-500" />
-                        {t("menu.teachers", "الأساتذة")}
-                      </span>
-                      <span className="font-mono">{searchResults?.teachers?.length || 0}</span>
-                    </div>
-                    {(searchResults?.teachers || []).length === 0 ? (
-                      <div className="px-3 py-2 text-xs text-muted-foreground">{t("common.no_results", "لا توجد نتائج")}</div>
-                    ) : (
-                      <div className="max-h-48 overflow-y-auto">
-                        {searchResults.teachers.map((tch) => (
-                          <div
-                            key={tch.id}
-                            onClick={() => handleSelectTeacher(tch.id)}
-                            className="px-3 py-2 text-xs hover:bg-muted/50 cursor-pointer flex items-center justify-between transition-colors"
-                          >
-                            <div>
-                              <div className="font-semibold text-foreground">{tch.name}</div>
-                              <div className="text-[11px] text-muted-foreground mt-0.5">
-                                {tch.subject || "—"} {tch.phone ? `&middot; ${tch.phone}` : ""}
-                              </div>
-                            </div>
-                            <Badge variant="outline" className="text-[10px] font-mono border-blue-500/40 text-blue-600 dark:text-blue-400">
-                              {t("menu.teachers")}
-                            </Badge>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                {/* Teachers Section */}
+                <div>
+                  <div className="px-3 py-1.5 bg-muted/60 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <UserRound className="w-3.5 h-3.5 text-blue-500" />
+                      {t("menu.teachers", "الأساتذة")}
+                    </span>
+                    <span className="font-mono">{searchResults?.teachers?.length || 0}</span>
                   </div>
-                </>
-              )}
-            </div>
-          </>
+                  {(searchResults?.teachers || []).length === 0 ? (
+                    <div className="px-3 py-2 text-xs text-muted-foreground">{t("common.no_results", "لا توجد نتائج")}</div>
+                  ) : (
+                    <div className="max-h-48 overflow-y-auto">
+                      {searchResults.teachers.map((tch) => (
+                        <div
+                          key={tch.id}
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            handleSelectTeacher(tch.id);
+                          }}
+                          className="px-3 py-2 text-xs hover:bg-muted/50 cursor-pointer flex items-center justify-between transition-colors"
+                        >
+                          <div>
+                            <div className="font-semibold text-foreground">{tch.name}</div>
+                            <div className="text-[11px] text-muted-foreground mt-0.5">
+                              {tch.subject || "—"} {tch.phone ? `· ${tch.phone}` : ""}
+                            </div>
+                          </div>
+                          <Badge variant="outline" className="text-[10px] font-mono border-blue-500/40 text-blue-600 dark:text-blue-400">
+                            {t("menu.teachers")}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         )}
       </div>
 

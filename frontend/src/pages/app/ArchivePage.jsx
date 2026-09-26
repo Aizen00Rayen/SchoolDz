@@ -53,7 +53,7 @@ export default function ArchivePage() {
   // Fetch detailed dossier for a selected archived course
   const { data: courseDossier, isLoading: dossierLoading } = useQuery({
     queryKey: ["archived-course-detail", selectedCourseId],
-    queryFn: async () => (await api.get(`/courses/${selectedCourseId}/archive-details/`)).data,
+    queryFn: async () => (await api.get(`/courses/${selectedCourseId}/archive-details`)).data,
     enabled: Boolean(selectedCourseId),
   });
 
@@ -67,7 +67,7 @@ export default function ArchivePage() {
 
     setRestoring(true);
     try {
-      await api.post(`/courses/${courseId}/unarchive/`);
+      await api.post(`/courses/${courseId}/unarchive`);
       toast.success(t("archive.restore_success", "تمت استعادة الدورة بنجاح إلى قائمة الدورات النشطة"));
       qc.invalidateQueries({ queryKey: ["archived-courses"] });
       qc.invalidateQueries({ queryKey: ["archive-overview"] });
