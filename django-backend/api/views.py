@@ -7315,13 +7315,34 @@ def filter_by_date_range(queryset, request, field):
         except Exception:
             is_datetime = False
 
-    lookup_from = f'{field}__date__gte' if is_datetime else f'{field}__gte'
-    lookup_to = f'{field}__date__lte' if is_datetime else f'{field}__lte'
-
-    if date_from:
-        queryset = queryset.filter(**{lookup_from: date_from})
-    if date_to:
-        queryset = queryset.filter(**{lookup_to: date_to})
+    if is_datetime:
+        if date_from:
+            try:
+                d_from = parse_date(date_from[:10]) if isinstance(date_from, str) else date_from
+                if d_from:
+                    dt_from = timezone.make_aware(datetime.combine(d_from, time.min)) if settings.USE_TZ else datetime.combine(d_from, time.min)
+                    queryset = queryset.filter(**{f'{field}__gte': dt_from})
+                else:
+                    queryset = queryset.filter(**{f'{field}__gte': date_from})
+            except Exception:
+                queryset = queryset.filter(**{f'{field}__gte': date_from})
+        if date_to:
+            try:
+                d_to = parse_date(date_to[:10]) if isinstance(date_to, str) else date_to
+                if d_to:
+                    dt_to = timezone.make_aware(datetime.combine(d_to, time.max)) if settings.USE_TZ else datetime.combine(d_to, time.max)
+                    queryset = queryset.filter(**{f'{field}__lte': dt_to})
+                else:
+                    queryset = queryset.filter(**{f'{field}__lte': date_to})
+            except Exception:
+                queryset = queryset.filter(**{f'{field}__lte': date_to})
+    else:
+        lookup_from = f'{field}__gte'
+        lookup_to = f'{field}__lte'
+        if date_from:
+            queryset = queryset.filter(**{lookup_from: date_from})
+        if date_to:
+            queryset = queryset.filter(**{lookup_to: date_to})
     return queryset
 
 
@@ -8321,10 +8342,15 @@ def compute_realized_revenue(tid, request):
 
         consumed_by_sc[(s_id, c_id)] = prior_consumed + session_price
 
-        sess_date = sess.start_at.date() if sess.start_at else None
-        if date_from and sess_date and sess_date < date_from:
+        if sess.start_at:
+            sess_dt = timezone.localtime(sess.start_at) if timezone.is_aware(sess.start_at) else sess.start_at
+            sess_date = sess_dt.date()
+        else:
+            sess_date = None
+
+        if date_from and (not sess_date or sess_date < date_from):
             continue
-        if date_to and sess_date and sess_date > date_to:
+        if date_to and (not sess_date or sess_date > date_to):
             continue
 
         actual_school_rev = round(school_cut * (funded_ratio if total_paid > 0 else 1.0), 2)

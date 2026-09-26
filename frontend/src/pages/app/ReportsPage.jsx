@@ -27,6 +27,37 @@ function currentMonthValue() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
+function getLocalDateStr(d = new Date()) {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getTodayStr() {
+  return getLocalDateStr(new Date());
+}
+
+function getYesterdayStr() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return getLocalDateStr(d);
+}
+
+function getWeekStartStr() {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = (day + 1) % 7;
+  const start = new Date(d);
+  start.setDate(d.getDate() - diff);
+  return getLocalDateStr(start);
+}
+
+function getMonthStartStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
 const BALANCE_CLS = {
   settled: "text-muted-foreground",
   owes: "text-destructive font-bold",
@@ -1791,41 +1822,123 @@ export default function ReportsPage() {
       {/* RENDER VIEW 3: DEFAULT GENERAL FINANCIAL REPORT (When neither student nor teacher is selected) */}
       {!selectedStudentId && !selectedTeacherId ? (
         <>
-          <div className="surface-card p-4 mb-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-            <Field label={t("reports.from")}>
-              <Input type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} data-testid="reports-from" />
-            </Field>
-            <Field label={t("reports.to")}>
-              <Input type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} data-testid="reports-to" />
-            </Field>
-            <Field label={t("menu.groups")}>
-              <Select
-                value={filters.group_id || "__all"}
-                onValueChange={(v) => setFilters({ ...filters, group_id: v === "__all" ? "" : v })}
+          <div className="surface-card p-4 mb-4 space-y-3">
+            {/* Quick Date Presets Bar */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs font-medium text-muted-foreground me-1 flex items-center gap-1">
+                <CalendarDays className="w-3.5 h-3.5" />
+                {t("reports.date")}:
+              </span>
+              <button
+                type="button"
+                onClick={() => setFilters({ ...filters, from: getTodayStr(), to: getTodayStr() })}
+                className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-all ${
+                  filters.from === getTodayStr() && filters.to === getTodayStr()
+                    ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                    : "bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80"
+                }`}
               >
-                <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
-                <SelectContent className="bg-popover">
-                  <SelectItem value="__all">{t("reports.all_groups")}</SelectItem>
-                  {(groups?.items || []).map((g) => (
-                    <SelectItem key={g.id} value={g.id}>{groupOptionLabel(g, courseMap, t)}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label={t("menu.teachers")}>
-              <Select
-                value={filters.teacher_id || "__all"}
-                onValueChange={(v) => setFilters({ ...filters, teacher_id: v === "__all" ? "" : v })}
+                {t("reports.preset_today")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilters({ ...filters, from: getYesterdayStr(), to: getYesterdayStr() })}
+                className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-all ${
+                  filters.from === getYesterdayStr() && filters.to === getYesterdayStr()
+                    ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                    : "bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80"
+                }`}
               >
-                <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
-                <SelectContent className="bg-popover">
-                  <SelectItem value="__all">{t("reports.all_teachers")}</SelectItem>
-                  {(teachers?.items || []).map((x) => (
-                    <SelectItem key={x.id} value={x.id}>{x.first_name} {x.last_name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
+                {t("reports.preset_yesterday")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilters({ ...filters, from: getWeekStartStr(), to: getTodayStr() })}
+                className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-all ${
+                  filters.from === getWeekStartStr() && filters.to === getTodayStr()
+                    ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                    : "bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80"
+                }`}
+              >
+                {t("reports.preset_this_week")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilters({ ...filters, from: getMonthStartStr(), to: getTodayStr() })}
+                className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-all ${
+                  filters.from === getMonthStartStr() && filters.to === getTodayStr()
+                    ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                    : "bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80"
+                }`}
+              >
+                {t("reports.preset_this_month")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setFilters({ ...filters, from: "", to: "" })}
+                className={`px-2.5 py-1 text-xs rounded-lg font-medium transition-all ${
+                  !filters.from && !filters.to
+                    ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                    : "bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80"
+                }`}
+              >
+                {t("reports.preset_all_time")}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 pt-2 border-t border-border/50">
+              <Field label={t("reports.from")}>
+                <Input
+                  type="date"
+                  value={filters.from}
+                  onChange={(e) => {
+                    const newFrom = e.target.value;
+                    setFilters({
+                      ...filters,
+                      from: newFrom,
+                      to: (!filters.to || filters.to < newFrom) ? newFrom : filters.to,
+                    });
+                  }}
+                  data-testid="reports-from"
+                />
+              </Field>
+              <Field label={t("reports.to")}>
+                <Input
+                  type="date"
+                  value={filters.to}
+                  onChange={(e) => setFilters({ ...filters, to: e.target.value })}
+                  data-testid="reports-to"
+                />
+              </Field>
+              <Field label={t("menu.groups")}>
+                <Select
+                  value={filters.group_id || "__all"}
+                  onValueChange={(v) => setFilters({ ...filters, group_id: v === "__all" ? "" : v })}
+                >
+                  <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+                  <SelectContent className="bg-popover">
+                    <SelectItem value="__all">{t("reports.all_groups")}</SelectItem>
+                    {(groups?.items || []).map((g) => (
+                      <SelectItem key={g.id} value={g.id}>{groupOptionLabel(g, courseMap, t)}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label={t("menu.teachers")}>
+                <Select
+                  value={filters.teacher_id || "__all"}
+                  onValueChange={(v) => setFilters({ ...filters, teacher_id: v === "__all" ? "" : v })}
+                >
+                  <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+                  <SelectContent className="bg-popover">
+                    <SelectItem value="__all">{t("reports.all_teachers")}</SelectItem>
+                    {(teachers?.items || []).map((x) => (
+                      <SelectItem key={x.id} value={x.id}>{x.first_name} {x.last_name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
           </div>
 
           {/* Mode Switch: Realized Revenue vs Cash Flow */}
@@ -1873,7 +1986,12 @@ export default function ReportsPage() {
                 <Card icon={TrendingUp} label={t("reports.realized_total")} value={money(finance?.realized_total)} />
                 <Card icon={Receipt} label={t("reports.expenses")} value={money(finance?.expenses)} />
                 <Card icon={HandCoins} label={t("reports.realized_net")} value={money(finance?.realized_net)} />
-                <Card icon={Wallet} label={t("reports.deferred_tuition")} value={money(finance?.deferred_tuition)} />
+                <Card
+                  icon={Wallet}
+                  label={t("reports.deferred_tuition")}
+                  value={money(finance?.deferred_tuition)}
+                  subtitle={t("reports.cumulative_balance")}
+                />
               </div>
 
               {finance?.expenses_scoped_out && (
@@ -2152,12 +2270,19 @@ export default function ReportsPage() {
   );
 }
 
-function Card({ icon: Icon, label, value }) {
+function Card({ icon: Icon, label, value, subtitle }) {
   return (
-    <div className="surface-card p-5">
-      <Icon className="w-4 h-4 text-muted-foreground mb-3" />
-      <div className="text-xs uppercase tracking-widest text-muted-foreground font-bold">{label}</div>
-      <div className="font-mono text-2xl font-bold mt-1">{value}</div>
+    <div className="surface-card p-4 sm:p-5 flex flex-col justify-between">
+      <div>
+        <Icon className="w-4 h-4 text-muted-foreground mb-2 sm:mb-3" />
+        <div className="text-[11px] sm:text-xs uppercase tracking-wider text-muted-foreground font-bold">{label}</div>
+      </div>
+      <div>
+        <div className="font-mono text-xl sm:text-2xl font-bold mt-1 text-foreground">{value}</div>
+        {subtitle && (
+          <div className="text-[10px] text-muted-foreground mt-1 font-medium">{subtitle}</div>
+        )}
+      </div>
     </div>
   );
 }

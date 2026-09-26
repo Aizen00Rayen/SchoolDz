@@ -345,6 +345,51 @@ class RealizedRevenueCalculationTestCase(SimpleTestCase):
         self.assertEqual(result['course_breakdown'][0]['realized_revenue'], 1000.0)
         self.assertEqual(result['course_breakdown'][0]['teacher_payout'], 1000.0)
 
+    @patch('api.views.Attendance')
+    @patch('api.views.PaymentItem')
+    def test_compute_realized_revenue_filtered_by_day(self, mock_payment_item, mock_attendance):
+        from api.views import compute_realized_revenue
+        from unittest.mock import MagicMock
+        from datetime import datetime
+
+        # Request filtered to only ONE day: 2026-09-10
+        request = MagicMock()
+        request.GET = {'from': '2026-09-10', 'to': '2026-09-10'}
+
+        # Mock payment of 4000
+        pi = MagicMock()
+        pi.amount = 4000.0
+        pi.reduction = 0
+        pi.teacher_percentage = None
+        pi.school_percentage = None
+        pi.course_id = 'c1'
+        pi.status = 'paid'
+        pi.pardon_type = None
+        pi.payment = MagicMock(student_id='s1', status='paid', pardon_type=None)
+        mock_payment_item.objects.filter.return_value.filter.return_value.exclude.return_value.exclude.return_value.select_related.return_value = [pi]
+        mock_payment_item.objects.filter.return_value.exclude.return_value.exclude.return_value.values.return_value = []
+
+        course = MagicMock(id='c1', title='Mathematics', price=4000.0, pricing_type='per_month', sessions_count=4)
+        teacher = MagicMock(id='t1', payment_percentage=50.0)
+        group = MagicMock(id='g1', name='Group A', course=course, teacher=teacher)
+
+        # 2 sessions on DIFFERENT dates: one on 2026-09-10, another on 2026-09-17
+        sess1 = MagicMock(id='sess1', course=course, group=group, teacher=teacher, status='completed', start_at=datetime(2026, 9, 10, 10, 0))
+        sess2 = MagicMock(id='sess2', course=course, group=group, teacher=teacher, status='completed', start_at=datetime(2026, 9, 17, 10, 0))
+
+        att1 = MagicMock(id='att1', session=sess1, student_id='s1', status='present', student=MagicMock(first_name='Ali', last_name='Ben'))
+        att2 = MagicMock(id='att2', session=sess2, student_id='s1', status='present', student=MagicMock(first_name='Ali', last_name='Ben'))
+        mock_attendance.objects.filter.return_value.exclude.return_value.select_related.return_value.order_by.return_value = [att1, att2]
+
+        result = compute_realized_revenue('tenant-1', request)
+
+        # Only session 1 is on 2026-09-10! Session 2 on 2026-09-17 must be excluded.
+        self.assertEqual(result['realized_sessions_count'], 1)
+        self.assertEqual(result['realized_tuition'], 500.0)
+        self.assertEqual(result['realized_teacher'], 500.0)
+        self.assertEqual(len(result['session_realizations']), 1)
+        self.assertEqual(result['session_realizations'][0]['id'], 'att1')
+
     @patch('api.views.OtherIncomeCategory')
     @patch('api.views.Tenant')
     def test_ensure_default_other_income_categories_seeding(self, mock_tenant, mock_oic):
@@ -702,9 +747,10 @@ class ReportsAndArchiveTestCase(SimpleTestCase):
         mock_request.GET = {'from': '2026-09-26', 'to': '2026-09-26'}
 
         filter_by_date_range(mock_qs, mock_request, 'paid_at')
-        # Must use paid_at__date__gte and paid_at__date__lte for DateTimeField
-        mock_qs.filter.assert_any_call(paid_at__date__gte='2026-09-26')
-        mock_qs.filter.assert_any_call(paid_at__date__lte='2026-09-26')
+        # Must use paid_at__gte and paid_at__lte with boundary timestamps for DateTimeField
+        call_keys = [list(call.kwargs.keys())[0] for call in mock_qs.filter.call_args_list]
+        self.assertIn('paid_at__gte', call_keys)
+        self.assertIn('paid_at__lte', call_keys)
 
     def test_course_archive_fields(self):
         from .models import Course
