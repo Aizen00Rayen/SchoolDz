@@ -95,7 +95,7 @@ export default function ReportsPage() {
     queryFn: async () => (await api.get("/courses")).data,
   });
   const courseMap = Object.fromEntries((courses?.items || []).map((c) => [c.id, c]));
-  const { data: teachersResponse } = useQuery({
+  const { data: teachers } = useQuery({
     queryKey: ["teachers"],
     queryFn: async () => (await api.get("/teachers")).data,
   });
@@ -134,7 +134,7 @@ export default function ReportsPage() {
   }, [studentsResponse]);
 
   const summonedTeachers = useMemo(() => {
-    const raw = teachersResponse?.items || (Array.isArray(teachersResponse) ? teachersResponse : []);
+    const raw = teachers?.items || (Array.isArray(teachers) ? teachers : []);
     if (!searchQuery.trim()) {
       return raw.slice(0, 30).map((t) => ({
         id: t.id,
@@ -160,7 +160,7 @@ export default function ReportsPage() {
         phone: t.phone,
         status: t.status,
       }));
-  }, [teachersResponse, searchQuery]);
+  }, [teachers, searchQuery]);
 
   const searchLoading = studentsLoading;
 
