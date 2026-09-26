@@ -2166,13 +2166,11 @@ def dashboard_summary(request):
         start_at__range=(now, now + timedelta(days=7))
     ).select_related('teacher', 'course', 'group', 'room_ref').order_by('start_at')[:20]
     
-    today_date = timezone.localdate() if hasattr(timezone, 'localdate') else now.date()
-
     # Calculate revenue today — accurately sums full bills and paid portions of partial bills
     today_payments = Payment.objects.filter(
         tenant_id=tid,
         status__in=('paid', 'partial', 'pardoned'),
-        paid_at__date=today_date
+        paid_at__range=(day_start, day_end)
     ).prefetch_related('items')
     revenue_today = 0.0
     for p in today_payments:
@@ -2190,7 +2188,7 @@ def dashboard_summary(request):
     month_payments = Payment.objects.filter(
         tenant_id=tid,
         status__in=('paid', 'partial', 'pardoned'),
-        paid_at__date__gte=month_start.date()
+        paid_at__gte=month_start
     ).prefetch_related('items')
     revenue_month = 0.0
     for p in month_payments:
@@ -2205,13 +2203,14 @@ def dashboard_summary(request):
             revenue_month += max(0.0, float(p.amount or 0) - float(p.discount or 0))
 
     # Other income (100% school revenue, not split with teachers)
+    # received_at is a DateField — querying directly with date objects without __date
     other_inc_today_data = OtherIncome.objects.filter(
-        tenant_id=tid, received_at__date=today_date
+        tenant_id=tid, received_at=day_start.date()
     ).aggregate(total=Sum('amount'))
     other_income_today = float(other_inc_today_data['total'] or 0)
 
     other_inc_month_data = OtherIncome.objects.filter(
-        tenant_id=tid, received_at__date__gte=month_start.date()
+        tenant_id=tid, received_at__gte=month_start.date()
     ).aggregate(total=Sum('amount'))
     other_income_month = float(other_inc_month_data['total'] or 0)
 
@@ -2224,7 +2223,7 @@ def dashboard_summary(request):
         status='pending'
     ).aggregate(total=Sum(F('amount') - F('discount')))
     outstanding = float(out_data['total'] or 0)
-    for pi in PaymentItem.objects.filter(payment__tenant_id=tid, payment__status='partial', status='pending'):
+    for pi in PaymentItem.objects.filter(payment__tenant_id=tid, payment__status='partial', status='pending').select_related('payment'):
         outstanding += max(0.0, float(pi.amount or 0) - _payment_item_discount(pi))
 
 

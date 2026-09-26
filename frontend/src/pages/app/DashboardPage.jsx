@@ -6,15 +6,16 @@ import {
 import { motion } from "framer-motion";
 import {
   ArrowUpRight, ArrowDownRight, GraduationCap, Wallet, Receipt, TrendingUp, TrendingDown,
-  Users, ClipboardCheck, Clock, TriangleAlert, HandCoins, PiggyBank, Banknote,
+  Users, ClipboardCheck, Clock, TriangleAlert, HandCoins, PiggyBank, Banknote, RotateCcw,
 } from "lucide-react";
 
-import { api } from "@/lib/api";
+import { api, extractError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { APPUI } from "@/constants/testIds";
 import { PageHeader, StatusPill, paymentKindLabel } from "./_shared";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 
 const KPI_CONFIG = [
   { key: "students_total", tKey: "kpi.students", icon: GraduationCap, tone: "default" },
@@ -38,7 +39,7 @@ function money(v, currency) {
 export default function DashboardPage() {
   const { t } = useI18n();
   const { tenant, user } = useAuth();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["dashboard"],
     queryFn: async () => (await api.get("/dashboard/summary")).data,
   });
@@ -71,6 +72,24 @@ export default function DashboardPage() {
           </span>
         }
       />
+
+      {error && !data && (
+        <div className="surface-card p-6 mb-6 text-center border-destructive/30 max-w-md mx-auto my-4 space-y-3">
+          <div className="w-10 h-10 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mx-auto">
+            <TriangleAlert className="w-5 h-5" />
+          </div>
+          <div className="text-sm font-semibold text-foreground">
+            {t("crud.load_failed", "فشل التحميل")}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {extractError(error)}
+          </div>
+          <Button size="sm" variant="outline" onClick={() => refetch()} className="text-xs">
+            <RotateCcw className="w-3.5 h-3.5 me-1.5" />
+            {t("actions.retry", "إعادة المحاولة")}
+          </Button>
+        </div>
+      )}
 
       {/* Net profit hero — the single "are we winning or losing" answer */}
       <motion.div

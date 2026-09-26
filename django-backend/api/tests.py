@@ -684,3 +684,12 @@ class ReportsAndArchiveTestCase(SimpleTestCase):
         self.assertTrue(hasattr(Student, 'groups'))
         self.assertFalse(hasattr(Student, 'group_memberships'))
 
+    def test_other_income_date_filtering(self):
+        from .models import OtherIncome
+        from django.utils import timezone
+        now = timezone.now()
+        q1 = OtherIncome.objects.filter(received_at=now.date()).query
+        q2 = OtherIncome.objects.filter(received_at__gte=now.date()).query
+        self.assertIn('received_at', str(q1))
+        self.assertIn('received_at', str(q2))
+
