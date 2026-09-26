@@ -330,11 +330,12 @@ function generateCourseDossierHtml({ courseDossier, selectedYear, tenant, user, 
       const att = stu.attendance || { present: 0, absent: 0, excused: 0, total: 0 };
       const rate = att.total > 0 ? Math.round((att.present / att.total) * 100) : 0;
       const gradeStr = formatStudentGrade(stu, t);
-      let statusBadge = `<span class="chip chip-muted">${escapeHtml(stu.payment_status || "—")}</span>`;
+      let statusBadge = `<span class="chip chip-muted">${escapeHtml(t(`status.${stu.payment_status}`, stu.payment_status || "—"))}</span>`;
       if (stu.payment_status === "paid") statusBadge = `<span class="badge-present">${escapeHtml(t("status.paid", "مدفوع"))}</span>`;
       else if (stu.payment_status === "partial") statusBadge = `<span class="badge-late">${escapeHtml(t("status.partial", "جزئي"))}</span>`;
       else if (stu.payment_status === "pending") statusBadge = `<span class="badge-absent">${escapeHtml(t("status.pending", "معلق"))}</span>`;
       else if (stu.payment_status === "pardoned") statusBadge = `<span class="chip chip-emerald">${escapeHtml(t("status.pardoned", "معفى"))}</span>`;
+      else if (stu.payment_status === "not_billed") statusBadge = `<span class="chip chip-muted">${escapeHtml(t("status.not_billed", "غير مفوتر"))}</span>`;
 
       return `
         <tr>

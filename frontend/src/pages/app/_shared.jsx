@@ -462,11 +462,12 @@ export function StatusPill({ status, tone = "default" }) {
     not_started: "bg-muted text-muted-foreground",
     in_progress: "bg-info/10 text-info",
     submitted: "bg-success/10 text-success",
+    not_billed: "bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20",
   };
   const cls = map[status] || "bg-muted text-muted-foreground";
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium capitalize ${cls}`}>
-      {status ? t(`status.${status}`) : status}
+      {status ? t(`status.${status}`, String(status).replace(/_/g, " ")) : status}
     </span>
   );
 }

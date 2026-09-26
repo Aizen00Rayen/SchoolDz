@@ -615,6 +615,7 @@ const TRANSLATIONS = {
     "status.not_started": "Pas commencé",
     "status.in_progress": "En cours",
     "status.submitted": "Soumis",
+    "status.not_billed": "Non facturé",
 
     "toast.created": "Créé",
     "toast.updated": "Mis à jour",
@@ -1634,6 +1635,7 @@ const TRANSLATIONS = {
     "status.not_started": "Not started",
     "status.in_progress": "In progress",
     "status.submitted": "Submitted",
+    "status.not_billed": "Not billed",
 
     "toast.created": "Created",
     "toast.updated": "Updated",
@@ -2652,6 +2654,7 @@ const TRANSLATIONS = {
     "status.not_started": "لم يبدأ",
     "status.in_progress": "قيد التنفيذ",
     "status.submitted": "تم التسليم",
+    "status.not_billed": "غير مفوتر",
 
     "toast.created": "تم الإنشاء",
     "toast.updated": "تم التحديث",
