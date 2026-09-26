@@ -31,6 +31,7 @@ export default function TeacherPaymentsPage() {
   const { tenant } = useAuth();
   const qc = useQueryClient();
   const { canAdd, canModify: canEditPercentage } = usePermission("teacher_payments");
+  const canPay = canAdd;
 
   const [filters, setFilters] = useState({ from: "", to: "", teacher_id: "", group_id: "" });
   const [open, setOpen] = useState(false);
@@ -326,7 +327,7 @@ export default function TeacherPaymentsPage() {
                         <Button
                           size="sm"
                           onClick={() => {
-                            setPayoutForm({ ...EMPTY_PAYOUT, teacher_id: r.teacher_id, amount: bal > 0 ? String(bal) : "" });
+                            setForm({ ...EMPTY_PAYOUT, teacher_id: r.teacher_id, amount: bal > 0 ? String(bal) : "" });
                             setOpen(true);
                           }}
                           className="h-8 text-xs gap-1.5 flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
@@ -425,7 +426,7 @@ export default function TeacherPaymentsPage() {
                               variant="outline"
                               onClick={() => {
                                 const bal = Number(r.balance || 0);
-                                setPayoutForm({ ...EMPTY_PAYOUT, teacher_id: r.teacher_id, amount: bal > 0 ? String(bal) : "" });
+                                setForm({ ...EMPTY_PAYOUT, teacher_id: r.teacher_id, amount: bal > 0 ? String(bal) : "" });
                                 setOpen(true);
                               }}
                               className="h-7 px-2.5 text-xs inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800"
