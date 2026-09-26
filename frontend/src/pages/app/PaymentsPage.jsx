@@ -359,22 +359,53 @@ export default function PaymentsPage() {
           if (it.item_type === "book" && it.book_id) out.book_id = it.book_id;
           return out;
         });
-        const firstPardon = items.find((it) => it.pardon_type);
+        const expandedItems = [];
+        for (const it of items) {
+          if (it.status === "partial") {
+            const fullAmt = parseFloat(it.amount) || 0;
+            const paidNow = it.paid_now !== undefined ? parseFloat(it.paid_now) || 0 : Math.round(fullAmt / 2);
+            const pendAmt = Math.max(0, fullAmt - paidNow);
+            if (paidNow > 0) {
+              expandedItems.push({
+                ...it,
+                amount: paidNow,
+                status: "paid",
+                due_date: null,
+              });
+            }
+            if (pendAmt > 0) {
+              expandedItems.push({
+                ...it,
+                amount: pendAmt,
+                status: "pending",
+                due_date: it.due_date || null,
+              });
+            }
+            if (paidNow <= 0 && pendAmt <= 0) {
+              expandedItems.push(it);
+            }
+          } else {
+            expandedItems.push(it);
+          }
+        }
+        const finalItems = expandedItems;
+
+        const firstPardon = finalItems.find((it) => it.pardon_type);
         if (firstPardon) {
           rest.pardon_type = firstPardon.pardon_type;
         } else if (rest.status === "pardoned") {
           rest.pardon_type = rest.pardon_type || "both";
         }
 
-        const allItemsPending = items.length > 0 && items.every((it) => it.status === "pending");
-        const anyItemPending = items.some((it) => it.status === "pending");
+        const allItemsPending = finalItems.length > 0 && finalItems.every((it) => it.status === "pending");
+        const anyItemPending = finalItems.some((it) => it.status === "pending");
         if (allItemsPending) {
           rest.status = "pending";
           rest.paid_at = null;
         } else if (anyItemPending && rest.status !== "pending") {
           rest.status = "partial";
         }
-        const pendingItemWithDue = items.find((it) => it.status === "pending" && it.due_date);
+        const pendingItemWithDue = finalItems.find((it) => it.status === "pending" && it.due_date);
         if (pendingItemWithDue && !rest.due_date) {
           rest.due_date = pendingItemWithDue.due_date;
         }
@@ -383,7 +414,7 @@ export default function PaymentsPage() {
           ...rest,
           reduction: reductionVal,
           reduction_target: reductionTarget,
-          items,
+          items: finalItems,
         };
       }}
       onBeforeSubmit={(form) => {
@@ -864,20 +895,41 @@ export default function PaymentsPage() {
                       )}
 
                       {item.status === "partial" && (
-                        <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-md bg-blue-500/10 border border-blue-500/25 text-xs">
-                          <span className="text-blue-700 dark:text-blue-300 font-medium">
-                            {t("payments.item_partial_hint")}
-                          </span>
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-muted-foreground">{t("payments.due")}:</span>
-                            <Input
-                              type="date"
-                              value={item.due_date || ""}
-                              onChange={(e) => updateItem(idx, { due_date: e.target.value })}
-                              className="h-7 w-36 text-xs bg-background"
-                              placeholder={t("field.due_date")}
-                              data-testid={`payments-item-${idx}-due-date`}
-                            />
+                        <div className="p-2.5 rounded-md bg-blue-500/10 border border-blue-500/25 text-xs space-y-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="text-blue-700 dark:text-blue-300 font-medium">
+                              {t("payments.item_partial_hint")}
+                            </span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-muted-foreground">{t("payments.due")}:</span>
+                              <Input
+                                type="date"
+                                value={item.due_date || ""}
+                                onChange={(e) => updateItem(idx, { due_date: e.target.value })}
+                                className="h-7 w-36 text-xs bg-background"
+                                placeholder={t("field.due_date")}
+                                data-testid={`payments-item-${idx}-due-date`}
+                              />
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-blue-500/20">
+                            <span className="text-muted-foreground">{t("payments.paid_now", "المبلغ المدفوع الآن")}:</span>
+                            <div className="flex items-center gap-2">
+                              <Input
+                                type="number"
+                                min="0"
+                                max={itemAmount(item)}
+                                value={item.paid_now !== undefined ? item.paid_now : Math.round(itemAmount(item) / 2)}
+                                onChange={(e) => updateItem(idx, { paid_now: parseFloat(e.target.value) || 0 })}
+                                className="h-7 w-28 text-xs bg-background font-mono"
+                              />
+                              <span className="text-muted-foreground font-mono">
+                                / {itemAmount(item).toLocaleString()} {currency}
+                              </span>
+                              <span className="text-[11px] text-amber-600 dark:text-amber-400 font-medium ms-1">
+                                ({t("payments.pending_debt", "متبقي دين")}: {Math.max(0, itemAmount(item) - (item.paid_now !== undefined ? item.paid_now : Math.round(itemAmount(item) / 2))).toLocaleString()} {currency})
+                              </span>
+                            </div>
                           </div>
                         </div>
                       )}
@@ -1398,44 +1450,96 @@ export default function PaymentsPage() {
       />
 
       <Dialog open={Boolean(detailStudentId)} onOpenChange={(o) => !o && setDetailStudentId(null)}>
-        <DialogContent className="bg-card max-w-md">
+        <DialogContent className="bg-card max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="font-display text-xl">
-              {detail?.student_name || t("payments.detail_title")}
+            <DialogTitle className="font-display text-xl flex items-center justify-between">
+              <span>{detail?.student_name || t("payments.detail_title")}</span>
+              {detail?.balance && (
+                <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${BALANCE_CLS[detail.balance.status] || "bg-muted"}`}>
+                  {t(`payments.balance_${detail.balance.status}`)}
+                </span>
+              )}
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              {t("payments.detail_title")}
+              {t("payments.detail_description", "تفاصيل الرصيد واستهلاك الحصص للطالب")}
             </DialogDescription>
           </DialogHeader>
 
           {detailLoading ? (
-            <div className="text-sm text-muted-foreground">{t("actions.loading")}</div>
+            <div className="py-8 text-center text-sm text-muted-foreground">{t("actions.loading")}</div>
           ) : detail ? (
             <div className="space-y-4">
-              <div className="rounded-lg bg-muted/40 p-3 space-y-1">
-                {/* Both net of any teacher/school %-discount — the discount
-                   is forgiven straight off cost (see compute_student_balances),
-                   not treated as cash collected — so these two numbers are
-                   exactly what Balance below is computed from (paid − cost),
-                   and they reconcile with it at a glance. */}
-                <InfoRow label={t("payments.total_paid")} value={`${Math.round(detail.balance.paid).toLocaleString()} ${tenant?.currency || "DZD"}`} />
-                <InfoRow label={t("payments.total_cost")} value={`${Math.round(detail.balance.cost).toLocaleString()} ${tenant?.currency || "DZD"}`} />
-                <div className={`flex justify-between text-sm font-semibold pt-1 border-t border-border ${BALANCE_CLS[detail.balance.status] || ""}`}>
-                  <span>{t("payments.balance_label")} — {t(`payments.balance_${detail.balance.status}`)}</span>
-                  <span className="font-mono">{Math.round(detail.balance.balance).toLocaleString()} {tenant?.currency || "DZD"}</span>
+              <div className="grid grid-cols-3 gap-2.5">
+                <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-center">
+                  <div className="text-[11px] text-muted-foreground">{t("payments.total_paid")}</div>
+                  <div className="text-base font-bold text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">
+                    {Math.round(detail.balance.paid).toLocaleString()} {tenant?.currency || "DZD"}
+                  </div>
+                </div>
+                <div className="p-3 rounded-lg bg-muted/60 border border-border text-center">
+                  <div className="text-[11px] text-muted-foreground">{t("payments.total_cost")}</div>
+                  <div className="text-base font-bold text-foreground font-mono mt-0.5">
+                    {Math.round(detail.balance.cost).toLocaleString()} {tenant?.currency || "DZD"}
+                  </div>
+                </div>
+                <div className={`p-3 rounded-lg border text-center ${detail.balance.balance < 0 ? "bg-amber-500/10 border-amber-500/20" : "bg-muted/60 border-border"}`}>
+                  <div className="text-[11px] text-muted-foreground">{t("payments.balance_label")}</div>
+                  <div className={`text-base font-bold font-mono mt-0.5 ${BALANCE_CLS[detail.balance.status] || ""}`}>
+                    {Math.round(detail.balance.balance).toLocaleString()} {tenant?.currency || "DZD"}
+                  </div>
                 </div>
               </div>
 
               <div>
-                <Label className="text-xs font-medium mb-1.5 block">{t("payments.enrolled_courses")}</Label>
+                <div className="flex items-center justify-between mb-2">
+                  <Label className="text-xs font-semibold">{t("payments.course_session_breakdown", "تفاصيل الحصص والرصيد المتبقي لكل مادة")}</Label>
+                  <span className="text-[11px] text-muted-foreground">{detail.courses.length} {t("menu.courses")}</span>
+                </div>
                 {detail.courses.length === 0 ? (
-                  <div className="text-sm text-muted-foreground">{t("payments.no_courses")}</div>
+                  <div className="text-sm text-muted-foreground p-4 text-center border rounded-lg">{t("payments.no_courses")}</div>
                 ) : (
-                  <div className="rounded-lg border border-border divide-y divide-border">
+                  <div className="space-y-2.5">
                     {detail.courses.map((c) => (
-                      <div key={c.group_id} className="px-3 py-2 text-sm flex items-center justify-between">
-                        <span>{c.course_title}</span>
-                        <span className="text-xs text-muted-foreground">{c.group_name}</span>
+                      <div key={c.group_id} className="p-3 rounded-lg border border-border bg-card/60 hover:bg-muted/30 transition-colors space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="font-semibold text-sm flex items-center gap-2">
+                              {c.course_title}
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground border border-border font-normal">
+                                {c.group_name}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-muted-foreground mt-0.5">
+                              {t("field.teacher")}: <span className="font-medium text-foreground">{c.teacher_name}</span> &middot; {t("field.pricing")}: {(c.cost_per_session || 0).toLocaleString()} {tenant?.currency || "DZD"}/{t("reports.session_unit", "حصة")}
+                            </div>
+                          </div>
+                          <div className="text-end">
+                            <span className="text-[11px] text-muted-foreground">{t("payments.paid_amount")}:</span>
+                            <div className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                              {(c.amount_paid || 0).toLocaleString()} {tenant?.currency || "DZD"}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Session Badges Grid */}
+                        <div className="grid grid-cols-4 gap-1.5 pt-1.5 border-t border-border/60 text-center text-xs">
+                          <div className="p-1.5 rounded bg-muted/50">
+                            <div className="text-[10px] text-muted-foreground">{t("payments.sessions_covered", "الحصص المدفوعة")}</div>
+                            <div className="font-bold text-foreground mt-0.5">{c.sessions_covered}</div>
+                          </div>
+                          <div className="p-1.5 rounded bg-blue-500/10 text-blue-700 dark:text-blue-300">
+                            <div className="text-[10px] opacity-80">{t("payments.sessions_deducted", "الحصص المستهلكة")}</div>
+                            <div className="font-bold mt-0.5">{c.sessions_deducted}</div>
+                          </div>
+                          <div className={`p-1.5 rounded ${c.sessions_remaining > 0 ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-semibold" : "bg-muted/40 text-muted-foreground"}`}>
+                            <div className="text-[10px] opacity-80">{t("payments.sessions_remaining", "الحصص المتبقية")}</div>
+                            <div className="font-bold mt-0.5">{c.sessions_remaining}</div>
+                          </div>
+                          <div className="p-1.5 rounded bg-purple-500/10 text-purple-700 dark:text-purple-300">
+                            <div className="text-[10px] opacity-80">{t("payments.credit_remaining", "الرصيد المتبقي")}</div>
+                            <div className="font-mono font-bold mt-0.5 text-[11px]">{(c.credit_remaining || 0).toLocaleString()}</div>
+                          </div>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1445,7 +1549,7 @@ export default function PaymentsPage() {
               {canAdd && (
                 <Button
                   type="button"
-                  className="w-full bg-accent hover:bg-accent/90 text-accent-foreground"
+                  className="w-full bg-accent hover:bg-accent/90 text-accent-foreground mt-2"
                   onClick={() => {
                     crudRef.current?.openCreateWith({ student_id: detailStudentId });
                     setDetailStudentId(null);

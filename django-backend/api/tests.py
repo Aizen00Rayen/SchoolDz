@@ -595,6 +595,67 @@ class DebtPayTestCase(SimpleTestCase):
         self.assertEqual(match_slash.func.__name__, 'view')
 
 
+class ReportsAndArchiveTestCase(SimpleTestCase):
+    def test_reports_and_archive_url_routing(self):
+        from django.urls import resolve
+        # Reports search and details
+        self.assertEqual(resolve('/api/v1/reports/search').func.__name__, 'view')
+        self.assertEqual(resolve('/api/v1/reports/student/test-student-id').func.__name__, 'view')
+        self.assertEqual(resolve('/api/v1/reports/teacher/test-teacher-id').func.__name__, 'view')
+        # Archive overview
+        self.assertEqual(resolve('/api/v1/archive/overview').func.__name__, 'view')
+        self.assertEqual(resolve('/api/v1/archive').func.__name__, 'view')
+
+    def test_filter_by_date_range_datetime_lookup(self):
+        from unittest.mock import MagicMock
+        from .views import filter_by_date_range
+        from .models import Payment
+
+        mock_qs = MagicMock()
+        mock_qs.model = Payment
+        mock_qs.filter.return_value = mock_qs
+        mock_request = MagicMock()
+        mock_request.GET = {'from': '2026-09-26', 'to': '2026-09-26'}
+
+        filter_by_date_range(mock_qs, mock_request, 'paid_at')
+        # Must use paid_at__date__gte and paid_at__date__lte for DateTimeField
+        mock_qs.filter.assert_any_call(paid_at__date__gte='2026-09-26')
+        mock_qs.filter.assert_any_call(paid_at__date__lte='2026-09-26')
+
+    def test_course_archive_fields(self):
+        from .models import Course
+        c = Course(
+            title='Physics Bac 2026',
+            price=6000,
+            pricing_type='per_month',
+            sessions_count=8,
+            status='archived',
+            archive_year=2026,
+        )
+        self.assertEqual(c.status, 'archived')
+        self.assertEqual(c.archive_year, 2026)
+
+    def test_session_deduction_calculation(self):
+        # 6000 DZD per month with 8 sessions -> 750 DZD per session
+        from .views import course_per_session_price
+        session_price = course_per_session_price(6000, 'per_month', 8)
+        self.assertEqual(session_price, 750.0)
+
+        # Student paid 6000 DZD (covers 8 sessions)
+        amount_paid = 6000.0
+        sessions_covered = int(amount_paid / session_price)
+        self.assertEqual(sessions_covered, 8)
+
+        # Attended 5 sessions -> 3 remaining, credit left = 6000 - (5 * 750) = 2250 DZD
+        sessions_attended = 5
+        sessions_remaining = max(0, sessions_covered - sessions_attended)
+        credit_remaining = round(amount_paid - (sessions_attended * session_price), 2)
+        self.assertEqual(sessions_remaining, 3)
+        self.assertEqual(credit_remaining, 2250.0)
+
+
+
+
 
 
 

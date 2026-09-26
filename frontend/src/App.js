@@ -89,6 +89,7 @@ import TeacherPaymentsPage from "@/pages/app/TeacherPaymentsPage";
 import LogsPage from "@/pages/app/LogsPage";
 import SettingsPage from "@/pages/app/SettingsPage";
 import UsersPage from "@/pages/app/UsersPage";
+import ArchivePage from "@/pages/app/ArchivePage";
 import MessagesPage from "@/pages/app/MessagesPage";
 import PortalShell from "@/pages/portal/PortalShell";
 import PortalHomePage from "@/pages/portal/PortalHomePage";
@@ -236,6 +237,7 @@ function App() {
                     <Route path="messages" element={<MessagesPage />} />
                     <Route path="settings" element={<SettingsPage />} />
                     <Route path="users" element={<UsersPage />} />
+                    <Route path="archive" element={<ArchivePage />} />
                   </Route>
 
                   {/* Parent portal */}

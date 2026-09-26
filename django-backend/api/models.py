@@ -472,6 +472,7 @@ class Course(models.Model):
         ('archived', 'archived'),
     ]
     status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='active')
+    archive_year = models.IntegerField(null=True, blank=True)
     show_on_enrollment = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

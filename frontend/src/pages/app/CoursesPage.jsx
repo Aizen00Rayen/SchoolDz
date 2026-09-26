@@ -1,8 +1,9 @@
 import CrudPanel, { StatusPill } from "./CrudPanel";
-import { BookOpen, Globe } from "lucide-react";
+import { BookOpen, Globe, Archive } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
 import { Field } from "./StudentsPage";
 import { SchoolLevelFields, SchoolLevelCell } from "./_shared";
 import {
@@ -11,6 +12,10 @@ import {
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/permissions";
+import { useConfirm } from "@/lib/confirm";
+import { useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api";
+import { toast } from "sonner";
 
 const DEFAULT_FORM = {
   title: "", description: "", category: "", pricing_type: "fixed_sessions", sessions_count: 12, price: 0,
@@ -28,6 +33,27 @@ export default function CoursesPage() {
   const { t } = useI18n();
   const { tenant } = useAuth();
   const { canAdd, canModify, canDelete } = usePermission("courses");
+  const confirm = useConfirm();
+  const qc = useQueryClient();
+
+  const handleArchive = async (course) => {
+    const ok = await confirm({
+      title: t("archive.confirm_title", "أرشفة الدورة"),
+      description: t("archive.confirm_desc", `هل أنت متأكد من نقل الدورة "${course.title}" إلى الأرشيف؟ ستختفي من هذه الصفحة وتصبح متاحة مع كامل سجلاتها وتفاصيلها في صفحة الأرشيف.`),
+      confirmLabel: t("archive.action", "أرشفة"),
+    });
+    if (!ok) return;
+
+    try {
+      await api.post(`/courses/${course.id}/archive/`, { year: 2026 });
+      toast.success(t("archive.archived_success", "تم نقل الدورة إلى الأرشيف بنجاح"));
+      qc.invalidateQueries({ queryKey: ["courses"] });
+      qc.invalidateQueries({ queryKey: ["archive"] });
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || err?.response?.data?.error || t("errors.generic"));
+    }
+  };
+
   return (
     <CrudPanel
       moduleKey="courses"
@@ -39,6 +65,19 @@ export default function CoursesPage() {
       subtitle={t("subtitle.courses")}
       emptyIcon={BookOpen}
       defaultForm={DEFAULT_FORM}
+      renderRowActions={(row) => (
+        canModify && (
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={() => handleArchive(row)}
+            title={t("archive.archive_course", "أرشفة الدورة")}
+            className="h-10 w-10 md:h-8 md:w-8 text-muted-foreground hover:text-amber-600 dark:hover:text-amber-400"
+          >
+            <Archive className="w-4 h-4" />
+          </Button>
+        )
+      )}
       columns={[
         {
           key: "title", label: t("field.course_title"),

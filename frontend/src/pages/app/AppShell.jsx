@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import {
-  Award, BarChart3, BookOpen, Building2, CalendarClock, CalendarDays, Check, ChevronDown, ChevronsUpDown, ChevronRight, CircleDollarSign, ClipboardCheck,
+  Award, Archive, BarChart3, BookOpen, Building2, CalendarClock, CalendarDays, Check, ChevronDown, ChevronsUpDown, ChevronRight, CircleDollarSign, ClipboardCheck,
   Coins, DoorOpen, FileBarChart2, FileQuestion, GaugeCircle, GraduationCap, Globe, HandCoins, Languages, LayoutGrid, Library, LogOut, Menu, MessageSquare, Moon,
   PanelLeft, PanelLeftClose, Plane, Plus, Receipt, ScrollText, Search, Settings, ShieldCheck, Sun, Users, UserRound, Wallet, Layers, Table2, X,
 } from "lucide-react";
@@ -96,6 +96,7 @@ const NAV_GROUPS = [
       { key: "website", to: "/app/website", icon: Globe, premiumOnly: true, module: "website" },
       { key: "users", to: "/app/users", icon: Users, adminOnly: true },
       { key: "settings", to: "/app/settings", icon: Settings, module: "settings" },
+      { key: "archive", to: "/app/archive", icon: Archive, module: "courses" },
     ],
   },
 ];

@@ -148,6 +148,15 @@ urlpatterns = [
     *_both('logs', views.activity_logs, 'activity_logs'),
     *_both('reports/finance', views.finance_report, 'finance_report'),
     *_both('reports/finance/print', views.finance_report_print, 'finance_report_print'),
+    *_both('reports/search', views.reports_search, 'reports_search'),
+    path('reports/student/<str:student_id>/', views.reports_student_detail, name='reports_student_detail'),
+    path('reports/student/<str:student_id>', views.reports_student_detail, name='reports_student_detail_noslash'),
+    path('reports/teacher/<str:teacher_id>/', views.reports_teacher_detail, name='reports_teacher_detail'),
+    path('reports/teacher/<str:teacher_id>', views.reports_teacher_detail, name='reports_teacher_detail_noslash'),
+
+    # Archive
+    *_both('archive/overview', views.archive_overview, 'archive_overview'),
+    *_both('archive', views.archive_overview, 'archive_overview_root'),
 
     # Parent portal
     *_both('portal/children', views.portal_children, 'portal_children'),

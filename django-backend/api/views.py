@@ -14,7 +14,7 @@ from PIL import Image, ImageOps
 from datetime import datetime, time, timedelta
 from decimal import Decimal
 from django.conf import settings
-from django.db import transaction
+from django.db import transaction, models
 from django.db.models import Q, Sum, F, Count, Prefetch
 from django.http import FileResponse, Http404, HttpResponse
 from django.template.loader import render_to_string
@@ -2162,45 +2162,67 @@ def dashboard_summary(request):
         start_at__range=(now, now + timedelta(days=7))
     ).select_related('teacher', 'course', 'group', 'room_ref').order_by('start_at')[:20]
     
-    # Calculate revenue today — 'partial' counts as collected money too
-    # (see compute_student_balances). 'pardoned' collects (amount - discount).
-    rev_today_data = Payment.objects.filter(
+    today_date = timezone.localdate() if hasattr(timezone, 'localdate') else now.date()
+
+    # Calculate revenue today — accurately sums full bills and paid portions of partial bills
+    today_payments = Payment.objects.filter(
         tenant_id=tid,
         status__in=('paid', 'partial', 'pardoned'),
-        paid_at__range=(day_start, day_end)
-    ).aggregate(total=Sum(F('amount') - F('discount')))
-    revenue_today = float(rev_today_data['total'] or 0)
+        paid_at__date=today_date
+    ).prefetch_related('items')
+    revenue_today = 0.0
+    for p in today_payments:
+        if p.status == 'partial':
+            items = list(p.items.all())
+            paid_sum = sum(
+                max(0.0, float(it.amount or 0) - _payment_item_discount(it))
+                for it in items if it.status == 'paid'
+            )
+            revenue_today += paid_sum
+        else:
+            revenue_today += max(0.0, float(p.amount or 0) - float(p.discount or 0))
 
     # Calculate revenue month
-    rev_month_data = Payment.objects.filter(
+    month_payments = Payment.objects.filter(
         tenant_id=tid,
         status__in=('paid', 'partial', 'pardoned'),
-        paid_at__gte=month_start
-    ).aggregate(total=Sum(F('amount') - F('discount')))
-    revenue_month = float(rev_month_data['total'] or 0)
+        paid_at__date__gte=month_start.date()
+    ).prefetch_related('items')
+    revenue_month = 0.0
+    for p in month_payments:
+        if p.status == 'partial':
+            items = list(p.items.all())
+            paid_sum = sum(
+                max(0.0, float(it.amount or 0) - _payment_item_discount(it))
+                for it in items if it.status == 'paid'
+            )
+            revenue_month += paid_sum
+        else:
+            revenue_month += max(0.0, float(p.amount or 0) - float(p.discount or 0))
 
     # Other income (100% school revenue, not split with teachers)
     other_inc_today_data = OtherIncome.objects.filter(
-        tenant_id=tid, received_at__range=(day_start.date(), day_end.date())
+        tenant_id=tid, received_at__date=today_date
     ).aggregate(total=Sum('amount'))
     other_income_today = float(other_inc_today_data['total'] or 0)
 
     other_inc_month_data = OtherIncome.objects.filter(
-        tenant_id=tid, received_at__gte=month_start.date()
+        tenant_id=tid, received_at__date__gte=month_start.date()
     ).aggregate(total=Sum('amount'))
     other_income_month = float(other_inc_month_data['total'] or 0)
 
     revenue_today += other_income_today
     revenue_month += other_income_month
     
-    # Outstanding — 'partial' now counts as collected money (see
-    # compute_student_balances), so only a still-fully-unpaid 'pending'
-    # invoice is genuinely outstanding.
+    # Outstanding — 'pending' bills plus pending items on partial bills
     out_data = Payment.objects.filter(
         tenant_id=tid,
         status='pending'
     ).aggregate(total=Sum(F('amount') - F('discount')))
     outstanding = float(out_data['total'] or 0)
+    for pi in PaymentItem.objects.filter(payment__tenant_id=tid, payment__status='partial', status='pending'):
+        outstanding += max(0.0, float(pi.amount or 0) - _payment_item_discount(pi))
+
 
     # Expenses — same today/month windows as revenue, so profit/loss compares
     # like-for-like periods.
@@ -4335,6 +4357,18 @@ class CourseViewSet(TenantScopedViewSet):
             queryset = queryset.filter(
                 Q(title__icontains=q) | Q(category__icontains=q)
             )
+        status_filter = request.GET.get('status')
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+        else:
+            queryset = queryset.exclude(status='archived')
+        year_filter = request.GET.get('year')
+        if year_filter:
+            try:
+                y = int(year_filter)
+                queryset = queryset.filter(Q(archive_year=y) | Q(updated_at__year=y))
+            except (ValueError, TypeError):
+                pass
         queryset = queryset.order_by('-created_at')[:500]
         serializer = self.get_serializer(queryset, many=True)
         return Response({'items': serializer.data, 'total': len(serializer.data)})
@@ -4345,6 +4379,141 @@ class CourseViewSet(TenantScopedViewSet):
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], url_path='archive')
+    def archive_course(self, request, pk=None):
+        self.check_module_modify()
+        course = self.get_object()
+        year = request.data.get('year')
+        try:
+            year_val = int(year) if year else timezone.now().year
+        except (ValueError, TypeError):
+            year_val = timezone.now().year
+        course.status = 'archived'
+        course.archive_year = year_val
+        course.save(update_fields=['status', 'archive_year', 'updated_at'])
+        log_activity(request, course.tenant_id, 'update', entity_type='courses', entity_id=course.id,
+                     description=f'Archived course: {course.title} (Year {year_val})')
+        return Response(self.get_serializer(course).data)
+
+    @action(detail=True, methods=['post'], url_path='unarchive')
+    def unarchive_course(self, request, pk=None):
+        self.check_module_modify()
+        course = self.get_object()
+        course.status = 'active'
+        course.archive_year = None
+        course.save(update_fields=['status', 'archive_year', 'updated_at'])
+        log_activity(request, course.tenant_id, 'update', entity_type='courses', entity_id=course.id,
+                     description=f'Restored course from archive: {course.title}')
+        return Response(self.get_serializer(course).data)
+
+    @action(detail=True, methods=['get'], url_path='archive-details')
+    def archive_details(self, request, pk=None):
+        course = self.get_object()
+        tid = course.tenant_id
+        groups = list(Group.objects.filter(tenant_id=tid, course_id=course.id).select_related('teacher'))
+        teachers = []
+        seen_tids = set()
+        for g in groups:
+            if g.teacher and g.teacher.id not in seen_tids:
+                seen_tids.add(g.teacher.id)
+                teachers.append({
+                    'id': g.teacher.id,
+                    'name': f"{g.teacher.first_name} {g.teacher.last_name}",
+                    'phone': g.teacher.phone,
+                    'payment_percentage': float(g.teacher.payment_percentage or 0),
+                })
+
+        group_ids = [g.id for g in groups]
+        enrolled_students = list(Student.objects.filter(
+            tenant_id=tid,
+            group_memberships__group_id__in=group_ids
+        ).distinct().order_by('first_name', 'last_name'))
+
+        sessions = list(ClassSession.objects.filter(
+            Q(course_id=course.id) | Q(group_id__in=group_ids),
+            tenant_id=tid,
+        ).select_related('teacher', 'group', 'room_ref').order_by('-start_at'))
+        session_ids = [s.id for s in sessions]
+
+        attendances = list(Attendance.objects.filter(
+            tenant_id=tid,
+            session_id__in=session_ids
+        ).values('student_id', 'status', 'session_id'))
+
+        student_att = {}
+        for a in attendances:
+            sid = a['student_id']
+            if sid not in student_att:
+                student_att[sid] = {'present': 0, 'absent': 0, 'excused': 0, 'total': 0}
+            student_att[sid]['total'] += 1
+            if a['status'] in ('present', 'late'):
+                student_att[sid]['present'] += 1
+            elif a['status'] == 'absent':
+                student_att[sid]['absent'] += 1
+            elif a['status'] == 'excused':
+                student_att[sid]['excused'] += 1
+
+        items = list(PaymentItem.objects.filter(
+            payment__tenant_id=tid,
+            course_id=course.id
+        ).select_related('payment'))
+        total_revenue = 0.0
+        for it in items:
+            if it.status in ('paid', 'partial') or (not it.status and it.payment and it.payment.status in ('paid', 'partial')):
+                total_revenue += max(0.0, float(it.amount or 0) - _payment_item_discount(it))
+
+        teacher_earnings = 0.0
+        session_price = course_per_session_price(course.price, course.pricing_type, course.sessions_count)
+        if course.kind in ('package', 'standalone'):
+            for it in items:
+                if it.status in ('paid', 'partial', 'pending', 'pardoned'):
+                    pct = float(it.teacher_percentage or 0)
+                    teacher_earnings += (float(it.amount or 0) * (pct / 100.0))
+        else:
+            for s in sessions:
+                t_pct = float(s.teacher.payment_percentage or 0) if s.teacher else 0.0
+                if not t_pct and s.group and s.group.teacher:
+                    t_pct = float(s.group.teacher.payment_percentage or 0)
+                pres_count = sum(1 for a in attendances if a['session_id'] == s.id and a['status'] in ('present', 'late'))
+                teacher_earnings += (pres_count * session_price * (t_pct / 100.0))
+
+        students_data = []
+        for stu in enrolled_students:
+            att = student_att.get(stu.id, {'present': 0, 'absent': 0, 'excused': 0, 'total': 0})
+            students_data.append({
+                'id': stu.id,
+                'name': f"{stu.first_name} {stu.last_name}",
+                'code': stu.student_code,
+                'phone': stu.phone,
+                'parent_phone': stu.parent.phone if stu.parent else None,
+                'attendance': att,
+            })
+
+        sessions_data = []
+        for s in sessions[:100]:
+            sessions_data.append({
+                'id': s.id,
+                'title': s.title or (s.group.name if s.group else course.title),
+                'start_at': s.start_at.isoformat() if s.start_at else None,
+                'group_name': s.group.name if s.group else '—',
+                'teacher_name': f"{s.teacher.first_name} {s.teacher.last_name}" if s.teacher else (f"{s.group.teacher.first_name} {s.group.teacher.last_name}" if s.group and s.group.teacher else '—'),
+                'room_name': s.room_ref.name if s.room_ref else (s.room or '—'),
+                'status': s.status,
+            })
+
+        return Response({
+            'course': CourseSerializer(course).data,
+            'teachers': teachers,
+            'groups': [{'id': g.id, 'name': g.name} for g in groups],
+            'total_students': len(students_data),
+            'students': students_data,
+            'total_sessions': len(sessions),
+            'sessions': sessions_data,
+            'total_revenue': round(total_revenue, 2),
+            'teacher_earnings': round(teacher_earnings, 2),
+            'net_profit': round(max(0.0, total_revenue - teacher_earnings), 2),
+        })
 
     @action(detail=True, methods=['post'], url_path='photo')
     def upload_photo(self, request, pk=None):
@@ -5908,8 +6077,64 @@ def payments_student_summary(request):
     balance = compute_student_balances(tid).get(
         student_id, {'paid': 0.0, 'cost': 0.0, 'balance': 0.0, 'status': 'settled'},
     )
-    groups = Group.objects.filter(tenant_id=tid, students__id=student_id).select_related('course')
-    courses = [{'group_id': g.id, 'group_name': g.name, 'course_id': g.course_id, 'course_title': g.course.title} for g in groups]
+    groups = Group.objects.filter(tenant_id=tid, students__id=student_id).select_related('course', 'teacher')
+
+    # Compute per-course statistics
+    course_items = PaymentItem.objects.filter(
+        payment__tenant_id=tid,
+        payment__student_id=student_id,
+        status__in=('paid', 'partial')
+    ).select_related('payment')
+    paid_by_course = {}
+    for it in course_items:
+        cid = it.course_id or (it.group.course_id if it.group else None)
+        if cid:
+            paid_by_course[cid] = paid_by_course.get(cid, 0.0) + max(0.0, float(it.amount or 0) - _payment_item_discount(it))
+
+    legacy_payments = Payment.objects.filter(
+        tenant_id=tid, student_id=student_id, status__in=('paid', 'partial'), items__isnull=True
+    )
+    for lp in legacy_payments:
+        cid = lp.course_id or (lp.group.course_id if lp.group else None)
+        if cid:
+            paid_by_course[cid] = paid_by_course.get(cid, 0.0) + max(0.0, float(lp.amount or 0) - float(lp.discount or 0))
+
+    # Attended sessions per group
+    attendances = Attendance.objects.filter(
+        tenant_id=tid, student_id=student_id, status__in=('present', 'late', 'excused')
+    ).values('session__group_id')
+    attended_by_group = {}
+    for a in attendances:
+        gid = a['session__group_id']
+        if gid:
+            attended_by_group[gid] = attended_by_group.get(gid, 0) + 1
+
+    courses = []
+    for g in groups:
+        course = g.course
+        session_price = course_per_session_price(course.price, course.pricing_type, course.sessions_count) if course else 0.0
+        course_paid = paid_by_course.get(course.id if course else None, 0.0)
+        attended_count = attended_by_group.get(g.id, 0)
+        sessions_covered = int(course_paid / session_price) if session_price > 0 else (course.sessions_count or 0 if course else 0)
+        sessions_remaining = max(0, sessions_covered - attended_count)
+        credit_remaining = round(max(0.0, course_paid - (attended_count * session_price)), 2)
+
+        courses.append({
+            'group_id': g.id,
+            'group_name': g.name,
+            'course_id': g.course_id,
+            'course_title': course.title if course else '—',
+            'teacher_name': f"{g.teacher.first_name} {g.teacher.last_name}" if g.teacher else '—',
+            'pricing_type': course.pricing_type if course else 'fixed_sessions',
+            'course_price': float(course.price or 0) if course else 0.0,
+            'sessions_count': course.sessions_count or 0 if course else 0,
+            'cost_per_session': session_price,
+            'amount_paid': round(course_paid, 2),
+            'sessions_covered': sessions_covered,
+            'sessions_deducted': attended_count,
+            'sessions_remaining': sessions_remaining,
+            'credit_remaining': credit_remaining,
+        })
 
     return Response({
         'student_id': student.id,
@@ -7001,11 +7226,24 @@ def filter_by_date_range(queryset, request, field):
     teacher payments and reports."""
     date_from = request.GET.get('from')
     date_to = request.GET.get('to')
+    model = getattr(queryset, 'model', None)
+    is_datetime = False
+    if model:
+        try:
+            model_field = model._meta.get_field(field)
+            is_datetime = isinstance(model_field, models.DateTimeField)
+        except Exception:
+            is_datetime = False
+
+    lookup_from = f'{field}__date__gte' if is_datetime else f'{field}__gte'
+    lookup_to = f'{field}__date__lte' if is_datetime else f'{field}__lte'
+
     if date_from:
-        queryset = queryset.filter(**{f'{field}__gte': date_from})
+        queryset = queryset.filter(**{lookup_from: date_from})
     if date_to:
-        queryset = queryset.filter(**{f'{field}__lte': date_to})
+        queryset = queryset.filter(**{lookup_to: date_to})
     return queryset
+
 
 
 def _teacher_earnings_context(tenant_id):
@@ -7912,8 +8150,22 @@ def _compute_finance_report_data(tid, request):
         payments_base.filter(status__in=('cancelled', 'refunded'), paid_at__isnull=False), request, 'paid_at',
     ))
     payments = paid + outstanding + voided
-    collected = round(sum(float(p.amount) - float(p.discount or 0) for p in paid), 2)
+    collected = 0.0
+    for p in paid:
+        if p.status == 'partial':
+            items = getattr(p, '_prefetched_objects_cache', {}).get('items')
+            if items is None:
+                items = list(p.items.all())
+            paid_sum = sum(
+                max(0.0, float(it.amount or 0) - _payment_item_discount(it))
+                for it in items if it.status == 'paid'
+            )
+            collected += paid_sum
+        else:
+            collected += max(0.0, float(p.amount) - float(p.discount or 0))
+    collected = round(collected, 2)
     pending_amount = round(sum(float(p.amount) - float(p.discount or 0) for p in outstanding), 2)
+
 
     expenses = Expense.objects.filter(tenant_id=tid).select_related('category')
     expenses = filter_by_date_range(expenses, request, 'spent_at')
@@ -8156,3 +8408,423 @@ def finance_report_print(request):
     response = HttpResponse(pdf_bytes, content_type='application/pdf')
     response['Content-Disposition'] = 'inline; filename="financial-report.pdf"'
     return response
+
+
+# ------------------------------------------------------- All-Time Reports & Archive
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def reports_search(request):
+    """Searches students and teachers for all-time reports in the Reports page."""
+    user = request.user
+    tid = require_staff_tenant(user)
+    if not user.can_view('reports'):
+        raise PermissionDenied('Forbidden')
+
+    q = (request.GET.get('q') or '').strip()
+    if not q:
+        return Response({'students': [], 'teachers': []})
+
+    student_q = (
+        Q(first_name__icontains=q) |
+        Q(last_name__icontains=q) |
+        Q(first_name_latin__icontains=q) |
+        Q(last_name_latin__icontains=q) |
+        Q(student_code__icontains=q) |
+        Q(phone__icontains=q)
+    )
+    students = Student.objects.filter(tenant_id=tid).filter(student_q)[:20]
+
+    teacher_q = (
+        Q(first_name__icontains=q) |
+        Q(last_name__icontains=q) |
+        Q(phone__icontains=q) |
+        Q(subject__icontains=q)
+    )
+    teachers = Teacher.objects.filter(tenant_id=tid).filter(teacher_q)[:20]
+
+    return Response({
+        'students': [{
+            'id': s.id,
+            'name': f"{s.first_name} {s.last_name}",
+            'code': s.student_code,
+            'phone': s.phone,
+            'school_level': s.school_level,
+            'school_year': s.school_year,
+            'status': s.status,
+        } for s in students],
+        'teachers': [{
+            'id': t.id,
+            'name': f"{t.first_name} {t.last_name}",
+            'phone': t.phone,
+            'subject': t.subject,
+            'status': t.status,
+        } for t in teachers],
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def reports_student_detail(request, student_id):
+    """Comprehensive all-time report for one student: payments, debts,
+    enrolled courses, and attendance session history."""
+    user = request.user
+    tid = require_staff_tenant(user)
+    if not user.can_view('reports'):
+        raise PermissionDenied('Forbidden')
+
+    student = Student.objects.filter(id=student_id, tenant_id=tid).select_related('parent').first()
+    if not student:
+        raise NotFound('Student not found')
+
+    # All-time running balance
+    balances = compute_student_balances(tid)
+    balance_info = balances.get(student_id, {'paid': 0.0, 'cost': 0.0, 'balance': 0.0, 'status': 'settled'})
+
+    # All payments / invoices
+    payments_qs = Payment.objects.filter(tenant_id=tid, student_id=student_id).prefetch_related('items__course', 'items__trip', 'items__book', 'items__group').order_by('-created_at')
+    invoices = []
+    total_paid_cash = 0.0
+    total_pending_debt = 0.0
+
+    for p in payments_qs:
+        p_items = list(p.items.all())
+        items_data = []
+        p_paid = 0.0
+        p_pending = 0.0
+        for it in p_items:
+            it_disc = _payment_item_discount(it)
+            it_net = max(0.0, float(it.amount or 0) - it_disc)
+            if it.status in ('paid', 'partial') or (not it.status and p.status in ('paid', 'partial')):
+                p_paid += it_net
+            elif it.status == 'pending' or (not it.status and p.status == 'pending'):
+                p_pending += it_net
+
+            cid = it.course_id or (it.group.course_id if it.group else None)
+            title = it.course.title if it.course else (it.trip.title if it.trip else (it.book.title if it.book else it.kind))
+            items_data.append({
+                'id': it.id,
+                'course_id': cid,
+                'title': title,
+                'kind': it.kind,
+                'amount': float(it.amount),
+                'discount': it_disc,
+                'net_amount': it_net,
+                'status': it.status,
+            })
+
+        if not p_items:
+            disc = float(p.discount or 0)
+            net = max(0.0, float(p.amount or 0) - disc)
+            if p.status in ('paid', 'partial'):
+                p_paid = net
+            elif p.status == 'pending':
+                p_pending = net
+            if p.course_id and p.status in ('paid', 'partial'):
+                items_data.append({
+                    'id': p.id,
+                    'course_id': p.course_id,
+                    'title': p.course.title if p.course else p.kind,
+                    'kind': p.kind,
+                    'amount': float(p.amount),
+                    'discount': disc,
+                    'net_amount': net,
+                    'status': p.status,
+                })
+
+        total_paid_cash += p_paid
+        total_pending_debt += p_pending
+
+        invoices.append({
+            'id': p.id,
+            'invoice_number': p.invoice_number,
+            'created_at': p.created_at.isoformat() if p.created_at else None,
+            'paid_at': p.paid_at.isoformat() if p.paid_at else None,
+            'due_date': p.due_date.isoformat() if p.due_date else None,
+            'amount': float(p.amount),
+            'discount': float(p.discount or 0),
+            'paid_amount': round(p_paid, 2),
+            'pending_amount': round(p_pending, 2),
+            'status': p.status,
+            'method': p.method,
+            'notes': p.notes,
+            'items': items_data,
+        })
+
+    # Enrolled courses and session breakdown
+    groups = Group.objects.filter(tenant_id=tid, students__id=student_id).select_related('course', 'teacher')
+    
+    # Calculate attendance
+    attendances_qs = Attendance.objects.filter(
+        tenant_id=tid, student_id=student_id
+    ).select_related('session__group', 'session__course', 'session__teacher', 'session__room_ref').order_by('-session__start_at')
+    
+    attendance_by_group = {}
+    sessions_history = []
+    for a in attendances_qs:
+        s = a.session
+        gid = s.group_id
+        if gid:
+            if gid not in attendance_by_group:
+                attendance_by_group[gid] = {'present': 0, 'absent': 0, 'excused': 0, 'total': 0}
+            attendance_by_group[gid]['total'] += 1
+            if a.status in ('present', 'late'):
+                attendance_by_group[gid]['present'] += 1
+            elif a.status == 'absent':
+                attendance_by_group[gid]['absent'] += 1
+            elif a.status == 'excused':
+                attendance_by_group[gid]['excused'] += 1
+
+        teacher_name = f"{s.teacher.first_name} {s.teacher.last_name}" if s.teacher else (f"{s.group.teacher.first_name} {s.group.teacher.last_name}" if s.group and s.group.teacher else '—')
+        sessions_history.append({
+            'id': a.id,
+            'session_id': s.id,
+            'date': s.start_at.isoformat() if s.start_at else None,
+            'group_name': s.group.name if s.group else '—',
+            'course_title': s.course.title if s.course else (s.group.course.title if s.group and s.group.course else '—'),
+            'teacher_name': teacher_name,
+            'status': a.status,
+            'recovery_status': a.recovery_status,
+            'note': a.note,
+        })
+
+    # Group paid amounts
+    paid_by_course = {}
+    for inv in invoices:
+        for it in inv['items']:
+            cid = it.get('course_id')
+            if cid and it['status'] in ('paid', 'partial'):
+                paid_by_course[cid] = paid_by_course.get(cid, 0.0) + it['net_amount']
+
+    courses = []
+    for g in groups:
+        course = g.course
+        session_price = course_per_session_price(course.price, course.pricing_type, course.sessions_count) if course else 0.0
+        course_paid = paid_by_course.get(course.id if course else None, 0.0)
+        att = attendance_by_group.get(g.id, {'present': 0, 'absent': 0, 'excused': 0, 'total': 0})
+        attended_count = att['present']
+        sessions_covered = int(course_paid / session_price) if session_price > 0 else (course.sessions_count or 0 if course else 0)
+        sessions_remaining = max(0, sessions_covered - attended_count)
+        credit_remaining = round(max(0.0, course_paid - (attended_count * session_price)), 2)
+
+        courses.append({
+            'group_id': g.id,
+            'group_name': g.name,
+            'course_id': g.course_id,
+            'course_title': course.title if course else '—',
+            'teacher_name': f"{g.teacher.first_name} {g.teacher.last_name}" if g.teacher else '—',
+            'pricing_type': course.pricing_type if course else 'fixed_sessions',
+            'course_price': float(course.price or 0) if course else 0.0,
+            'sessions_count': course.sessions_count or 0 if course else 0,
+            'cost_per_session': session_price,
+            'amount_paid': round(course_paid, 2),
+            'sessions_covered': sessions_covered,
+            'sessions_attended': attended_count,
+            'sessions_absent': att['absent'],
+            'sessions_excused': att['excused'],
+            'sessions_remaining': sessions_remaining,
+            'credit_remaining': credit_remaining,
+        })
+
+    return Response({
+        'student': {
+            'id': student.id,
+            'name': f"{student.first_name} {student.last_name}",
+            'code': student.student_code,
+            'phone': student.phone,
+            'email': student.email,
+            'school_level': student.school_level,
+            'school_year': student.school_year,
+            'specialty': student.specialty,
+            'status': student.status,
+            'created_at': student.created_at.isoformat() if student.created_at else None,
+            'parent_name': student.parent.name if student.parent else None,
+            'parent_phone': student.parent.phone if student.parent else None,
+        },
+        'financial_summary': {
+            'total_paid': round(total_paid_cash, 2),
+            'total_debt': round(max(total_pending_debt, abs(balance_info['balance']) if balance_info['status'] == 'owes' else 0.0), 2),
+            'total_cost': round(balance_info['cost'], 2),
+            'balance': balance_info['balance'],
+            'balance_status': balance_info['status'],
+        },
+        'courses': courses,
+        'invoices': invoices,
+        'sessions_history': sessions_history[:150],
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def reports_teacher_detail(request, teacher_id):
+    """Comprehensive all-time report for one teacher: courses/groups taught,
+    sessions conducted, total earnings accrued, payouts received, and balance."""
+    user = request.user
+    tid = require_staff_tenant(user)
+    if not user.can_view('reports'):
+        raise PermissionDenied('Forbidden')
+
+    teacher = Teacher.objects.filter(id=teacher_id, tenant_id=tid).first()
+    if not teacher:
+        raise NotFound('Teacher not found')
+
+    # All groups taught by this teacher
+    groups = list(Group.objects.filter(tenant_id=tid, teacher_id=teacher_id).select_related('course'))
+    group_ids = [g.id for g in groups]
+
+    # Sessions conducted
+    sessions = list(ClassSession.objects.filter(
+        Q(teacher_id=teacher_id) | Q(group_id__in=group_ids),
+        tenant_id=tid,
+    ).select_related('course', 'group', 'room_ref').order_by('-start_at'))
+    session_ids = [s.id for s in sessions]
+
+    # Attendances for those sessions
+    attendances = list(Attendance.objects.filter(
+        tenant_id=tid,
+        session_id__in=session_ids
+    ).values('session_id', 'status'))
+
+    att_by_session = {}
+    for a in attendances:
+        sid = a['session_id']
+        if sid not in att_by_session:
+            att_by_session[sid] = {'present': 0, 'absent': 0, 'excused': 0}
+        if a['status'] in ('present', 'late'):
+            att_by_session[sid]['present'] += 1
+        elif a['status'] == 'absent':
+            att_by_session[sid]['absent'] += 1
+        elif a['status'] == 'excused':
+            att_by_session[sid]['excused'] += 1
+
+    # Payouts to this teacher
+    payouts = list(TeacherPayment.objects.filter(tenant_id=tid, teacher_id=teacher_id).order_by('-payment_date'))
+    total_paid_out = sum(float(p.amount or 0) for p in payouts)
+
+    # Earnings calculation
+    t_pct = float(teacher.payment_percentage or 0)
+    total_revenue_generated = 0.0
+    total_earned = 0.0
+
+    # Course pricing lookup
+    course_ids = {g.course_id for g in groups if g.course_id}
+    for s in sessions:
+        if s.course_id:
+            course_ids.add(s.course_id)
+    courses_dict = {c.id: c for c in Course.objects.filter(tenant_id=tid, id__in=course_ids)}
+
+    # Session earnings (regular courses)
+    for s in sessions:
+        cid = s.course_id or (s.group.course_id if s.group else None)
+        c = courses_dict.get(cid)
+        if not c:
+            continue
+        session_price = course_per_session_price(c.price, c.pricing_type, c.sessions_count)
+        pres_count = att_by_session.get(s.id, {}).get('present', 0)
+        session_rev = pres_count * session_price
+        total_revenue_generated += session_rev
+        if c.kind not in ('package', 'standalone'):
+            total_earned += session_rev * (t_pct / 100.0)
+
+    # Package/standalone earnings
+    package_items = PaymentItem.objects.filter(
+        payment__tenant_id=tid,
+        course__in=[c for c in courses_dict.values() if c.kind in ('package', 'standalone')],
+        status__in=('paid', 'partial', 'pending', 'pardoned')
+    )
+    for it in package_items:
+        it_rev = float(it.amount or 0)
+        total_revenue_generated += it_rev
+        pct = float(it.teacher_percentage if it.teacher_percentage is not None else t_pct)
+        total_earned += it_rev * (pct / 100.0)
+
+    # Groups summary
+    groups_data = []
+    for g in groups:
+        stu_count = g.students.count()
+        g_sessions_count = sum(1 for s in sessions if s.group_id == g.id)
+        groups_data.append({
+            'id': g.id,
+            'name': g.name,
+            'course_id': g.course_id,
+            'course_title': g.course.title if g.course else '—',
+            'students_count': stu_count,
+            'sessions_count': g_sessions_count,
+            'status': g.status,
+        })
+
+    # Sessions history list
+    sessions_data = []
+    for s in sessions[:120]:
+        att = att_by_session.get(s.id, {'present': 0, 'absent': 0, 'excused': 0})
+        sessions_data.append({
+            'id': s.id,
+            'title': s.title or (s.group.name if s.group else 'Session'),
+            'start_at': s.start_at.isoformat() if s.start_at else None,
+            'group_name': s.group.name if s.group else '—',
+            'course_title': s.course.title if s.course else (s.group.course.title if s.group and s.group.course else '—'),
+            'room_name': s.room_ref.name if s.room_ref else (s.room or '—'),
+            'present_count': att['present'],
+            'absent_count': att['absent'],
+            'status': s.status,
+        })
+
+    payouts_data = [{
+        'id': p.id,
+        'payment_date': p.payment_date.isoformat() if p.payment_date else None,
+        'amount': float(p.amount),
+        'method': p.method,
+        'notes': p.notes,
+        'created_at': p.created_at.isoformat() if p.created_at else None,
+    } for p in payouts]
+
+    balance_due = max(0.0, total_earned - total_paid_out)
+
+    return Response({
+        'teacher': {
+            'id': teacher.id,
+            'name': f"{teacher.first_name} {teacher.last_name}",
+            'phone': teacher.phone,
+            'email': teacher.email,
+            'subject': teacher.subject,
+            'payment_percentage': float(teacher.payment_percentage or 0),
+            'status': teacher.status,
+            'created_at': teacher.created_at.isoformat() if teacher.created_at else None,
+        },
+        'financial_summary': {
+            'total_revenue_generated': round(total_revenue_generated, 2),
+            'total_earned': round(total_earned, 2),
+            'total_paid_out': round(total_paid_out, 2),
+            'balance_due': round(balance_due, 2),
+        },
+        'groups': groups_data,
+        'sessions': sessions_data,
+        'payouts': payouts_data,
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def archive_overview(request):
+    """Returns archive structure: years and archived courses counts."""
+    user = request.user
+    tid = require_staff_tenant(user)
+    archived_courses = Course.objects.filter(tenant_id=tid, status='archived')
+
+    years_set = set()
+    counts = {}
+    for c in archived_courses:
+        y = c.archive_year or (c.updated_at.year if c.updated_at else 2026)
+        years_set.add(y)
+        counts[y] = counts.get(y, 0) + 1
+
+    years_set.add(2026)
+    if 2026 not in counts:
+        counts[2026] = 0
+
+    sorted_years = sorted(list(years_set), reverse=True)
+    return Response({
+        'years': sorted_years,
+        'counts': counts,
+    })
+
