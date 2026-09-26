@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, ShieldCheck, Trash2, Edit2, Info, Search, Calendar, User } from "lucide-react";
+import { Plus, ShieldCheck, Trash2, Edit2, Info, Search, Calendar, User, Phone, Layers } from "lucide-react";
 
 import { api, extractError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -135,8 +135,53 @@ export default function InsurancesPage() {
         </div>
       </div>
 
-      {/* Filter and KPI bar */}
-      <div className="surface-card p-4 mb-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+      {/* Top KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-4">
+        <div className="surface-card p-4 sm:p-5 flex items-center gap-3 border-blue-500/20 bg-blue-500/5">
+          <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 grid place-items-center flex-shrink-0">
+            <ShieldCheck className="w-5 h-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[11px] uppercase tracking-wider font-semibold text-blue-600/90 dark:text-blue-400/90">
+              {t("insurances.total_collected")}
+            </div>
+            <div className="font-mono font-bold text-xl sm:text-2xl text-blue-600 dark:text-blue-400 truncate" dir="ltr">
+              {(data?.total_amount || 0).toLocaleString()} {currency}
+            </div>
+          </div>
+        </div>
+
+        <div className="surface-card p-4 sm:p-5 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-muted text-muted-foreground grid place-items-center flex-shrink-0">
+            <User className="w-5 h-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">
+              {t("insurances.count")}
+            </div>
+            <div className="font-mono font-bold text-xl sm:text-2xl text-foreground">
+              {data?.total_count || items.length}
+            </div>
+          </div>
+        </div>
+
+        <div className="surface-card p-4 sm:p-5 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-muted text-muted-foreground grid place-items-center flex-shrink-0">
+            <Layers className="w-5 h-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">
+              {t("debts.avg_debt", "متوسط التأمين")}
+            </div>
+            <div className="font-mono font-bold text-xl sm:text-2xl text-foreground truncate" dir="ltr">
+              {(items.length > 0 ? Math.round((data?.total_amount || 0) / items.length) : 0).toLocaleString()} {currency}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Filter bar */}
+      <div className="surface-card p-4 mb-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Field label={t("crud.search")}>
           <div className="relative">
             <Search className="w-4 h-4 absolute start-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -162,29 +207,9 @@ export default function InsurancesPage() {
             onChange={(e) => setFilters({ ...filters, to: e.target.value })}
           />
         </Field>
-        <div className="flex items-end">
-          <div className="w-full rounded-lg bg-muted/40 px-3 py-2 flex items-center justify-between">
-            <div>
-              <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
-                {t("insurances.total_collected")}
-              </div>
-              <div className="font-mono font-bold text-lg text-foreground">
-                {(data?.total_amount || 0).toLocaleString()} {currency}
-              </div>
-            </div>
-            <div className="text-end">
-              <div className="text-[10px] uppercase tracking-widest text-muted-foreground">
-                {t("insurances.count")}
-              </div>
-              <div className="font-mono font-bold text-base text-foreground">
-                {data?.total_count || 0}
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
 
-      {/* Table */}
+      {/* Table & Mobile Cards */}
       <div className="surface-card overflow-hidden">
         {isLoading ? (
           <div className="p-4"><LoadingRows /></div>
@@ -200,78 +225,178 @@ export default function InsurancesPage() {
             )}
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[700px] text-sm">
-              <thead className="bg-muted/40 border-b border-border">
-                <tr>
-                  <th className="text-start px-4 py-2.5 font-medium text-xs uppercase tracking-widest text-muted-foreground">
-                    {t("insurances.paid_at")}
-                  </th>
-                  <th className="text-start px-4 py-2.5 font-medium text-xs uppercase tracking-widest text-muted-foreground">
-                    {t("insurances.student")}
-                  </th>
-                  <th className="text-start px-4 py-2.5 font-medium text-xs uppercase tracking-widest text-muted-foreground">
-                    {t("insurances.parent_name")}
-                  </th>
-                  <th className="text-start px-4 py-2.5 font-medium text-xs uppercase tracking-widest text-muted-foreground">
-                    {t("insurances.amount")}
-                  </th>
-                  <th className="text-start px-4 py-2.5 font-medium text-xs uppercase tracking-widest text-muted-foreground">
-                    {t("insurances.academic_year")}
-                  </th>
-                  <th className="text-start px-4 py-2.5 font-medium text-xs uppercase tracking-widest text-muted-foreground">
-                    {t("insurances.notes")}
-                  </th>
-                  {(canModify || canDelete) && <th className="w-24 px-4 py-2.5" />}
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((row) => (
-                  <tr
-                    key={row.id}
-                    className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors"
-                  >
-                    <td className="px-4 py-3 font-mono text-xs text-foreground">
-                      {row.paid_at}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-foreground flex items-center gap-1.5">
-                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                        {row.student_name || "—"}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground">
-                      <div>{row.parent_name || "—"}</div>
-                      {row.parent_phone && (
-                        <div className="font-mono text-[11px] text-foreground/70">{row.parent_phone}</div>
+          <>
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full min-w-[700px] text-sm">
+                <thead className="bg-muted/40 border-b border-border">
+                  <tr>
+                    <th className="text-start px-4 py-2.5 font-medium text-xs uppercase tracking-widest text-muted-foreground">
+                      {t("insurances.paid_at")}
+                    </th>
+                    <th className="text-start px-4 py-2.5 font-medium text-xs uppercase tracking-widest text-muted-foreground">
+                      {t("insurances.student")}
+                    </th>
+                    <th className="text-start px-4 py-2.5 font-medium text-xs uppercase tracking-widest text-muted-foreground">
+                      {t("insurances.parent_name")}
+                    </th>
+                    <th className="text-start px-4 py-2.5 font-medium text-xs uppercase tracking-widest text-muted-foreground">
+                      {t("insurances.amount")}
+                    </th>
+                    <th className="text-start px-4 py-2.5 font-medium text-xs uppercase tracking-widest text-muted-foreground">
+                      {t("insurances.academic_year")}
+                    </th>
+                    <th className="text-start px-4 py-2.5 font-medium text-xs uppercase tracking-widest text-muted-foreground">
+                      {t("insurances.notes")}
+                    </th>
+                    {(canModify || canDelete) && <th className="w-24 px-4 py-2.5" />}
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((row) => (
+                    <tr
+                      key={row.id}
+                      className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors"
+                    >
+                      <td className="px-4 py-3 font-mono text-xs text-foreground" dir="ltr">
+                        {row.paid_at}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-foreground flex items-center gap-1.5">
+                          <ShieldCheck className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                          {row.student_name || "—"}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">
+                        <div>{row.parent_name || "—"}</div>
+                        {row.parent_phone && (
+                          <a
+                            href={`tel:${row.parent_phone}`}
+                            className="font-mono text-[11px] text-primary hover:underline inline-flex items-center gap-1 mt-0.5"
+                            dir="ltr"
+                          >
+                            <Phone className="w-3 h-3" />
+                            {row.parent_phone}
+                          </a>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 font-mono font-semibold text-foreground" dir="ltr">
+                        {Number(row.amount).toLocaleString()} {currency}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground font-mono">
+                        {row.academic_year ? (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-muted text-foreground">
+                            {row.academic_year}
+                          </span>
+                        ) : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground max-w-[200px] truncate">
+                        {row.notes || "—"}
+                      </td>
+                      {(canModify || canDelete) && (
+                        <td className="px-4 py-3 text-end whitespace-nowrap">
+                          {canModify && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openEdit(row)}
+                              title={t("actions.edit")}
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </Button>
+                          )}
+                          {canDelete && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              onClick={async () => {
+                                if (await confirm({
+                                  title: t("insurances.delete_confirm"),
+                                  destructive: true,
+                                })) {
+                                  deleteMut.mutate(row.id);
+                                }
+                              }}
+                              title={t("actions.delete")}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          )}
+                        </td>
                       )}
-                    </td>
-                    <td className="px-4 py-3 font-mono font-semibold text-foreground">
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards Stack View */}
+            <div className="md:hidden divide-y divide-border">
+              {items.map((row) => (
+                <div key={row.id} className="p-4 space-y-2.5 hover:bg-muted/20 transition-colors">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-mono text-muted-foreground" dir="ltr">
+                      {row.paid_at}
+                    </span>
+                    {row.academic_year && (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-muted text-foreground font-mono">
+                        {row.academic_year}
+                      </span>
+                    )}
+                  </div>
+
+                  <div>
+                    <div className="font-semibold text-sm text-foreground flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4 text-blue-500 shrink-0" />
+                      <span>{row.student_name || "—"}</span>
+                    </div>
+                    {(row.parent_name || row.parent_phone) && (
+                      <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+                        {row.parent_name && <span>{row.parent_name}</span>}
+                        {row.parent_name && row.parent_phone && <span>•</span>}
+                        {row.parent_phone && (
+                          <a
+                            href={`tel:${row.parent_phone}`}
+                            className="text-primary font-mono hover:underline inline-flex items-center gap-1"
+                            dir="ltr"
+                          >
+                            <Phone className="w-3 h-3" />
+                            {row.parent_phone}
+                          </a>
+                        )}
+                      </div>
+                    )}
+                    {row.notes && (
+                      <div className="text-xs text-muted-foreground mt-1 leading-relaxed bg-muted/40 p-2 rounded">
+                        {row.notes}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="font-mono font-bold text-base text-foreground" dir="ltr">
                       {Number(row.amount).toLocaleString()} {currency}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground font-mono">
-                      {row.academic_year || "—"}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground max-w-[200px] truncate">
-                      {row.notes || "—"}
-                    </td>
+                    </span>
+
                     {(canModify || canDelete) && (
-                      <td className="px-4 py-3 text-end whitespace-nowrap">
+                      <div className="flex items-center gap-1">
                         {canModify && (
                           <Button
-                            variant="ghost"
+                            variant="outline"
                             size="sm"
+                            className="h-8 text-xs px-2.5"
                             onClick={() => openEdit(row)}
-                            title={t("actions.edit")}
                           >
-                            <Edit2 className="w-3.5 h-3.5" />
+                            <Edit2 className="w-3.5 h-3.5 me-1" />
+                            {t("actions.edit")}
                           </Button>
                         )}
                         {canDelete && (
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                            className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
                             onClick={async () => {
                               if (await confirm({
                                 title: t("insurances.delete_confirm"),
@@ -280,18 +405,17 @@ export default function InsurancesPage() {
                                 deleteMut.mutate(row.id);
                               }
                             }}
-                            title={t("actions.delete")}
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Trash2 className="w-4 h-4" />
                           </Button>
                         )}
-                      </td>
+                      </div>
                     )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
 

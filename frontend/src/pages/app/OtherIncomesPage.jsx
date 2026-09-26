@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus, Coins, Trash2, Info } from "lucide-react";
+import { Plus, Coins, Trash2, Edit2, TrendingUp, Layers, Info } from "lucide-react";
 
 import { api, extractError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -138,6 +138,9 @@ export default function OtherIncomesPage() {
   };
 
   const currency = tenant?.currency || "DZD";
+  const totalAmount = data?.total_amount || 0;
+  const count = items.length;
+  const avgAmount = count > 0 ? Math.round(totalAmount / count) : 0;
 
   return (
     <div>
@@ -166,7 +169,53 @@ export default function OtherIncomesPage() {
         <span>{t("other_incomes.school_revenue_note")}</span>
       </div>
 
-      <div className="surface-card p-4 mb-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+      {/* Top KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-4">
+        <div className="surface-card p-4 sm:p-5 flex items-center gap-3 border-emerald-500/20 bg-emerald-500/5">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 grid place-items-center flex-shrink-0">
+            <TrendingUp className="w-5 h-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[11px] uppercase tracking-wider font-semibold text-emerald-600/90 dark:text-emerald-400/90">
+              {t("other_incomes.total")}
+            </div>
+            <div className="font-mono font-bold text-xl sm:text-2xl text-emerald-600 dark:text-emerald-400 truncate" dir="ltr">
+              +{Number(totalAmount).toLocaleString()} {currency}
+            </div>
+          </div>
+        </div>
+
+        <div className="surface-card p-4 sm:p-5 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-muted text-muted-foreground grid place-items-center flex-shrink-0">
+            <Coins className="w-5 h-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">
+              {t("insurances.count", "العدد")}
+            </div>
+            <div className="font-mono font-bold text-xl sm:text-2xl text-foreground">
+              {count}
+            </div>
+          </div>
+        </div>
+
+        <div className="surface-card p-4 sm:p-5 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-muted text-muted-foreground grid place-items-center flex-shrink-0">
+            <Layers className="w-5 h-5" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">
+              {t("debts.avg_debt", "متوسط الإيراد")}
+            </div>
+            <div className="font-mono font-bold text-xl sm:text-2xl text-foreground truncate" dir="ltr">
+              +{avgAmount.toLocaleString()} {currency}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Filter Bar */}
+      <div className="surface-card p-4 mb-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Field label={t("reports.from")}>
           <Input type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
         </Field>
@@ -187,14 +236,6 @@ export default function OtherIncomesPage() {
             </SelectContent>
           </Select>
         </Field>
-        <div className="flex items-end">
-          <div className="w-full rounded-lg bg-emerald-500/10 border border-emerald-500/20 px-3 py-2">
-            <div className="text-[10px] uppercase tracking-widest text-emerald-600 dark:text-emerald-400 font-semibold">{t("other_incomes.total")}</div>
-            <div className="font-mono font-bold text-lg text-emerald-600 dark:text-emerald-400">
-              +{(data?.total_amount || 0).toLocaleString()} {currency}
-            </div>
-          </div>
-        </div>
       </div>
 
       <div className="surface-card overflow-hidden">
@@ -212,57 +253,126 @@ export default function OtherIncomesPage() {
             )}
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[680px] text-sm">
-              <thead className="bg-muted/40 border-b border-border">
-                <tr>
-                  {["field.received_at", "field.title", "field.category", "field.amount", "field.method"].map((k) => (
-                    <th key={k} className="text-start px-4 py-2.5 font-medium text-xs uppercase tracking-widest text-muted-foreground">
-                      {t(k)}
-                    </th>
+          <>
+            {/* Desktop Table View */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full min-w-[680px] text-sm">
+                <thead className="bg-muted/40 border-b border-border">
+                  <tr>
+                    {["field.received_at", "field.title", "field.category", "field.amount", "field.method"].map((k) => (
+                      <th key={k} className="text-start px-4 py-2.5 font-medium text-xs uppercase tracking-widest text-muted-foreground">
+                        {t(k)}
+                      </th>
+                    ))}
+                    {(canModify || canDelete) && <th className="w-24" />}
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((row) => (
+                    <tr key={row.id} className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors">
+                      <td className="px-4 py-3 font-mono text-xs" dir="ltr">{row.received_at}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-foreground">{row.title}</div>
+                        {row.notes && <div className="text-[11px] text-muted-foreground mt-0.5">{row.notes}</div>}
+                      </td>
+                      <td className="px-4 py-3 text-xs">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-muted text-foreground">
+                          {otherIncomeCategoryLabel({ key: row.category_key, name: row.category_name }, t)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-mono font-semibold text-emerald-600 dark:text-emerald-400" dir="ltr">
+                        +{Number(row.amount).toLocaleString()} {currency}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">{t(`method.${row.method}`)}</td>
+                      {(canModify || canDelete) && (
+                        <td className="px-4 py-3 text-end whitespace-nowrap">
+                          {canModify && (
+                            <Button variant="ghost" size="sm" onClick={() => openEdit(row)}>{t("actions.edit")}</Button>
+                          )}
+                          {canDelete && (
+                            <Button
+                              variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              onClick={async () => {
+                                if (await confirm({ title: t("confirm.delete_record"), destructive: true })) {
+                                  deleteMut.mutate(row.id);
+                                }
+                              }}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          )}
+                        </td>
+                      )}
+                    </tr>
                   ))}
-                  {(canModify || canDelete) && <th className="w-24" />}
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((row) => (
-                  <tr key={row.id} className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors">
-                    <td className="px-4 py-3 font-mono text-xs">{row.received_at}</td>
-                    <td className="px-4 py-3">
-                      <div className="font-medium">{row.title}</div>
-                      {row.notes && <div className="text-[11px] text-muted-foreground">{row.notes}</div>}
-                    </td>
-                    <td className="px-4 py-3 text-xs">
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile Cards Stack View */}
+            <div className="md:hidden divide-y divide-border">
+              {items.map((row) => (
+                <div key={row.id} className="p-4 space-y-2.5 hover:bg-muted/20 transition-colors">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-mono text-muted-foreground" dir="ltr">
+                      {row.received_at}
+                    </span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-muted text-foreground">
                       {otherIncomeCategoryLabel({ key: row.category_key, name: row.category_name }, t)}
-                    </td>
-                    <td className="px-4 py-3 font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                      +{Number(row.amount).toLocaleString()} {currency}
-                    </td>
-                    <td className="px-4 py-3 text-xs">{t(`method.${row.method}`)}</td>
+                    </span>
+                  </div>
+
+                  <div>
+                    <div className="font-semibold text-sm text-foreground">{row.title}</div>
+                    {row.notes && (
+                      <div className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{row.notes}</div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1">
+                    <div className="flex items-baseline gap-2">
+                      <span className="font-mono font-bold text-base text-emerald-600 dark:text-emerald-400" dir="ltr">
+                        +{Number(row.amount).toLocaleString()} {currency}
+                      </span>
+                      <span className="text-[11px] text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded">
+                        {t(`method.${row.method}`)}
+                      </span>
+                    </div>
+
                     {(canModify || canDelete) && (
-                      <td className="px-4 py-3 text-end whitespace-nowrap">
+                      <div className="flex items-center gap-1">
                         {canModify && (
-                          <Button variant="ghost" size="sm" onClick={() => openEdit(row)}>{t("actions.edit")}</Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 text-xs px-2.5"
+                            onClick={() => openEdit(row)}
+                          >
+                            <Edit2 className="w-3.5 h-3.5 me-1" />
+                            {t("actions.edit")}
+                          </Button>
                         )}
                         {canDelete && (
                           <Button
-                            variant="ghost" size="sm" className="text-destructive"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
                             onClick={async () => {
                               if (await confirm({ title: t("confirm.delete_record"), destructive: true })) {
                                 deleteMut.mutate(row.id);
                               }
                             }}
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Trash2 className="w-4 h-4" />
                           </Button>
                         )}
-                      </td>
+                      </div>
                     )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
 
