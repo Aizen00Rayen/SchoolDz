@@ -44,6 +44,7 @@ import { AuthProvider, useAuth } from "@/lib/auth";
 import { I18nProvider } from "@/lib/i18n";
 import { ThemeProvider } from "@/lib/theme";
 import { ConfirmProvider } from "@/lib/confirm";
+import { getDefaultAppPath } from "@/lib/permissions";
 
 import LandingPage from "@/pages/marketing/LandingPage";
 import PricingPage from "@/pages/marketing/PricingPage";
@@ -151,6 +152,13 @@ function RequirePortalAccess({ children }) {
   return children;
 }
 
+function AppIndexRedirect() {
+  const { user, tenant, loading } = useAuth();
+  if (loading) return null;
+  if (!user) return <Navigate to="/login" replace />;
+  return <Navigate to={getDefaultAppPath(user, tenant)} replace />;
+}
+
 function App() {
   return (
     <ErrorBoundary>
@@ -206,7 +214,7 @@ function App() {
                       </RequireActiveTenant>
                     }
                   >
-                    <Route index element={<Navigate to="dashboard" replace />} />
+                    <Route index element={<AppIndexRedirect />} />
                     <Route path="dashboard" element={<DashboardPage />} />
                     <Route path="master-dashboard" element={<MasterDashboardPage />} />
                     <Route path="students" element={<StudentsPage />} />

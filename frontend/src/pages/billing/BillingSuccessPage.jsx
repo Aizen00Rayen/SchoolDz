@@ -35,7 +35,7 @@ export default function BillingSuccessPage() {
         if (data.status === "paid") {
           setStatus("paid");
           await refreshTenant();
-          setTimeout(() => nav("/app/dashboard", { replace: true }), 1200);
+          setTimeout(() => nav("/app", { replace: true }), 1200);
           return;
         }
         if (data.status === "failed" || data.status === "expired") {

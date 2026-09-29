@@ -823,3 +823,46 @@ class ReportsAndArchiveTestCase(SimpleTestCase):
         self.assertIn('received_at', str(q1))
         self.assertIn('received_at', str(q2))
 
+    def test_dashboard_permission_enforcement(self):
+        from .models import User
+        from .views import dashboard_summary
+        from rest_framework.exceptions import PermissionDenied
+        from unittest.mock import MagicMock, patch
+
+        # 1. Staff user without dashboard permission
+        u_restricted = User(
+            name="Restricted Secretary",
+            email="sec@test.com",
+            role="secretary",
+            permissions={"dashboard": {}, "students": {"view": True}}
+        )
+        self.assertFalse(u_restricted.can_view("dashboard"))
+        self.assertTrue(u_restricted.can_view("students"))
+
+        # 2. Staff user with dashboard permission
+        u_allowed = User(
+            name="Allowed Accountant",
+            email="acc@test.com",
+            role="accountant",
+            permissions={"dashboard": {"view": True}}
+        )
+        self.assertTrue(u_allowed.can_view("dashboard"))
+
+        # 3. Owner user always has dashboard access
+        u_owner = User(
+            name="School Owner",
+            email="owner@test.com",
+            role="owner",
+            permissions={}
+        )
+        self.assertTrue(u_owner.can_view("dashboard"))
+
+        # 4. View call raises PermissionDenied for restricted user
+        from rest_framework.test import APIRequestFactory, force_authenticate
+        factory = APIRequestFactory()
+        request = factory.get('/api/v1/dashboard/summary')
+        force_authenticate(request, user=u_restricted)
+        with patch('api.views.require_staff_tenant', return_value='t1'):
+            response = dashboard_summary(request)
+            self.assertEqual(response.status_code, 403)
+

@@ -129,7 +129,7 @@ export function AuthProvider({ children }) {
    * would be both fragile (easy to miss a page) and no faster in practice. */
   const switchTenant = async (tenantId) => {
     await api.post("/auth/switch-tenant", { tenant_id: tenantId });
-    window.location.href = "/app/dashboard";
+    window.location.href = "/app";
   };
 
   /** Adds another school under this same login and immediately switches to
@@ -137,7 +137,7 @@ export function AuthProvider({ children }) {
    * billing gate for the new, unpaid school via the same hard navigation. */
   const createSchool = async (payload) => {
     const { data } = await api.post("/owner/schools/new", payload);
-    window.location.href = "/app/dashboard";
+    window.location.href = "/app";
     return data;
   };
 

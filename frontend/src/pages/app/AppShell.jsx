@@ -13,7 +13,7 @@ import { useI18n } from "@/lib/i18n";
 import { useTheme, useTenantBranding } from "@/lib/theme";
 import { APPUI, AUTH } from "@/constants/testIds";
 import { api, resolveFileUrl } from "@/lib/api";
-import { canViewModule } from "@/lib/permissions";
+import { canViewModule, isNavItemAllowed, getDefaultAppPath } from "@/lib/permissions";
 import { Field } from "./_shared";
 
 import { Button } from "@/components/ui/button";
@@ -265,7 +265,7 @@ export default function AppShell() {
       grade: `/app/grades`,
       user: `/app/users`,
     };
-    nav(map[r.type] || "/app/dashboard");
+    nav(map[r.type] || getDefaultAppPath(user, tenant));
   };
 
   return (
@@ -410,12 +410,7 @@ export default function AppShell() {
 
         <nav className="flex-1 p-3 overflow-y-auto">
           {NAV_GROUPS.map((group) => {
-            const items = group.items.filter((n) =>
-              (!n.adminOnly || isAdmin) &&
-              (!n.premiumOnly || isPremium) &&
-              (!n.standardPlusOnly || isStandardPlus) &&
-              (!n.module || canViewModule(user, n.module))
-            );
+            const items = group.items.filter((n) => isNavItemAllowed(n, user, tenant));
             if (items.length === 0) return null;
             // A section marked collapsed still shows itself expanded while
             // the current page lives inside it — minimizing "Finance" should

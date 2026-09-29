@@ -2145,6 +2145,9 @@ def apply_remote_status(checkout, remote_status):
 def dashboard_summary(request):
     tid = require_staff_tenant(request.user)
 
+    if not request.user.is_super_admin() and not request.user.can_view('dashboard'):
+        raise PermissionDenied("You do not have permission to view the dashboard.")
+
     now = timezone.now()
     # Today range in local time or simple date comparison
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
 import {
   ResponsiveContainer, ComposedChart, Area, Line, Tooltip, XAxis, YAxis, CartesianGrid, Legend,
 } from "recharts";
@@ -12,6 +12,7 @@ import {
 import { api, extractError } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
+import { canViewModule, getDefaultAppPath } from "@/lib/permissions";
 import { APPUI } from "@/constants/testIds";
 import { PageHeader, StatusPill, paymentKindLabel } from "./_shared";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -39,10 +40,17 @@ function money(v, currency) {
 export default function DashboardPage() {
   const { t } = useI18n();
   const { tenant, user } = useAuth();
+  const canView = !user || canViewModule(user, "dashboard");
+
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["dashboard"],
     queryFn: async () => (await api.get("/dashboard/summary")).data,
+    enabled: canView,
   });
+
+  if (user && !canViewModule(user, "dashboard")) {
+    return <Navigate to={getDefaultAppPath(user, tenant)} replace />;
+  }
 
   const kpis = data?.kpis || {};
   const alerts = data?.financial_alerts || {};
