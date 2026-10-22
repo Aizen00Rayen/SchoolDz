@@ -19,6 +19,9 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { PageHeader, EmptyState, LoadingRows, Field } from "./_shared";
+import { currencyLabel } from "@/lib/format";
+import { DateInput } from "@/components/DateInput";
+import { Amount } from "@/components/Amount";
 
 export default function DebtsPage() {
   const { t } = useI18n();
@@ -30,7 +33,7 @@ export default function DebtsPage() {
   const confirm = useConfirm();
   const qc = useQueryClient();
   const [q, setQ] = useState("");
-  const currency = tenant?.currency || "DZD";
+  const currency = currencyLabel(tenant?.currency);
 
   // Settle Debt Modal State
   const [payRow, setPayRow] = useState(null);
@@ -155,8 +158,8 @@ export default function DebtsPage() {
             <div className="text-[11px] uppercase tracking-wider font-semibold text-destructive/90">
               {t("debts.total_owed", "مجموع الديون")}
             </div>
-            <div className="font-mono font-bold text-xl sm:text-2xl text-destructive truncate">
-              {Math.round(totalOwed).toLocaleString()} {currency}
+            <div className="font-mono font-bold text-xl sm:text-2xl text-destructive leading-tight">
+              <Amount value={totalOwed} currency={currency} />
             </div>
           </div>
         </div>
@@ -169,8 +172,8 @@ export default function DebtsPage() {
             <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">
               {t("debts.avg_debt", "متوسط الدين")}
             </div>
-            <div className="font-mono font-bold text-xl sm:text-2xl text-foreground truncate">
-              {avgOwed.toLocaleString()} {currency}
+            <div className="font-mono font-bold text-xl sm:text-2xl text-foreground leading-tight">
+              <Amount value={avgOwed} currency={currency} />
             </div>
           </div>
         </div>
@@ -188,7 +191,7 @@ export default function DebtsPage() {
             data-testid="debts-search-input"
           />
           {q && (
-            <button
+            <button aria-label={t("a11y.clear")} title={t("a11y.clear")}
               onClick={() => setQ("")}
               className="absolute end-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-1"
             >
@@ -272,7 +275,7 @@ export default function DebtsPage() {
                           </Button>
                         )}
                         {canDelete && (
-                          <Button
+                          <Button aria-label={t("actions.delete")}
                             size="icon"
                             variant="ghost"
                             onClick={() => deleteDebt(row)}
@@ -349,7 +352,7 @@ export default function DebtsPage() {
                                 </Button>
                               )}
                               {canDelete && (
-                                <Button
+                                <Button aria-label={t("actions.delete")}
                                   size="icon"
                                   variant="ghost"
                                   onClick={() => deleteDebt(row)}
@@ -440,8 +443,7 @@ export default function DebtsPage() {
               </Field>
 
               <Field label={t("debts.pay_date")} required>
-                <Input
-                  type="date"
+                <DateInput
                   value={payDate}
                   onChange={(e) => setPayDate(e.target.value)}
                   required

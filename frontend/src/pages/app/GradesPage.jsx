@@ -9,6 +9,8 @@ import {
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
+import { DateInput } from "@/components/DateInput";
+import { formatDate } from "@/lib/format";
 
 const DEFAULT_FORM = {
   student_id: "", course_id: "", title: "", score: 0, max_score: 100,
@@ -57,7 +59,7 @@ export default function GradesPage() {
           key: "score", label: t("field.score"),
           render: (r) => <span className="font-mono">{r.score} / {r.max_score}</span>,
         },
-        { key: "date", label: t("field.date"), render: (r) => <span className="font-mono text-xs">{(r.date || "").slice(0, 10)}</span> },
+        { key: "date", label: t("field.date"), render: (r) => <span className="font-mono text-xs">{formatDate(r.date, "short")}</span> },
       ]}
       renderForm={(form, setForm) => (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -93,7 +95,7 @@ export default function GradesPage() {
             <Input type="number" value={form.max_score ?? 100} onChange={(e) => setForm({ ...form, max_score: parseFloat(e.target.value) || 0 })} />
           </Field>
           <Field label={t("field.date")} required>
-            <Input type="date" value={(form.date || "").slice(0, 10)} onChange={(e) => setForm({ ...form, date: e.target.value })} required />
+            <DateInput value={(form.date || "").slice(0, 10)} onChange={(e) => setForm({ ...form, date: e.target.value })} required />
           </Field>
         </div>
       )}

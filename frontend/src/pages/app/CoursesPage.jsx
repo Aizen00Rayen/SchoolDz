@@ -16,6 +16,7 @@ import { useConfirm } from "@/lib/confirm";
 import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
+import { currencyLabel } from "@/lib/format";
 
 const DEFAULT_FORM = {
   title: "", description: "", category: "", pricing_type: "fixed_sessions", sessions_count: 12, price: 0,
@@ -68,7 +69,7 @@ export default function CoursesPage() {
       defaultForm={DEFAULT_FORM}
       renderRowActions={(row) => (
         canModify && (
-          <Button
+          <Button aria-label={t("archive.archive_course", "أرشفة الدورة")}
             size="icon"
             variant="ghost"
             onClick={() => handleArchive(row)}
@@ -102,7 +103,7 @@ export default function CoursesPage() {
           key: "price", label: t("field.price"),
           render: (r) => (
             <span className="font-mono">
-              {r.price?.toLocaleString?.() || 0} {tenant?.currency || "DZD"}
+              {r.price?.toLocaleString?.() || 0} {currencyLabel(tenant?.currency)}
             </span>
           ),
         },

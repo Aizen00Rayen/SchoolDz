@@ -154,14 +154,14 @@ function GalleryLightbox({ photos, index, onClose, onNav }) {
         </AnimatePresence>
         {photos.length > 1 && (
           <>
-            <Button
+            <Button aria-label={t("a11y.previous")} title={t("a11y.previous")}
               type="button" size="icon" variant="secondary"
               className="absolute left-2 top-1/2 -translate-y-1/2 rounded-full"
               onClick={() => onNav(-1)}
             >
               <ChevronLeft className="w-4 h-4" />
             </Button>
-            <Button
+            <Button aria-label={t("a11y.next")} title={t("a11y.next")}
               type="button" size="icon" variant="secondary"
               className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full"
               onClick={() => onNav(1)}

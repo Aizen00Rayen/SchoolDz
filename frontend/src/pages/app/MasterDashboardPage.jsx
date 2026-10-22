@@ -7,10 +7,13 @@ import { Building2, GaugeCircle, GraduationCap, Users, Wallet } from "lucide-rea
 import { api } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
-import { PageHeader, EmptyState, LoadingRows } from "./_shared";
+import { PageHeader, EmptyState, LoadingRows, FilterPanel } from "./_shared";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { currencyLabel } from "@/lib/format";
+import { DateInput } from "@/components/DateInput";
+import { Amount } from "@/components/Amount";
 
 const KPI_CONFIG = [
   { key: "schools_total", tKey: "master.schools", icon: Building2 },
@@ -43,7 +46,7 @@ export default function MasterDashboardPage() {
     enabled: myTenants.length > 1 && !dateRangeInvalid,
   });
 
-  const currency = tenant?.currency || "DZD";
+  const currency = currencyLabel(tenant?.currency);
   const kpis = data?.kpis || {};
   const schools = data?.schools || [];
 
@@ -77,15 +80,15 @@ export default function MasterDashboardPage() {
     <div>
       <PageHeader title={t("workspace.master_dashboard")} subtitle={t("master.subtitle")} />
 
-      <div className="surface-card p-4 mb-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <FilterPanel className="grid grid-cols-1 sm:grid-cols-2 gap-4" activeCount={Object.values(filters).filter(Boolean).length}>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <Label className="text-xs font-medium mb-1.5 block">{t("reports.from")}</Label>
-            <Input type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
+            <DateInput value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
           </div>
           <div>
             <Label className="text-xs font-medium mb-1.5 block">{t("reports.to")}</Label>
-            <Input type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
+            <DateInput value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
           </div>
           {dateRangeInvalid && (
             <div className="col-span-2 text-xs text-destructive">{t("master.invalid_date_range")}</div>
@@ -102,7 +105,7 @@ export default function MasterDashboardPage() {
             ))}
           </div>
         </div>
-      </div>
+      </FilterPanel>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
         {KPI_CONFIG.map((k, i) => (
@@ -119,11 +122,11 @@ export default function MasterDashboardPage() {
               <div className="text-[10px] sm:text-xs uppercase tracking-widest font-bold text-muted-foreground">
                 {t(k.tKey)}
               </div>
-              <div className="font-mono text-xl sm:text-2xl lg:text-3xl font-bold mt-1 truncate">
+              <div className="font-mono text-xl sm:text-2xl lg:text-3xl font-bold mt-1 leading-tight">
                 {isLoading
                   ? "—"
                   : k.format === "currency"
-                    ? `${Math.round(kpis[k.key] || 0).toLocaleString()} ${currency}`
+                    ? <Amount value={kpis[k.key] || 0} currency={currency} />
                     : (kpis[k.key] ?? 0).toLocaleString()}
               </div>
             </div>

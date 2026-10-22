@@ -24,6 +24,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { StatusPill, isoToLocalInput, localInputToIso } from "@/pages/app/_shared";
+import { formatDate } from "@/lib/format";
 
 const COUPON_PLANS = ["basic", "standard", "premium"];
 const EMPTY_COUPON_FORM = {
@@ -136,7 +137,7 @@ export default function AdminDashboardPage() {
     onSuccess: (updated) => {
       toast.success(
         updated?.plan_expires_at
-          ? `Subscription updated — expires ${new Date(updated.plan_expires_at).toLocaleDateString()}`
+          ? `Subscription updated — expires ${formatDate(updated.plan_expires_at, "short")}`
           : "Subscription updated",
       );
       qc.invalidateQueries({ queryKey: ["admin-platform"] });
@@ -537,7 +538,7 @@ export default function AdminDashboardPage() {
                           return (
                             <div>
                               <div className="font-mono">
-                                {new Date(tt.plan_expires_at).toLocaleDateString()}
+                                {formatDate(tt.plan_expires_at, "short")}
                               </div>
                               <div className={`text-[10px] ${tone}`}>
                                 {days < 0 ? `${Math.abs(days)}d overdue` : `${days}d left`}
@@ -549,7 +550,7 @@ export default function AdminDashboardPage() {
                       <td className="px-4 py-3 font-mono text-xs">{tt.users_count ?? 0}</td>
                       <td className="px-4 py-3 font-mono text-xs">{tt.students_count ?? 0}</td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">
-                        {new Date(tt.created_at).toLocaleDateString()}
+                        {formatDate(tt.created_at, "short")}
                       </td>
                       <td className="px-4 py-2 text-end">
                         <div className="inline-flex items-center gap-1">
@@ -592,7 +593,7 @@ export default function AdminDashboardPage() {
                               {t("admin.actions.activate")}
                             </Button>
                           )}
-                          <Button
+                          <Button aria-label={t("actions.delete")} title={t("actions.delete")}
                             size="icon" variant="ghost"
                             onClick={async () => {
                               if (await confirm({
@@ -693,7 +694,7 @@ export default function AdminDashboardPage() {
                               {t("admin.actions.pause")}
                             </Button>
                           )}
-                          <Button
+                          <Button aria-label={t("actions.edit")} title={t("actions.edit")}
                             size="icon" variant="ghost"
                             onClick={() => openEdit(u)}
                             data-testid={`admin-user-edit-${u.id}`}
@@ -701,7 +702,7 @@ export default function AdminDashboardPage() {
                           >
                             <Pencil className="w-3.5 h-3.5" />
                           </Button>
-                          <Button
+                          <Button aria-label={t("actions.delete")} title={t("actions.delete")}
                             size="icon" variant="ghost"
                             onClick={async () => {
                               if (await confirm({
@@ -793,9 +794,9 @@ export default function AdminDashboardPage() {
                       <td className="px-4 py-3 text-xs text-muted-foreground">
                         {c.starts_at || c.expires_at ? (
                           <>
-                            {c.starts_at ? new Date(c.starts_at).toLocaleDateString() : "…"}
+                            {c.starts_at ? formatDate(c.starts_at, "short") : "…"}
                             {" → "}
-                            {c.expires_at ? new Date(c.expires_at).toLocaleDateString() : "…"}
+                            {c.expires_at ? formatDate(c.expires_at, "short") : "…"}
                           </>
                         ) : (
                           "Always"
@@ -821,10 +822,10 @@ export default function AdminDashboardPage() {
                               <Power className="w-3 h-3 me-1" /> Enable
                             </Button>
                           )}
-                          <Button size="icon" variant="ghost" onClick={() => openEditCoupon(c)} className="h-8 w-8">
+                          <Button aria-label={t("actions.edit")} title={t("actions.edit")} size="icon" variant="ghost" onClick={() => openEditCoupon(c)} className="h-8 w-8">
                             <Pencil className="w-3.5 h-3.5" />
                           </Button>
-                          <Button
+                          <Button aria-label={t("actions.delete")} title={t("actions.delete")}
                             size="icon" variant="ghost"
                             onClick={async () => {
                               if (await confirm({ title: `Delete coupon ${c.code}?`, confirmLabel: "Delete", destructive: true })) {
@@ -1161,7 +1162,7 @@ export default function AdminDashboardPage() {
               {subTenant?.name} — currently{" "}
               <span className="font-medium capitalize">{subTenant?.plan || "no plan"}</span>
               {subTenant?.plan_expires_at
-                ? `, expiring ${new Date(subTenant.plan_expires_at).toLocaleDateString()}`
+                ? `, expiring ${formatDate(subTenant.plan_expires_at, "short")}`
                 : ", no expiry set"}
             </DialogDescription>
           </DialogHeader>

@@ -9,7 +9,9 @@ import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { PageHeader, EmptyState, LoadingRows, Field } from "./_shared";
+import { PageHeader, EmptyState, LoadingRows, Field, FilterPanel } from "./_shared";
+import { DateInput } from "@/components/DateInput";
+import { formatDateTime } from "@/lib/format";
 
 const CATEGORIES = ["auth", "data", "security", "billing"];
 
@@ -45,12 +47,12 @@ export default function LogsPage() {
         }
       />
 
-      <div className="surface-card p-4 mb-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+      <FilterPanel className="grid grid-cols-1 md:grid-cols-4 gap-3" activeCount={Object.values(filters).filter(Boolean).length}>
         <Field label={t("reports.from")}>
-          <Input type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
+          <DateInput value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
         </Field>
         <Field label={t("reports.to")}>
-          <Input type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
+          <DateInput value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
         </Field>
         <Field label={t("logs.category")}>
           <Select
@@ -69,7 +71,7 @@ export default function LogsPage() {
         <Field label={t("actions.search")}>
           <Input value={filters.q} onChange={(e) => setFilters({ ...filters, q: e.target.value })} data-testid="logs-search" />
         </Field>
-      </div>
+      </FilterPanel>
 
       <div className="surface-card overflow-hidden">
         {isLoading ? (
@@ -92,7 +94,7 @@ export default function LogsPage() {
                 {items.map((l) => (
                   <tr key={l.id} className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors">
                     <td className="px-4 py-3 font-mono text-[11px] whitespace-nowrap">
-                      {new Date(l.created_at).toLocaleString()}
+                      {formatDateTime(l.created_at)}
                     </td>
                     <td className="px-4 py-3">{l.user_label || "—"}</td>
                     <td className="px-4 py-3">

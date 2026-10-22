@@ -17,6 +17,7 @@ import { APPUI } from "@/constants/testIds";
 import { PageHeader, StatusPill, paymentKindLabel } from "./_shared";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { currencyLabel, formatDate, formatMoney, formatNumber, formatTime } from "@/lib/format";
 
 const KPI_CONFIG = [
   { key: "students_total", tKey: "kpi.students", icon: GraduationCap, tone: "default" },
@@ -27,14 +28,14 @@ const KPI_CONFIG = [
   { key: "sessions_today", tKey: "kpi.sessions_today", icon: Clock, tone: "default" },
 ];
 
-function formatValue(k, v, currency) {
-  if (k.format === "currency") return `${Math.round(v || 0).toLocaleString()} ${currency || "DZD"}`;
+function formatValue(k, v, currency, compact = false) {
+  if (k.format === "currency") return formatMoney(v, currency, { compact });
   if (k.format === "percent") return `${v}%`;
-  return v?.toLocaleString?.() ?? v;
+  return formatNumber(v);
 }
 
 function money(v, currency) {
-  return `${Math.round(v || 0).toLocaleString()} ${currency || "DZD"}`;
+  return formatMoney(v, currency);
 }
 
 export default function DashboardPage() {
@@ -71,9 +72,7 @@ export default function DashboardPage() {
     <div>
       <PageHeader
         title={`${t("dashboard.title")} — ${tenant?.name || ""}`}
-        subtitle={`${t("dashboard.today")} · ${new Date().toLocaleDateString(undefined, {
-          weekday: "long", year: "numeric", month: "long", day: "numeric",
-        })}`}
+        subtitle={`${t("dashboard.today")} · ${formatDate(new Date(), "long")}`}
         actions={
           <span className="hidden sm:inline-block max-w-full truncate text-xs px-3 py-1.5 rounded-full border border-border bg-card text-muted-foreground font-mono">
             {user?.email}
@@ -161,8 +160,13 @@ export default function DashboardPage() {
               }`}>
                 {t(k.tKey)}
               </div>
-              <div className="font-mono text-xl sm:text-2xl lg:text-3xl font-bold sm:mt-1 truncate">
-                {isLoading ? <Skeleton className="h-8 w-24" /> : formatValue(k, kpis[k.key], tenant?.currency)}
+              {/* Long amounts switch to a compact form (1.25M) instead of
+                  being cut off; the exact value is in the tooltip. */}
+              <div
+                className="font-mono text-xl sm:text-2xl font-bold sm:mt-1 break-words leading-tight"
+                title={isLoading ? undefined : formatValue(k, kpis[k.key], currency)}
+              >
+                {isLoading ? <Skeleton className="h-8 w-24" /> : formatValue(k, kpis[k.key], currency, true)}
               </div>
             </div>
           </motion.div>
@@ -194,8 +198,12 @@ export default function DashboardPage() {
                     </linearGradient>
                   </defs>
                   <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="month" stroke="hsl(var(--muted-foreground))" fontSize={11} />
-                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} />
+                  <XAxis dataKey="month" tickFormatter={(m, i) => {
+                    const p = data.revenue_trend[i];
+                    return p?.month_start ? formatDate(p.month_start, "month") : m;
+                  }} stroke="hsl(var(--muted-foreground))" fontSize={11} />
+                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={11} width={52}
+                         tickFormatter={(v) => formatNumber(v >= 1000 ? Math.round(v / 1000) : v) + (v >= 1000 ? "k" : "")} />
                   <Tooltip
                     contentStyle={{
                       background: "hsl(var(--popover))",
@@ -235,9 +243,9 @@ export default function DashboardPage() {
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-medium truncate">{s.topic || t("menu.sessions")}</div>
                   <div className="text-[11px] font-mono text-muted-foreground">
-                    {new Date(s.start_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    {formatTime(s.start_at)}
                     {" → "}
-                    {new Date(s.end_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    {formatTime(s.end_at)}
                   </div>
                 </div>
                 <StatusPill status={s.status} />
@@ -326,7 +334,7 @@ export default function DashboardPage() {
                   <div className="text-sm font-mono font-semibold">
                     {/* Net of discount — see PaymentsPage's Amount column
                        for why the raw amount alone is misleading. */}
-                    {Math.round(Math.max(0, p.amount - (p.discount || 0))).toLocaleString()} {tenant?.currency || "DZD"}
+                    {Math.round(Math.max(0, p.amount - (p.discount || 0))).toLocaleString()} {currencyLabel(tenant?.currency)}
                   </div>
                   <StatusPill status={p.status} />
                 </div>

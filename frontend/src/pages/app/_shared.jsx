@@ -6,7 +6,7 @@ import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek, eachDayOfInterval,
   isSameMonth, isToday, format, addMonths, subMonths, addWeeks, subWeeks,
 } from "date-fns";
-import { ChevronLeft, ChevronRight, Copy, Download, Repeat, Send, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Copy, Download, Plus, Repeat, Send, SlidersHorizontal, X } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,7 @@ import { api, extractError, downloadExport } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useDateLocale } from "@/lib/dateLocale";
 import { SCHOOL_LEVELS, SCHOOL_LEVEL_YEAR_COUNT, specialtiesFor } from "@/lib/schoolLevels";
+import { formatDateTime } from "@/lib/format";
 
 export function Field({ label, required, children }) {
   return (
@@ -256,7 +257,7 @@ export function StudentSearchSelect({ value, onChange, placeholder }) {
     return (
       <div className="flex items-center gap-2 h-10 px-3 rounded-lg border border-border bg-background text-sm">
         <span className="flex-1 truncate font-medium">{label}</span>
-        <button type="button" onClick={clear} className="text-muted-foreground hover:text-destructive flex-shrink-0">
+        <button aria-label={t("a11y.clear")} title={t("a11y.clear")} type="button" onClick={clear} className="text-muted-foreground hover:text-destructive flex-shrink-0">
           <X className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -324,6 +325,54 @@ export function PageHeader({ title, subtitle, actions }) {
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
+  );
+}
+
+/** Filter fields that fold behind a "Filters" button on phones, so the
+ * numbers aren't pushed a whole screen down. Always open from md up. */
+export function FilterPanel({ children, className = "", activeCount = 0 }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mb-4">
+      <Button
+        type="button" variant="outline" size="sm"
+        className="md:hidden w-full justify-between mb-2 h-10"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        data-testid="filters-toggle"
+      >
+        <span className="flex items-center gap-2">
+          <SlidersHorizontal className="w-4 h-4" />
+          {t("actions.filters")}
+          {activeCount > 0 && (
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-accent text-accent-foreground">{activeCount}</span>
+          )}
+        </span>
+        <ChevronDown className={`w-4 h-4 transition-transform ${open ? "rotate-180" : ""}`} />
+      </Button>
+      <div className={open ? "block" : "hidden md:block"}>
+        <div className={`surface-card p-4 ${className}`}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+/** The page's main action as a round button pinned to the bottom corner on
+ * phones, where the header button scrolls out of reach. Hidden from md up. */
+export function MobileFab({ onClick, label, icon: Icon = Plus, testId }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      data-testid={testId}
+      className="md:hidden fixed bottom-5 end-5 z-40 h-14 w-14 rounded-full shadow-lg grid place-items-center bg-accent text-accent-foreground hover:bg-accent/90 active:scale-95 transition-transform"
+      style={{ marginBottom: "env(safe-area-inset-bottom)" }}
+    >
+      <Icon className="w-6 h-6" />
+    </button>
   );
 }
 
@@ -421,7 +470,7 @@ export function InviteButton({ person, endpoint, invalidateKey, canInvite = true
           </DialogHeader>
           <div className="flex items-center gap-2">
             <Input readOnly value={inviteUrl || ""} className="font-mono text-xs" />
-            <Button
+            <Button aria-label={t("a11y.copy")} title={t("a11y.copy")}
               type="button" size="icon" variant="outline"
               onClick={() => { navigator.clipboard.writeText(inviteUrl); toast.success(t("toast.copied")); }}
             >
@@ -780,7 +829,7 @@ export function ChatThread({ messages, onSend, currentRole, sending, readOnly = 
                 {!mine && <div className="text-[11px] font-semibold opacity-70 mb-0.5">{m.sender_name}</div>}
                 <div className="whitespace-pre-wrap break-words">{m.body}</div>
                 <div className={`text-[10px] mt-1 ${mine ? "text-primary-foreground/60" : "text-muted-foreground"}`}>
-                  {new Date(m.created_at).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  {formatDateTime(m.created_at)}
                 </div>
               </div>
             </div>
@@ -803,7 +852,7 @@ export function ChatThread({ messages, onSend, currentRole, sending, readOnly = 
             rows={1}
             className="resize-none min-h-[40px] max-h-32"
           />
-          <Button
+          <Button aria-label={t("a11y.send")} title={t("a11y.send")}
             type="submit" size="icon"
             disabled={!text.trim() || sending}
             className="bg-accent hover:bg-accent/90 text-accent-foreground flex-shrink-0"

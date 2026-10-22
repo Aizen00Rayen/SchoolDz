@@ -17,7 +17,10 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { PageHeader, EmptyState, LoadingRows, Field, ExportMenu } from "./_shared";
+import { PageHeader, EmptyState, LoadingRows, Field, ExportMenu, FilterPanel, MobileFab } from "./_shared";
+import { currencyLabel, formatDate } from "@/lib/format";
+import { DateInput } from "@/components/DateInput";
+import { Amount } from "@/components/Amount";
 
 const EMPTY_FORM = {
   title: "", amount: "", spent_at: new Date().toISOString().slice(0, 10),
@@ -141,7 +144,7 @@ export default function ExpensesPage() {
     });
   };
 
-  const currency = tenant?.currency || "DZD";
+  const currency = currencyLabel(tenant?.currency);
   const totalAmount = data?.total_amount || 0;
   const count = items.length;
   const avgAmount = count > 0 ? Math.round(totalAmount / count) : 0;
@@ -167,6 +170,7 @@ export default function ExpensesPage() {
           </>
         }
       />
+      {canAdd && <MobileFab onClick={openCreate} label={t("actions.new")} testId={"expenses-fab"} />}
 
       {/* Top KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-4">
@@ -178,8 +182,8 @@ export default function ExpensesPage() {
             <div className="text-[11px] uppercase tracking-wider font-semibold text-rose-600/90 dark:text-rose-400/90">
               {t("expenses.total")}
             </div>
-            <div className="font-mono font-bold text-xl sm:text-2xl text-rose-600 dark:text-rose-400 truncate" dir="ltr">
-              {Number(totalAmount).toLocaleString()} {currency}
+            <div className="font-mono font-bold text-xl sm:text-2xl text-rose-600 dark:text-rose-400 leading-tight" dir="ltr">
+              <Amount value={totalAmount} currency={currency} />
             </div>
           </div>
         </div>
@@ -206,20 +210,20 @@ export default function ExpensesPage() {
             <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">
               {t("debts.avg_debt", "متوسط المصروف")}
             </div>
-            <div className="font-mono font-bold text-xl sm:text-2xl text-foreground truncate" dir="ltr">
-              {avgAmount.toLocaleString()} {currency}
+            <div className="font-mono font-bold text-xl sm:text-2xl text-foreground leading-tight" dir="ltr">
+              <Amount value={avgAmount} currency={currency} />
             </div>
           </div>
         </div>
       </div>
 
       {/* Filter Bar */}
-      <div className="surface-card p-4 mb-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <FilterPanel className="grid grid-cols-1 sm:grid-cols-3 gap-3" activeCount={Object.values(filters).filter(Boolean).length}>
         <Field label={t("reports.from")}>
-          <Input type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
+          <DateInput value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
         </Field>
         <Field label={t("reports.to")}>
-          <Input type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
+          <DateInput value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
         </Field>
         <Field label={t("field.category")}>
           <Select
@@ -235,7 +239,7 @@ export default function ExpensesPage() {
             </SelectContent>
           </Select>
         </Field>
-      </div>
+      </FilterPanel>
 
       <div className="surface-card overflow-hidden">
         {isLoading ? (
@@ -269,7 +273,7 @@ export default function ExpensesPage() {
                 <tbody>
                   {items.map((row) => (
                     <tr key={row.id} className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors">
-                      <td className="px-4 py-3 font-mono text-xs" dir="ltr">{row.spent_at}</td>
+                      <td className="px-4 py-3 font-mono text-xs" dir="ltr">{formatDate(row.spent_at, "short")}</td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-foreground">{row.title}</div>
                         {row.notes && <div className="text-[11px] text-muted-foreground mt-0.5">{row.notes}</div>}
@@ -289,7 +293,7 @@ export default function ExpensesPage() {
                             <Button variant="ghost" size="sm" onClick={() => openEdit(row)}>{t("actions.edit")}</Button>
                           )}
                           {canDelete && (
-                            <Button
+                            <Button aria-label={t("actions.delete")} title={t("actions.delete")}
                               variant="ghost" size="sm" className="text-destructive hover:text-destructive hover:bg-destructive/10"
                               onClick={async () => {
                                 if (await confirm({ title: t("confirm.delete_record"), destructive: true })) {
@@ -314,7 +318,7 @@ export default function ExpensesPage() {
                 <div key={row.id} className="p-4 space-y-2.5 hover:bg-muted/20 transition-colors">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-mono text-muted-foreground" dir="ltr">
-                      {row.spent_at}
+                      {formatDate(row.spent_at, "short")}
                     </span>
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-muted text-foreground">
                       {categoryLabel({ key: row.category_key, name: row.category_name }, t)}
@@ -352,7 +356,7 @@ export default function ExpensesPage() {
                           </Button>
                         )}
                         {canDelete && (
-                          <Button
+                          <Button aria-label={t("actions.delete")} title={t("actions.delete")}
                             variant="ghost"
                             size="sm"
                             className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
@@ -395,7 +399,7 @@ export default function ExpensesPage() {
               <Input type="number" step="0.01" min="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} required data-testid="expense-amount" />
             </Field>
             <Field label={t("field.spent_at")} required>
-              <Input type="date" value={form.spent_at} onChange={(e) => setForm({ ...form, spent_at: e.target.value })} required />
+              <DateInput value={form.spent_at} onChange={(e) => setForm({ ...form, spent_at: e.target.value })} required />
             </Field>
             <Field label={t("field.category")}>
               <Select
@@ -463,7 +467,7 @@ export default function ExpensesPage() {
               <div key={c.id} className="flex items-center justify-between text-sm px-1 py-1">
                 <span>{categoryLabel(c, t)}</span>
                 {canDelete && (
-                  <Button
+                  <Button aria-label={t("actions.delete")} title={t("actions.delete")}
                     variant="ghost" size="sm" className="text-destructive h-7"
                     onClick={async () => {
                       if (await confirm({ title: t("confirm.delete_record"), destructive: true })) {

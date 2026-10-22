@@ -19,6 +19,8 @@ import { api, extractError, openInvoicePdf } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/permissions";
+import { currencyLabel, formatDate, formatTime } from "@/lib/format";
+import { DateInput } from "@/components/DateInput";
 
 const downloadInvoice = (paymentId) => openInvoicePdf(paymentId).catch((e) => toast.error(extractError(e)));
 
@@ -269,7 +271,7 @@ export default function PaymentsPage() {
               {t("payments.overdue_count", { count: overdue.total })}
             </div>
             <div className="text-xs text-muted-foreground">
-              {t("payments.overdue_amount", { amount: Math.round(overdue.total_owed).toLocaleString(), currency: tenant?.currency || "DZD" })}
+              {t("payments.overdue_amount", { amount: Math.round(overdue.total_owed).toLocaleString(), currency: currencyLabel(tenant?.currency) })}
             </div>
           </div>
         </div>
@@ -458,8 +460,7 @@ export default function PaymentsPage() {
 
           {datePeriod === "custom" && (
             <div className="flex items-center gap-1.5 shrink-0">
-              <Input
-                type="date"
+              <DateInput
                 value={customDates.from}
                 onChange={(e) => setCustomDates((prev) => ({ ...prev, from: e.target.value }))}
                 className="h-9 w-32 text-xs bg-background"
@@ -467,8 +468,7 @@ export default function PaymentsPage() {
                 data-testid="payments-custom-from"
               />
               <span className="text-muted-foreground text-xs">&ndash;</span>
-              <Input
-                type="date"
+              <DateInput
                 value={customDates.to}
                 onChange={(e) => setCustomDates((prev) => ({ ...prev, to: e.target.value }))}
                 className="h-9 w-32 text-xs bg-background"
@@ -520,7 +520,7 @@ export default function PaymentsPage() {
                 <div className="font-mono text-xs">{r.invoice_number}</div>
                 <div className="text-[11px] text-muted-foreground capitalize">{paymentKindLabel(r, t)}</div>
               </div>
-              <Button
+              <Button aria-label={t("payments.download_invoice")}
                 type="button" variant="ghost" size="icon" className="h-7 w-7 flex-shrink-0"
                 onClick={() => downloadInvoice(r.id)}
                 title={t("payments.download_invoice")}
@@ -549,7 +549,7 @@ export default function PaymentsPage() {
               tagTone = "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/25";
               try {
                 const d = new Date(r.paid_at);
-                const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+                const time = formatTime(d);
                 if (time && time !== "Invalid Date") {
                   subLabel = (
                     <span className="text-[10px] text-muted-foreground font-mono ps-1">
@@ -570,7 +570,7 @@ export default function PaymentsPage() {
                 tagTone = "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/25";
                 subLabel = (
                   <span className="text-[10px] font-medium text-amber-600 dark:text-amber-400 ps-1">
-                    {t("payments.due")}: {r.due_date}
+                    {t("payments.due")}: {formatDate(r.due_date, "short")}
                   </span>
                 );
               }
@@ -604,7 +604,7 @@ export default function PaymentsPage() {
             // because they attended a session more recently than their last
             // payment. Spell that out in the tooltip so it doesn't read as
             // a contradiction with the "Paid" pill sitting right next to it.
-            const currency = tenant?.currency || "DZD";
+            const currency = currencyLabel(tenant?.currency);
             const tooltip = b
               ? t("payments.balance_tooltip", {
                   status: t(`payments.balance_${b.status}`),
@@ -643,11 +643,11 @@ export default function PaymentsPage() {
             return (
               <div className="flex flex-col leading-tight">
                 <span className="font-mono font-semibold">
-                  {Math.round(net).toLocaleString()} {tenant?.currency || "DZD"}
+                  {Math.round(net).toLocaleString()} {currencyLabel(tenant?.currency)}
                 </span>
                 {hasDiscount && (
                   <span className="font-mono text-[11px] text-muted-foreground line-through">
-                    {Math.round(r.amount).toLocaleString()} {tenant?.currency || "DZD"}
+                    {Math.round(r.amount).toLocaleString()} {currencyLabel(tenant?.currency)}
                   </span>
                 )}
               </div>
@@ -681,7 +681,7 @@ export default function PaymentsPage() {
         const reductionVal = Math.max(0, parseFloat(form.reduction) || 0);
         const totalDiscount = Math.min(subtotal, pardonDiscount + reductionVal);
         const total = Math.max(0, subtotal - totalDiscount);
-        const currency = tenant?.currency || "DZD";
+        const currency = currencyLabel(tenant?.currency);
 
         const effectiveStatus = (it) => (it.pay_later && (it.status === "pardoned" || it.status === "pardonned")) ? "pending" : (it.status || "paid");
         const paidItems = items.filter((it) => effectiveStatus(it) === "paid" || (effectiveStatus(it) === "pardoned" && !it.pay_later));
@@ -864,7 +864,7 @@ export default function PaymentsPage() {
                           </div>
 
                           {items.length > 1 && (
-                            <Button
+                            <Button aria-label={t("actions.delete")} title={t("actions.delete")}
                               type="button" variant="ghost" size="icon" className="h-8 w-8 text-destructive"
                               onClick={() => removeItem(idx)}
                               data-testid={`payments-item-${idx}-remove`}
@@ -882,8 +882,7 @@ export default function PaymentsPage() {
                           </span>
                           <div className="flex items-center gap-1.5">
                             <span className="text-muted-foreground">{t("payments.due")}:</span>
-                            <Input
-                              type="date"
+                            <DateInput
                               value={item.due_date || ""}
                               onChange={(e) => updateItem(idx, { due_date: e.target.value })}
                               className="h-7 w-36 text-xs bg-background"
@@ -902,8 +901,7 @@ export default function PaymentsPage() {
                             </span>
                             <div className="flex items-center gap-1.5">
                               <span className="text-muted-foreground">{t("payments.due")}:</span>
-                              <Input
-                                type="date"
+                              <DateInput
                                 value={item.due_date || ""}
                                 onChange={(e) => updateItem(idx, { due_date: e.target.value })}
                                 className="h-7 w-36 text-xs bg-background"
@@ -1003,8 +1001,7 @@ export default function PaymentsPage() {
                                 {item.pay_later && (
                                   <div className="flex items-center gap-1.5">
                                     <span className="text-muted-foreground">{t("payments.due")}:</span>
-                                    <Input
-                                      type="date"
+                                    <DateInput
                                       value={item.due_date || ""}
                                       onChange={(e) => updateItem(idx, { due_date: e.target.value })}
                                       className="h-7 w-36 text-xs bg-background"
@@ -1086,10 +1083,18 @@ export default function PaymentsPage() {
                                   // teacher/school % split below, never edited directly.
                                   amount: course ? parseFloat(course.price) || 0 : 0,
                                 };
-                                if (candidates.length === 1) {
-                                  patch.group_id = candidates[0].id;
+                                // Prefer the group this student is actually
+                                // enrolled in, so the bill (and any discount
+                                // charged to the teacher) lands on the right
+                                // teacher when a course has several groups.
+                                const own = candidates.filter((g) => (g.student_ids || []).includes(form.student_id));
+                                const pick = own.length === 1 ? own[0] : candidates.length === 1 ? candidates[0] : null;
+                                if (pick) {
+                                  patch.group_id = pick.id;
+                                  Object.assign(patch, pctFromGroup(pick));
+                                } else {
+                                  Object.assign(patch, pctFromCourse(v));
                                 }
-                                Object.assign(patch, pctFromCourse(v));
                                 updateItem(idx, patch);
                               }}
                             >
@@ -1131,7 +1136,7 @@ export default function PaymentsPage() {
 
                       {item.item_type === "course" && item.course_id && (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-3 border-t border-border">
-                          {groupsForCourse(item.course_id).length > 1 && (
+                          {groupsForCourse(item.course_id).length > 0 && (
                             <div className="md:col-span-2">
                               <Field label={t("field.group")}>
                                 <Select
@@ -1295,8 +1300,7 @@ export default function PaymentsPage() {
                 </Field>
                 {(form.status === "paid" || form.status === "partial" || form.status === "pardoned" || form.status === "refunded" || form.status === "cancelled") ? (
                   <Field label={t("field.paid_at")}>
-                    <Input
-                      type="date"
+                    <DateInput
                       value={form.paid_at || ""}
                       onChange={(e) => setForm({ ...form, paid_at: e.target.value })}
                       data-testid="payments-form-paid-at"
@@ -1304,8 +1308,7 @@ export default function PaymentsPage() {
                   </Field>
                 ) : (
                   <Field label={t("field.due_date")}>
-                    <Input
-                      type="date"
+                    <DateInput
                       value={form.due_date || ""}
                       onChange={(e) => setForm({ ...form, due_date: e.target.value })}
                       data-testid="payments-form-due-date"
@@ -1342,8 +1345,7 @@ export default function PaymentsPage() {
               {form.status === "partial" && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <Field label={t("field.due_date")}>
-                    <Input
-                      type="date"
+                    <DateInput
                       value={form.due_date || ""}
                       onChange={(e) => setForm({ ...form, due_date: e.target.value })}
                       data-testid="payments-form-partial-due-date"
@@ -1369,16 +1371,14 @@ export default function PaymentsPage() {
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Field label={t("field.paid_at")}>
-                  <Input
-                    type="date"
+                  <DateInput
                     value={form.paid_at || ""}
                     onChange={(e) => setForm({ ...form, paid_at: e.target.value })}
                     data-testid="payments-form-paid-at"
                   />
                 </Field>
                 <Field label={t("payments.item_due_date")}>
-                  <Input
-                    type="date"
+                  <DateInput
                     value={form.due_date || ""}
                     onChange={(e) => setForm({ ...form, due_date: e.target.value })}
                     data-testid="payments-form-due-date"
@@ -1389,8 +1389,7 @@ export default function PaymentsPage() {
           ) : allPending ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Field label={t("field.due_date")}>
-                <Input
-                  type="date"
+                <DateInput
                   value={form.due_date || ""}
                   onChange={(e) => setForm({ ...form, due_date: e.target.value })}
                   data-testid="payments-form-due-date"
@@ -1400,8 +1399,7 @@ export default function PaymentsPage() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Field label={t("field.paid_at")}>
-                <Input
-                  type="date"
+                <DateInput
                   value={form.paid_at || ""}
                   onChange={(e) => setForm({ ...form, paid_at: e.target.value })}
                   data-testid="payments-form-paid-at"
@@ -1473,19 +1471,19 @@ export default function PaymentsPage() {
                 <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-center">
                   <div className="text-[11px] text-muted-foreground">{t("payments.total_paid")}</div>
                   <div className="text-base font-bold text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">
-                    {Math.round(detail.balance.paid).toLocaleString()} {tenant?.currency || "DZD"}
+                    {Math.round(detail.balance.paid).toLocaleString()} {currencyLabel(tenant?.currency)}
                   </div>
                 </div>
                 <div className="p-3 rounded-lg bg-muted/60 border border-border text-center">
                   <div className="text-[11px] text-muted-foreground">{t("payments.total_cost")}</div>
                   <div className="text-base font-bold text-foreground font-mono mt-0.5">
-                    {Math.round(detail.balance.cost).toLocaleString()} {tenant?.currency || "DZD"}
+                    {Math.round(detail.balance.cost).toLocaleString()} {currencyLabel(tenant?.currency)}
                   </div>
                 </div>
                 <div className={`p-3 rounded-lg border text-center ${detail.balance.balance < 0 ? "bg-amber-500/10 border-amber-500/20" : "bg-muted/60 border-border"}`}>
                   <div className="text-[11px] text-muted-foreground">{t("payments.balance_label")}</div>
                   <div className={`text-base font-bold font-mono mt-0.5 ${BALANCE_CLS[detail.balance.status] || ""}`}>
-                    {Math.round(detail.balance.balance).toLocaleString()} {tenant?.currency || "DZD"}
+                    {Math.round(detail.balance.balance).toLocaleString()} {currencyLabel(tenant?.currency)}
                   </div>
                 </div>
               </div>
@@ -1510,13 +1508,13 @@ export default function PaymentsPage() {
                               </span>
                             </div>
                             <div className="text-[11px] text-muted-foreground mt-0.5">
-                              {t("field.teacher")}: <span className="font-medium text-foreground">{c.teacher_name}</span> &middot; {t("field.pricing")}: {(c.cost_per_session || 0).toLocaleString()} {tenant?.currency || "DZD"}/{t("reports.session_unit", "حصة")}
+                              {t("field.teacher")}: <span className="font-medium text-foreground">{c.teacher_name}</span> &middot; {t("field.pricing")}: {(c.cost_per_session || 0).toLocaleString()} {currencyLabel(tenant?.currency)}/{t("reports.session_unit", "حصة")}
                             </div>
                           </div>
                           <div className="text-end">
                             <span className="text-[11px] text-muted-foreground">{t("payments.paid_amount")}:</span>
                             <div className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
-                              {(c.amount_paid || 0).toLocaleString()} {tenant?.currency || "DZD"}
+                              {(c.amount_paid || 0).toLocaleString()} {currencyLabel(tenant?.currency)}
                             </div>
                           </div>
                         </div>

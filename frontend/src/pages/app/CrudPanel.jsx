@@ -1,4 +1,4 @@
-import { Fragment, forwardRef, useImperativeHandle, useState } from "react";
+import { Fragment, forwardRef, useImperativeHandle, useState, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Plus, Search, Trash2, Pencil, AlertTriangle } from "lucide-react";
@@ -10,7 +10,7 @@ import { APPUI } from "@/constants/testIds";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { PageHeader, EmptyState, LoadingRows, StatusPill } from "./_shared";
+import { PageHeader, EmptyState, LoadingRows, StatusPill, MobileFab } from "./_shared";
 
 /** Remove empty strings from payload so Optional[EmailStr] etc. validate. */
 function cleanPayload(obj) {
@@ -53,17 +53,25 @@ function cleanPayload(obj) {
  * a "record a payment" shortcut for a student found elsewhere on the page).
  */
 const CrudPanel = forwardRef(function CrudPanel({
-  moduleKey, endpoint, title, subtitle, columns, defaultForm, renderForm,
+  moduleKey, endpoint, title, subtitle, columns, defaultForm: defaultFormProp, renderForm,
   emptyIcon: EmptyIcon, canEdit = true, canDelete = true, canCreate = true, extraActions,
   rowClassName, renderRowActions, extraParams, filterBar, prepareEditForm, preparePayload, onBeforeSubmit,
+  onCreated,
 }, ref) {
+  // defaultForm may be a function so values like "now" are fresh each time
+  // the form opens rather than frozen when the page module first loaded.
+  const resolveDefault = () => (typeof defaultFormProp === "function" ? defaultFormProp() : defaultFormProp) || {};
   const { t } = useI18n();
   const confirm = useConfirm();
   const qc = useQueryClient();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState(defaultForm || {});
+  const [form, setForm] = useState(resolveDefault);
+  // "Save & add another" keeps the dialog open with a fresh form.
+  const addAnotherRef = useRef(false);
+  const submittedFormRef = useRef(null);
+  const formRef = useRef(null);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: [moduleKey, q, extraParams],
@@ -72,12 +80,22 @@ const CrudPanel = forwardRef(function CrudPanel({
 
   const createMut = useMutation({
     mutationFn: (payload) => api.post(endpoint, payload).then((r) => r.data),
-    onSuccess: () => {
+    onSuccess: async (created) => {
+      // Follow-up work a page needs once the record exists (e.g. a book's
+      // starting stock). Runs before the list refresh so it shows at once.
+      if (onCreated) {
+        try { await onCreated(created, submittedFormRef.current); } catch (err) { toast.error(extractError(err)); }
+      }
       toast.success(t("toast.created"));
       qc.invalidateQueries({ queryKey: [moduleKey] });
       qc.invalidateQueries({ queryKey: ["dashboard"] });
-      setOpen(false);
-      setForm(defaultForm || {});
+      setForm(resolveDefault());
+      if (addAnotherRef.current) {
+        // Back to the first field, ready for the next record.
+        setTimeout(() => formRef.current?.querySelector("input:not([type=hidden]), textarea")?.focus(), 50);
+      } else {
+        setOpen(false);
+      }
     },
     onError: (e) => toast.error(extractError(e)),
   });
@@ -89,7 +107,7 @@ const CrudPanel = forwardRef(function CrudPanel({
       qc.invalidateQueries({ queryKey: [moduleKey] });
       setOpen(false);
       setEditing(null);
-      setForm(defaultForm || {});
+      setForm(resolveDefault());
     },
     onError: (e) => toast.error(extractError(e)),
   });
@@ -105,13 +123,13 @@ const CrudPanel = forwardRef(function CrudPanel({
 
   const openCreate = () => {
     setEditing(null);
-    setForm(defaultForm || {});
+    setForm(resolveDefault());
     setOpen(true);
   };
 
   const openCreateWith = (partial) => {
     setEditing(null);
-    setForm({ ...(defaultForm || {}), ...partial });
+    setForm({ ...resolveDefault(), ...partial });
     setOpen(true);
   };
 
@@ -119,7 +137,7 @@ const CrudPanel = forwardRef(function CrudPanel({
 
   const openEdit = (row) => {
     setEditing(row);
-    setForm({ ...defaultForm, ...(prepareEditForm ? prepareEditForm(row) : row) });
+    setForm({ ...resolveDefault(), ...(prepareEditForm ? prepareEditForm(row) : row) });
     setOpen(true);
   };
 
@@ -146,12 +164,14 @@ const CrudPanel = forwardRef(function CrudPanel({
 
   const onSubmit = async (e) => {
     e.preventDefault();
+    addAnotherRef.current = e.nativeEvent?.submitter?.dataset?.addAnother === "true";
     const clean = cleanPayload(preparePayload ? preparePayload(form) : form);
     if (editing) {
       updateMut.mutate({ id: editing.id, payload: clean });
       return;
     }
     if (onBeforeSubmit && !(await onBeforeSubmit(form))) return;
+    submittedFormRef.current = form;
     createMut.mutate(clean);
   };
 
@@ -212,6 +232,7 @@ const CrudPanel = forwardRef(function CrudPanel({
           </>
         }
       />
+      {canCreate && <MobileFab onClick={openCreate} label={t("actions.new")} testId={`${moduleKey}-fab`} />}
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <div className="relative flex-1 min-w-[160px] sm:max-w-xs">
@@ -342,9 +363,9 @@ const CrudPanel = forwardRef(function CrudPanel({
               {t("crud.fill_details")}
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={onSubmit} className="space-y-4">
+          <form ref={formRef} onSubmit={onSubmit} className="space-y-4">
             {renderForm(form, setForm)}
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex flex-wrap justify-end gap-2 pt-2">
               <Button
                 type="button" variant="outline"
                 onClick={() => setOpen(false)}
@@ -352,6 +373,17 @@ const CrudPanel = forwardRef(function CrudPanel({
               >
                 {t("actions.cancel")}
               </Button>
+              {!editing && (
+                <Button
+                  type="submit"
+                  variant="outline"
+                  data-add-another="true"
+                  disabled={createMut.isPending}
+                  data-testid={`${APPUI.formSubmit(moduleKey)}-another`}
+                >
+                  {t("actions.save_add_another")}
+                </Button>
+              )}
               <Button
                 type="submit"
                 disabled={createMut.isPending || updateMut.isPending}

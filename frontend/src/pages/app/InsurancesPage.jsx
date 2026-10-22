@@ -14,7 +14,10 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { PageHeader, EmptyState, LoadingRows, Field, ExportMenu, StudentSearchSelect } from "./_shared";
+import { PageHeader, EmptyState, LoadingRows, Field, ExportMenu, StudentSearchSelect, FilterPanel, MobileFab } from "./_shared";
+import { currencyLabel, formatDate } from "@/lib/format";
+import { DateInput } from "@/components/DateInput";
+import { Amount } from "@/components/Amount";
 
 const EMPTY_FORM = {
   student_id: "",
@@ -46,7 +49,7 @@ export default function InsurancesPage() {
   });
 
   const items = data?.items || [];
-  const currency = tenant?.currency || "DZD";
+  const currency = currencyLabel(tenant?.currency);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["insurances"] });
@@ -126,6 +129,7 @@ export default function InsurancesPage() {
           </>
         }
       />
+      {canAdd && <MobileFab onClick={openCreate} label={t("actions.new")} testId={"insurances-fab"} />}
 
       {/* Info notice about insurance cashflow */}
       <div className="mb-4 rounded-xl border border-blue-500/20 bg-blue-500/5 p-3.5 flex items-start gap-3 text-xs text-foreground">
@@ -145,8 +149,8 @@ export default function InsurancesPage() {
             <div className="text-[11px] uppercase tracking-wider font-semibold text-blue-600/90 dark:text-blue-400/90">
               {t("insurances.total_collected")}
             </div>
-            <div className="font-mono font-bold text-xl sm:text-2xl text-blue-600 dark:text-blue-400 truncate" dir="ltr">
-              {(data?.total_amount || 0).toLocaleString()} {currency}
+            <div className="font-mono font-bold text-xl sm:text-2xl text-blue-600 dark:text-blue-400 leading-tight" dir="ltr">
+              <Amount value={data?.total_amount || 0} currency={currency} />
             </div>
           </div>
         </div>
@@ -173,15 +177,15 @@ export default function InsurancesPage() {
             <div className="text-[11px] uppercase tracking-wider font-semibold text-muted-foreground">
               {t("debts.avg_debt", "متوسط التأمين")}
             </div>
-            <div className="font-mono font-bold text-xl sm:text-2xl text-foreground truncate" dir="ltr">
-              {(items.length > 0 ? Math.round((data?.total_amount || 0) / items.length) : 0).toLocaleString()} {currency}
+            <div className="font-mono font-bold text-xl sm:text-2xl text-foreground leading-tight" dir="ltr">
+              <Amount value={items.length > 0 ? (data?.total_amount || 0) / items.length : 0} currency={currency} />
             </div>
           </div>
         </div>
       </div>
 
       {/* Filter bar */}
-      <div className="surface-card p-4 mb-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <FilterPanel className="grid grid-cols-1 sm:grid-cols-3 gap-3" activeCount={Object.values(filters).filter(Boolean).length}>
         <Field label={t("crud.search")}>
           <div className="relative">
             <Search className="w-4 h-4 absolute start-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -194,20 +198,18 @@ export default function InsurancesPage() {
           </div>
         </Field>
         <Field label={t("reports.from")}>
-          <Input
-            type="date"
+          <DateInput
             value={filters.from}
             onChange={(e) => setFilters({ ...filters, from: e.target.value })}
           />
         </Field>
         <Field label={t("reports.to")}>
-          <Input
-            type="date"
+          <DateInput
             value={filters.to}
             onChange={(e) => setFilters({ ...filters, to: e.target.value })}
           />
         </Field>
-      </div>
+      </FilterPanel>
 
       {/* Table & Mobile Cards */}
       <div className="surface-card overflow-hidden">
@@ -259,7 +261,7 @@ export default function InsurancesPage() {
                       className="border-b border-border last:border-0 hover:bg-muted/40 transition-colors"
                     >
                       <td className="px-4 py-3 font-mono text-xs text-foreground" dir="ltr">
-                        {row.paid_at}
+                        {formatDate(row.paid_at, "short")}
                       </td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-foreground flex items-center gap-1.5">
@@ -296,7 +298,7 @@ export default function InsurancesPage() {
                       {(canModify || canDelete) && (
                         <td className="px-4 py-3 text-end whitespace-nowrap">
                           {canModify && (
-                            <Button
+                            <Button aria-label={t("actions.edit")}
                               variant="ghost"
                               size="sm"
                               onClick={() => openEdit(row)}
@@ -306,7 +308,7 @@ export default function InsurancesPage() {
                             </Button>
                           )}
                           {canDelete && (
-                            <Button
+                            <Button aria-label={t("actions.delete")}
                               variant="ghost"
                               size="sm"
                               className="text-destructive hover:text-destructive hover:bg-destructive/10"
@@ -337,7 +339,7 @@ export default function InsurancesPage() {
                 <div key={row.id} className="p-4 space-y-2.5 hover:bg-muted/20 transition-colors">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-mono text-muted-foreground" dir="ltr">
-                      {row.paid_at}
+                      {formatDate(row.paid_at, "short")}
                     </span>
                     {row.academic_year && (
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-muted text-foreground font-mono">
@@ -393,7 +395,7 @@ export default function InsurancesPage() {
                           </Button>
                         )}
                         {canDelete && (
-                          <Button
+                          <Button aria-label={t("actions.delete")} title={t("actions.delete")}
                             variant="ghost"
                             size="sm"
                             className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
@@ -461,8 +463,7 @@ export default function InsurancesPage() {
             </Field>
 
             <Field label={t("insurances.paid_at")} required>
-              <Input
-                type="date"
+              <DateInput
                 value={form.paid_at}
                 onChange={(e) => setForm({ ...form, paid_at: e.target.value })}
                 required

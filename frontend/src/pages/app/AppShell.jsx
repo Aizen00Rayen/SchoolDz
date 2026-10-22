@@ -594,7 +594,7 @@ export default function AppShell() {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.25 }}
-            className="max-w-[1280px] mx-auto px-4 sm:px-6 py-6 sm:py-8"
+            className="max-w-[1280px] mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-24 md:pb-8"
           >
             <Outlet />
           </motion.div>

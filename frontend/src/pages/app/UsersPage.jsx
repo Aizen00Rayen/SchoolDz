@@ -224,7 +224,7 @@ export default function UsersPage() {
                   <td className="px-4 py-2 text-end">
                     <div className="flex items-center justify-end gap-1">
                       {u.role !== "super_admin" && (
-                        <Button
+                        <Button aria-label={t("actions.edit")} title={t("actions.edit")}
                           size="icon"
                           variant="ghost"
                           onClick={() => openEdit(u)}
@@ -234,7 +234,7 @@ export default function UsersPage() {
                           <Pencil className="w-3.5 h-3.5" />
                         </Button>
                       )}
-                      <Button
+                      <Button aria-label={t("actions.delete")} title={t("actions.delete")}
                         size="icon"
                         variant="ghost"
                         onClick={async () => {

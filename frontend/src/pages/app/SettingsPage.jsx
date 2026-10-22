@@ -17,6 +17,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
+import { formatDate } from "@/lib/format";
 
 const MAX_LOGO_BYTES = 3 * 1024 * 1024;
 const ALLOWED_LOGO_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
@@ -228,13 +229,13 @@ export default function SettingsPage() {
         </p>
         <div className="flex items-center gap-2">
           <Input readOnly value={enrollUrl} className="font-mono text-xs bg-muted/40" />
-          <Button
+          <Button aria-label={t("a11y.copy")} title={t("a11y.copy")}
             type="button" variant="outline" size="icon"
             onClick={() => { navigator.clipboard.writeText(enrollUrl); toast.success(t("settings.link_copied")); }}
           >
             <Copy className="w-3.5 h-3.5" />
           </Button>
-          <Button type="button" variant="outline" size="icon" asChild>
+          <Button aria-label={t("a11y.open")} title={t("a11y.open")} type="button" variant="outline" size="icon" asChild>
             <a href={enrollUrl} target="_blank" rel="noreferrer"><ExternalLink className="w-3.5 h-3.5" /></a>
           </Button>
         </div>
@@ -258,13 +259,13 @@ export default function SettingsPage() {
               </div>
               <div className="flex items-center gap-2">
                 <Input readOnly value={app.url} className="font-mono text-xs bg-muted/40" />
-                <Button
+                <Button aria-label={t("a11y.copy")} title={t("a11y.copy")}
                   type="button" variant="outline" size="icon"
                   onClick={() => { navigator.clipboard.writeText(app.url); toast.success(t("settings.link_copied")); }}
                 >
                   <Copy className="w-3.5 h-3.5" />
                 </Button>
-                <Button type="button" variant="outline" size="icon" asChild>
+                <Button aria-label={t("a11y.open")} title={t("a11y.open")} type="button" variant="outline" size="icon" asChild>
                   <a href={app.url} target="_blank" rel="noreferrer"><ExternalLink className="w-3.5 h-3.5" /></a>
                 </Button>
               </div>
@@ -281,7 +282,7 @@ export default function SettingsPage() {
         </p>
         {tenant.plan_expires_at && (
           <p className="text-sm text-muted-foreground mb-4">
-            {t(tenant.status === "active" ? "settings.renews_on" : "settings.expired_on", { date: new Date(tenant.plan_expires_at).toLocaleDateString() })}
+            {t(tenant.status === "active" ? "settings.renews_on" : "settings.expired_on", { date: formatDate(tenant.plan_expires_at, "short") })}
             {tenant.billing_cycle && <span className="capitalize"> · {t(`cycle.${tenant.billing_cycle}`)}</span>}
           </p>
         )}

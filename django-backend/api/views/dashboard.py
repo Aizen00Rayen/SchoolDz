@@ -234,6 +234,7 @@ def dashboard_summary(request):
         m_teacher = compute_teacher_earned_total(tid, date_from=m_date.date(), date_to=m_end.date(), _context=earn_ctx)
         trend.append({
             'month': m_date.strftime('%b'),
+            'month_start': m_date.date().isoformat(),
             'revenue': round(m_total, 2),
             'expenses': round(m_expenses, 2),
             'teacher_earnings': round(m_teacher, 2),

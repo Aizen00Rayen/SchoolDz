@@ -16,6 +16,7 @@ import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { useConfirm } from "@/lib/confirm";
 import { usePermission } from "@/lib/permissions";
+import { currencyLabel, formatDate, formatTime } from "@/lib/format";
 
 function escapeHtml(str) {
   if (str == null) return "";
@@ -29,11 +30,9 @@ function escapeHtml(str) {
 
 function formatPrintDate(d) {
   if (!d) return "—";
-  try {
-    return String(d).slice(0, 16).replace("T", " ");
-  } catch {
-    return String(d);
-  }
+  const str = String(d);
+  // Date-only values print as 22/10/2026; timestamps add the time.
+  return str.length > 10 ? `${formatDate(d, "short")} ${formatTime(d)}` : formatDate(d, "short");
 }
 
 function getSharedArchiveStyles(isRtl) {
@@ -613,7 +612,7 @@ export default function ArchivePage() {
   const [selectedCourseId, setSelectedCourseId] = useState(null);
   const [restoring, setRestoring] = useState(false);
 
-  const currency = tenant?.currency || "DZD";
+  const currency = currencyLabel(tenant?.currency);
   const money = (v) => `${Number(v || 0).toLocaleString()} ${currency}`;
 
   // Fetch archive overview (years and counts)
@@ -920,7 +919,7 @@ export default function ArchivePage() {
                     </Button>
 
                     {canModify && (
-                      <Button
+                      <Button aria-label={t("archive.restore_action", "استعادة")}
                         size="icon"
                         variant="ghost"
                         onClick={() => handleRestore(c.id, c.title)}

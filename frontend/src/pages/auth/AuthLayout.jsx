@@ -47,7 +47,7 @@ export default function AuthLayout({ children, title, subtitle, footer }) {
           <div className="ms-auto flex items-center gap-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" data-testid="auth-lang-switcher">
+                <Button aria-label={t("a11y.language")} title={t("a11y.language")} variant="ghost" size="icon" data-testid="auth-lang-switcher">
                   <Languages className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
