@@ -17,7 +17,8 @@ export function getFormatLang() {
 }
 
 // Algeria writes Western digits even in Arabic, hence "-u-nu-latn".
-const NUMBER_LOCALES = { en: "en-US", fr: "fr-FR", ar: "ar-DZ-u-nu-latn" };
+// Arabic uses the French style (471 900): ar-DZ prints "471.900", which reads like 471.9.
+const NUMBER_LOCALES = { en: "en-US", fr: "fr-FR", ar: "fr-FR" };
 // en-GB rather than en-US: day before month, like the rest of the country.
 const DATE_LOCALES = { en: "en-GB", fr: "fr-FR", ar: "ar-DZ-u-nu-latn" };
 
@@ -44,16 +45,19 @@ export function formatNumber(value, { decimals = 0, lang = currentLang } = {}) {
   }).format(n);
 }
 
-/** 1,250,000 DZD — or, with compact, 1.25M DZD (full value goes in a title). */
+// Millions are abbreviated with a short Latin-digit suffix; below a million
+// the full amount is always shown. (Intl's own compact form in Arabic is
+// "471.9 ألف", which is long and reads in the wrong order next to the currency.)
+const MILLION_SUFFIX = { en: "M", fr: " M", ar: " م" };
+
+/** 1,250,000 DZD, or with compact: 1.25M DZD (full value goes in a title).
+ * The currency label always comes after the number. */
 export function formatMoney(value, currency, { compact = false, decimals = 0, lang = currentLang } = {}) {
   const n = Number(value || 0);
   const label = currencyLabel(currency, lang);
-  if (compact && Math.abs(n) >= 100000) {
-    const short = new Intl.NumberFormat(numberLocale(lang), {
-      notation: "compact",
-      maximumFractionDigits: Math.abs(n) >= 1e6 ? 2 : 1,
-    }).format(n);
-    return `${short} ${label}`;
+  if (compact && Math.abs(n) >= 1000000) {
+    const m = Math.round((n / 1000000) * 100) / 100;
+    return `${formatNumber(m, { decimals: 2, lang })}${MILLION_SUFFIX[lang] || "M"} ${label}`;
   }
   return `${formatNumber(n, { decimals, lang })} ${label}`;
 }
