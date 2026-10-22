@@ -32,6 +32,7 @@ from ..models import (
 from ..serializers import PaymentSerializer, PaymentItemSerializer
 from ..services import log_activity
 from .common import (
+    ATTENDED_STATUSES,
     INVOICE_CURRENCY_AR,
     INVOICE_KIND_AR,
     INVOICE_METHOD_AR,
@@ -871,7 +872,7 @@ def compute_student_balances(tenant_id):
     any more precisely than "stop billing the missed slot once marked
     recovered" without a schema change."""
     attendance = Attendance.objects.filter(tenant_id=tenant_id).filter(
-        Q(status='present') | Q(status='excused', recovery_status__in=('not_applicable', 'needs_recovery'))
+        Q(status__in=ATTENDED_STATUSES) | Q(status='excused', recovery_status__in=('not_applicable', 'needs_recovery'))
     )
 
     sessions = ClassSession.objects.filter(tenant_id=tenant_id).values('id', 'course_id', 'group__course_id')
@@ -1127,7 +1128,7 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
     attendance_qs = Attendance.objects.filter(
         tenant_id=tenant_id, session_id__in=session_ids_for_course,
     ).filter(
-        Q(status='present') | Q(status='excused', recovery_status__in=('not_applicable', 'needs_recovery'))
+        Q(status__in=ATTENDED_STATUSES) | Q(status='excused', recovery_status__in=('not_applicable', 'needs_recovery'))
     )
     if student_ids is not None:
         attendance_qs = attendance_qs.filter(student_id__in=student_ids)

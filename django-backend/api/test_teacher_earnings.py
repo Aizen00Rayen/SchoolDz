@@ -217,3 +217,113 @@ class TeacherEarningsTests(TestCase):
         self.assertAlmostEqual(fin['total_paid_out'], 200)
         self.assertAlmostEqual(fin['book_earned'], 80)
         self.assertEqual(len(res.json()['payouts']), 1)
+
+    # ---- 2026-10 rule fixes --------------------------------------------
+    def test_late_students_count_for_the_teacher(self):
+        _, group = self.regular_course('1000')
+        self.session(group, statuses=('late', 'late', 'present'))
+        row = self.summary()
+        self.assertEqual(row['present_count'], 3)
+        self.assertAlmostEqual(row['earned'], 3 * 600)
+
+    def test_late_students_are_billed_like_present_ones(self):
+        from .views import compute_student_balances
+        _, group = self.regular_course('1000')
+        self.session(group, statuses=('late', 'present', 'absent'))
+        balances = compute_student_balances(self.tenant.id)
+        self.assertAlmostEqual(balances[self.students[0].id]['cost'], 1000)
+        self.assertAlmostEqual(balances[self.students[1].id]['cost'], 1000)
+        self.assertAlmostEqual(balances.get(self.students[2].id, {}).get('cost', 0), 0)
+
+    def test_teacher_discount_applies_to_bill_without_group(self):
+        course, group = self.regular_course('1000')
+        self.session(group)  # 1800
+        # The payment form never sends a group for course lines.
+        self.bill(self.students[0], '1000', kind='course', course=course,
+                  reduction=Decimal('100'), reduction_target='teacher')
+        self.bill(self.students[1], '1000', kind='course', course=course,
+                  reduction=Decimal('100'), reduction_target='total')
+        row = self.summary()
+        self.assertAlmostEqual(row['reductions_deducted'], 100 + 60)
+        self.assertAlmostEqual(row['earned'], 1800 - 160)
+
+    def test_discount_without_group_goes_to_the_students_own_teacher(self):
+        course, group = self.regular_course('1000')
+        other = Teacher.objects.create(tenant=self.tenant, first_name='Other', last_name='T',
+                                       payment_percentage=Decimal('50'))
+        other_student = Student.objects.create(tenant=self.tenant, first_name='Z', last_name='Y')
+        g2 = Group.objects.create(tenant=self.tenant, course=course, teacher=other, name='G2')
+        g2.students.add(other_student)
+        self.session(group)
+        self.bill(other_student, '1000', kind='course', course=course,
+                  reduction=Decimal('100'), reduction_target='teacher')
+        self.assertAlmostEqual(self.summary()['earned'], 1800)  # not docked for someone else's student
+        res = self.client.get(f'{API}teacher-payments/summary')
+        rows = {r['teacher_id']: r for r in res.json()['items']}
+        self.assertAlmostEqual(rows[other.id]['reductions_deducted'], 100)
+
+    def test_waiver_covers_only_its_own_bill(self):
+        # 4000/month over 4 sessions = 1000 per session -> 600 teacher share.
+        course, group = self.regular_course('4000', 'per_month', 4)
+        self.session(group, days_ago=35, statuses=('present', None, None))
+        self.session(group, days_ago=0, statuses=('present', None, None))
+        # Only one session's worth was waived by the teacher.
+        self.bill(self.students[0], '1000', kind='course', course=course,
+                  status='pardoned', pardon_type='teacher')
+        row = self.summary()
+        self.assertAlmostEqual(row['waivers_deducted'], 600)
+        self.assertAlmostEqual(row['earned'], 1200 - 600)  # used to be 0
+
+    def test_waiver_never_takes_more_than_that_student_earned_the_teacher(self):
+        course, group = self.regular_course('1000')
+        self.session(group)  # 3 x 600
+        # A large waived bill for student 0, who attended once.
+        self.bill(self.students[0], '12000', kind='course', course=course,
+                  status='pardoned', pardon_type='both')
+        row = self.summary()
+        self.assertAlmostEqual(row['waivers_deducted'], 600)
+        self.assertAlmostEqual(row['earned'], 1200)  # other students untouched
+
+    def test_school_waiver_does_not_touch_teacher(self):
+        course, group = self.regular_course('1000')
+        self.session(group)
+        self.bill(self.students[0], '1000', kind='course', course=course,
+                  status='pardoned', pardon_type='school')
+        self.assertAlmostEqual(self.summary()['earned'], 1800)
+
+    def test_book_discount_is_capped_at_the_royalty(self):
+        _, group = self.regular_course('1000')
+        self.session(group)  # 1800 from sessions
+        book = self.book('Algebra', self.teacher)
+        self.bill(self.students[0], '800', kind='book', book=book,
+                  reduction=Decimal('300'), reduction_target='teacher')
+        row = self.summary()
+        self.assertAlmostEqual(row['book_earned'], 80)
+        self.assertAlmostEqual(row['reductions_deducted'], 80)
+        self.assertAlmostEqual(row['earned'], 1800)  # session pay untouched
+
+    def test_course_discount_is_capped_at_teacher_share_of_the_bill(self):
+        course, group = self.regular_course('1000')
+        self.session(group)
+        self.bill(self.students[0], '1000', kind='course', course=course,
+                  reduction=Decimal('900'), reduction_target='teacher')
+        self.assertAlmostEqual(self.summary()['reductions_deducted'], 600)
+
+    def test_all_pages_agree(self):
+        course, group = self.regular_course('1000')
+        self.session(group, statuses=('present', 'late', 'present'))
+        self.bill(self.students[0], '1000', kind='course', course=course,
+                  status='pardoned', pardon_type='teacher')
+        self.bill(self.students[1], '1000', kind='course', course=course,
+                  reduction=Decimal('100'), reduction_target='teacher')
+        book = self.book('Algebra', self.teacher)
+        self.bill(self.students[2], '800', kind='book', book=book)
+        expected = self.summary()['earned']
+        self.assertAlmostEqual(expected, 1800 - 600 - 100 + 80)
+        history = self.client.get(f'{API}teacher-payments/{self.teacher.id}/history').json()
+        self.assertAlmostEqual(history['totals']['total_earned'], expected)
+        report = self.client.get(f'{API}reports/teacher/{self.teacher.id}').json()
+        self.assertAlmostEqual(report['financial_summary']['total_earned'], expected)
+        dash = self.client.get(f'{API}dashboard/summary').json()
+        self.assertAlmostEqual(dash['kpis']['teacher_earnings_month'] if 'kpis' in dash
+                               else dash['teacher_earnings_month'], expected)

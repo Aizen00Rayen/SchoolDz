@@ -36,6 +36,10 @@ from ..services import log_activity
 # Keep the original logger name so existing log config/filters still match.
 logger = logging.getLogger('api.views')
 
+# Attendance statuses that count as "the student attended": the student is
+# billed for the session and the teacher earns their share of it.
+ATTENDED_STATUSES = ('present', 'late')
+
 
 # Single source of truth for pricing:
 PLANS_CONFIG = {

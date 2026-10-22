@@ -31,6 +31,7 @@ from ..models import (
 )
 from ..serializers import ActivityLogSerializer
 from .common import (
+    ATTENDED_STATUSES,
     EXPENSE_CATEGORY_AR,
     INVOICE_CURRENCY_AR,
     INVOICE_KIND_AR,
@@ -101,7 +102,7 @@ def compute_realized_revenue(tid, request):
     """
     Computes accrual/realized revenue based on session attendance:
     When a student pays upfront (e.g. 4000 DZD for 4 monthly sessions), the cash
-    is deferred until the student actually attends sessions (status='present').
+    is deferred until the student actually attends sessions (present or late).
     Upon attendance, each session's value (e.g. 1000 DZD) is deducted from their
     payment credit:
       - Teacher's commission percentage (e.g. 50% = 500 DZD)
@@ -127,7 +128,7 @@ def compute_realized_revenue(tid, request):
 
     try:
         attendance_qs = Attendance.objects.filter(
-            tenant_id=tid, status='present'
+            tenant_id=tid, status__in=ATTENDED_STATUSES
         ).exclude(session__status='cancelled').select_related(
             'session', 'student', 'session__group', 'session__group__teacher',
             'session__group__course', 'session__course', 'session__teacher'

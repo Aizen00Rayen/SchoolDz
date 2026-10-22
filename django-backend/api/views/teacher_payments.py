@@ -8,6 +8,7 @@ from rest_framework.exceptions import ValidationError, PermissionDenied, NotFoun
 from ..models import Teacher, Course, Group, ClassSession, Attendance, PaymentItem, TeacherPayout
 from ..serializers import TeacherPayoutSerializer
 from .common import (
+    ATTENDED_STATUSES,
     TenantScopedViewSet,
     course_per_session_price,
     export_rows,
@@ -20,13 +21,38 @@ from .payments import (
 )
 
 
+PARDONED_STATUSES = ('pardoned', 'pardonned')
+
+
+def _item_pardon_type(item):
+    """Which party waived this line item: 'teacher', 'school', 'both' or None.
+    An item marked pardoned with no explicit type means a full waiver. The
+    bill-level type is only used for items that are themselves pardoned, so
+    one waived line doesn't spill onto the other lines of the same bill."""
+    if item.pardon_type:
+        return item.pardon_type
+    if item.status in PARDONED_STATUSES:
+        return getattr(item.payment, 'pardon_type', None) or 'both'
+    return None
+
+
+def _in_bill_window(qs, date_from, date_to):
+    """Bills are dated by paid_at, or created_at while still unpaid."""
+    if date_from:
+        qs = qs.filter(
+            Q(payment__paid_at__date__gte=date_from) | (Q(payment__paid_at__isnull=True) & Q(payment__created_at__date__gte=date_from))
+        )
+    if date_to:
+        qs = qs.filter(
+            Q(payment__paid_at__date__lte=date_to) | (Q(payment__paid_at__isnull=True) & Q(payment__created_at__date__lte=date_to))
+        )
+    return qs
+
+
 def _teacher_earnings_context(tenant_id):
-    """The per-tenant session/course/teacher lookup tables that both
-    compute_teacher_earned_total and compute_teacher_earnings independently
-    rebuilt from scratch — a single dashboard_summary request used to call
-    them 9 times combined (today + month + 6 trend months + the balances
-    breakdown), each refetching every session/course/teacher row in the
-    tenant. Build it once per request and pass it in via `_context` instead."""
+    """Per-tenant lookup tables shared by every teacher-earnings figure.
+    Build it once per request (the dashboard needs ~9 figures) and pass it
+    in via `_context`."""
     sessions = ClassSession.objects.filter(tenant_id=tenant_id).values(
         'id', 'teacher_id', 'group__teacher_id', 'course_id', 'group__course_id',
     )
@@ -42,85 +68,95 @@ def _teacher_earnings_context(tenant_id):
         c['id']: course_per_session_price(c['price'], c['pricing_type'], c['sessions_count'])
         for c in Course.objects.filter(id__in=course_ids).values('id', 'price', 'pricing_type', 'sessions_count')
     }
-    teacher_pct = dict(Teacher.objects.filter(tenant_id=tenant_id).values_list('id', 'payment_percentage'))
-    # A 'standalone' course's teacher earnings come entirely from a
-    # payment-driven stream (see compute_teacher_earned_total/
-    # compute_teacher_earnings) — its course_ids are excluded from the
-    # attendance loop below, queried tenant-wide rather than just
-    # course_ids above since a standalone course may have a group with no
-    # sessions at all (attendance never applies to it).
+    teacher_rows = list(Teacher.objects.filter(tenant_id=tenant_id).values_list('id', 'payment_percentage', 'book_percentage'))
+    teacher_pct = {tid: float(p or 0) for tid, p, _ in teacher_rows}
+    book_pct = {tid: float(b or 0) for tid, _, b in teacher_rows}
+    # Package/standalone courses earn from billing, not attendance.
     standalone_course_ids = set(
         Course.objects.filter(tenant_id=tenant_id, kind__in=['package', 'standalone']).values_list('id', flat=True)
     )
-    # A standalone course's own PaymentItems essentially never carry a
-    # group_id in practice (staff bill the course amount directly, without
-    # picking a specific group) — even though the item's teacher_percentage
-    # is correctly set. Falling back to "which teacher teaches this course"
-    # only works when every group teaching it agrees on the teacher; a
-    # course split across groups with different teachers is left unmapped
-    # (contributes nothing, same as before) rather than guessing wrong.
-    standalone_course_teacher = {}
-    if standalone_course_ids:
-        by_course = {}
-        for course_id, teacher_id in Group.objects.filter(
-            tenant_id=tenant_id, course_id__in=standalone_course_ids, teacher_id__isnull=False,
-        ).values_list('course_id', 'teacher_id'):
-            by_course.setdefault(course_id, set()).add(teacher_id)
-        standalone_course_teacher = {cid: next(iter(tids)) for cid, tids in by_course.items() if len(tids) == 1}
 
-    teacher_pardoned_pairs = set(
-        PaymentItem.objects.filter(
-            payment__tenant_id=tenant_id,
-            course_id__isnull=False,
-        ).filter(
-            Q(pardon_type__in=('teacher', 'both')) |
-            Q(payment__pardon_type__in=('teacher', 'both')) |
-            Q(status__in=('pardoned', 'pardonned'), pardon_type__isnull=True) |
-            Q(payment__status__in=('pardoned', 'pardonned'), payment__pardon_type__isnull=True)
-        ).exclude(payment__status='cancelled').values_list('payment__student_id', 'course_id')
-    )
-    return session_info, price_per_session, teacher_pct, standalone_course_ids, standalone_course_teacher, teacher_pardoned_pairs
+    # Bills rarely carry a group, so a bill line is matched to its teacher
+    # by (1) the group the student is enrolled in for that course, then
+    # (2) the course's only teacher. Ambiguous cases stay unmatched rather
+    # than credited to the wrong teacher.
+    by_course = {}
+    by_student_course = {}
+    for group_id, course_id, teacher_id in Group.objects.filter(
+        tenant_id=tenant_id, teacher_id__isnull=False,
+    ).values_list('id', 'course_id', 'teacher_id'):
+        by_course.setdefault(course_id, set()).add(teacher_id)
+    for student_id, course_id, teacher_id in Group.students.through.objects.filter(
+        group__tenant_id=tenant_id, group__teacher_id__isnull=False,
+    ).values_list('student_id', 'group__course_id', 'group__teacher_id'):
+        by_student_course.setdefault((student_id, course_id), set()).add(teacher_id)
+    course_teacher = {cid: next(iter(t)) for cid, t in by_course.items() if len(t) == 1}
+    student_course_teacher = {k: next(iter(t)) for k, t in by_student_course.items() if len(t) == 1}
+
+    return {
+        'session_info': session_info,
+        'price_per_session': price_per_session,
+        'teacher_pct': teacher_pct,
+        'book_pct': book_pct,
+        'standalone_course_ids': standalone_course_ids,
+        'course_teacher': course_teacher,
+        'student_course_teacher': student_course_teacher,
+    }
 
 
-def compute_teacher_earned_total(tenant_id, date_from=None, date_to=None, _context=None):
-    """Sum of every teacher's earned share (percentage x per-session price,
-    for every present attendance) in an optional date window — the slice of
-    collected revenue that belongs to teachers, not the school. A lighter
-    sibling of compute_teacher_earnings(): no per-teacher breakdown, no
-    already-paid-out figure, just the one number the dashboard and revenue
-    trend need to net revenue down to what the institution actually keeps.
-    Takes explicit dates rather than a request, since the dashboard has no
-    ?from=/?to= of its own to read via filter_by_date_range. Pass `_context`
-    (from _teacher_earnings_context) to skip rebuilding the lookup tables
-    when the caller already has one for this tenant/request."""
-    attendance = Attendance.objects.filter(tenant_id=tenant_id, status='present')
+def _item_teacher(item, ctx):
+    if item.group_id and item.group and item.group.teacher_id:
+        return item.group.teacher_id
+    student_id = item.payment.student_id if item.payment else None
+    return (ctx['student_course_teacher'].get((student_id, item.course_id))
+            or ctx['course_teacher'].get(item.course_id))
+
+
+def compute_teacher_breakdown(tenant_id, date_from=None, date_to=None, teacher_id=None, group_id=None, _context=None):
+    """The single teacher-pay engine. Returns {teacher_id: figures}.
+
+    1. Sessions: for every attended student (present or late) in a regular
+       course, the teacher earns their % of that course's per-session price.
+    2. Books: their book % of every paid sale of a book they authored.
+    3. Package/standalone courses: their % of each bill line, from billing.
+    4. Waivers: a bill line the teacher waived (teacher/both) removes the
+       teacher's share of THAT bill only, never more than they earned from
+       that student in that course.
+    5. Discounts: "deduct from teacher" takes the discount from the teacher,
+       "total" takes their % of it; either way capped at the teacher's share
+       of that bill line.
+    """
+    ctx = _context or _teacher_earnings_context(tenant_id)
+    figures = {}
+
+    def row(tid):
+        return figures.setdefault(tid, {
+            'present_count': 0, 'session_earned': 0.0, 'book_revenue': 0.0, 'book_earned': 0.0,
+            'standalone_earned': 0.0, 'waivers': 0.0, 'reductions': 0.0, 'earned': 0.0,
+        })
+
+    # 1. Sessions
+    attendance = Attendance.objects.filter(tenant_id=tenant_id, status__in=ATTENDED_STATUSES)
     if date_from:
         attendance = attendance.filter(session__start_at__date__gte=date_from)
     if date_to:
         attendance = attendance.filter(session__start_at__date__lte=date_to)
-
-    session_info, price_per_session, teacher_pct, standalone_course_ids, standalone_course_teacher, teacher_pardoned_pairs = _context or _teacher_earnings_context(tenant_id)
-
-    total = 0.0
+    if group_id:
+        attendance = attendance.filter(session__group_id=group_id)
+    accrued = {}  # (teacher, student, course) -> earned from sessions
     for a in attendance.values('session_id', 'student_id'):
-        info = session_info.get(a['session_id'])
-        if not info or not info['teacher_id']:
+        info = ctx['session_info'].get(a['session_id'])
+        if not info or not info['teacher_id'] or info['course_id'] in ctx['standalone_course_ids']:
             continue
-        # Attendance never earns a standalone course's teacher anything —
-        # its cut comes entirely from the fully-paid-bill stream below.
-        if info['course_id'] in standalone_course_ids:
-            continue
-        if (a['student_id'], info['course_id']) in teacher_pardoned_pairs:
-            continue
-        pct = float(teacher_pct.get(info['teacher_id']) or 0)
-        total += price_per_session.get(info['course_id'], 0.0) * pct / 100
+        tid = info['teacher_id']
+        share = ctx['price_per_session'].get(info['course_id'], 0.0) * ctx['teacher_pct'].get(tid, 0.0) / 100
+        r = row(tid)
+        r['present_count'] += 1
+        r['session_earned'] += share
+        key = (tid, a['student_id'], info['course_id'])
+        accrued[key] = accrued.get(key, 0.0) + share
 
-    # Book royalties — same second income stream compute_teacher_earnings
-    # includes (see its docstring). Without this, "teacher share" here was
-    # course-teaching-only, disagreeing with the Teacher Payments page's
-    # total for any teacher who also authors books, and net_profit was
-    # correspondingly overstated (the royalty is money owed to the teacher,
-    # not money the school keeps).
+    # 2. Books
     book_items = PaymentItem.objects.filter(
         payment__tenant_id=tenant_id, payment__status='paid', kind='book',
         book__author_teacher_id__isnull=False,
@@ -129,253 +165,107 @@ def compute_teacher_earned_total(tenant_id, date_from=None, date_to=None, _conte
         book_items = book_items.filter(payment__paid_at__date__gte=date_from)
     if date_to:
         book_items = book_items.filter(payment__paid_at__date__lte=date_to)
-    book_revenue = {}
     for item in book_items:
-        author_id = item.book.author_teacher_id
-        book_revenue[author_id] = book_revenue.get(author_id, 0.0) + float(item.amount)
-    book_pct_by_teacher = dict(Teacher.objects.filter(tenant_id=tenant_id).values_list('id', 'book_percentage'))
-    for teacher_id, revenue in book_revenue.items():
-        book_pct = float(book_pct_by_teacher.get(teacher_id) or 0)
-        total += revenue * book_pct / 100
+        r = row(item.book.author_teacher_id)
+        r['book_revenue'] += float(item.amount or 0)
+    for tid, r in figures.items():
+        r['book_earned'] = round(r['book_revenue'] * ctx['book_pct'].get(tid, 0.0) / 100, 2)
 
-    # Package & standalone-course teacher earnings — driven by student bills
-    # created/issued rather than attendance (the teacher earns their cut from
-    # the beginning when billed, even while student payment is pending,
-    # unless cancelled). Uses each PaymentItem's own teacher_percentage
-    # (falling back to the teacher's standing percentage if unset) against
-    # that item's own amount. The item itself almost never carries a group_id in
-    # practice (staff bill the course amount directly, without picking a
-    # specific group) — fall back to the course's own teacher when the
-    # course teaches through exactly one (see standalone_course_teacher's
-    # docstring in _teacher_earnings_context).
-    standalone_items = PaymentItem.objects.filter(
-        payment__tenant_id=tenant_id, kind='course',
-        course_id__in=standalone_course_ids,
-    ).exclude(payment__status='cancelled').select_related('group', 'payment')
-    if date_from:
-        standalone_items = standalone_items.filter(
-            Q(payment__paid_at__date__gte=date_from) | (Q(payment__paid_at__isnull=True) & Q(payment__created_at__date__gte=date_from))
-        )
-    if date_to:
-        standalone_items = standalone_items.filter(
-            Q(payment__paid_at__date__lte=date_to) | (Q(payment__paid_at__isnull=True) & Q(payment__created_at__date__lte=date_to))
-        )
-    for item in standalone_items:
-        tid = item.group.teacher_id if item.group_id else standalone_course_teacher.get(item.course_id)
-        if not tid:
-            continue
-        p_type = item.pardon_type or getattr(item.payment, 'pardon_type', None)
-        if p_type in ('teacher', 'both') or (item.status in ('pardoned', 'pardonned') and not p_type):
-            continue
-        pct = float(item.teacher_percentage) if item.teacher_percentage is not None else float(teacher_pct.get(tid) or 0)
-        total += float(item.amount or 0) * pct / 100
+    # 3 + 4 + 5: every non-cancelled course or book line, once.
+    items = _in_bill_window(PaymentItem.objects.filter(payment__tenant_id=tenant_id).filter(
+        Q(kind='course', course_id__isnull=False) | Q(kind='book', book__author_teacher_id__isnull=False)
+    ).exclude(payment__status='cancelled').exclude(status='cancelled').select_related(
+        'group', 'payment', 'book'), date_from, date_to)
+    waived = {}  # (teacher, student, course) -> teacher share waived
+    for item in items:
+        amount = float(item.amount or 0)
+        if item.kind == 'book':
+            if item.payment.status != 'paid':
+                continue  # no royalty yet, so nothing to discount
+            tid = item.book.author_teacher_id
+            pct = ctx['book_pct'].get(tid, 0.0)
+        else:
+            tid = _item_teacher(item, ctx)
+            if not tid:
+                continue
+            pct = float(item.teacher_percentage) if item.teacher_percentage is not None else ctx['teacher_pct'].get(tid, 0.0)
+        teacher_share = amount * pct / 100
+        p_type = _item_pardon_type(item)
+        teacher_waived = p_type in ('teacher', 'both')
 
-    # Teacher reductions from payments with reduction_target in ('total', 'teacher')
-    red_items = PaymentItem.objects.filter(
-        payment__tenant_id=tenant_id,
-        reduction__gt=0,
-        reduction_target__in=('total', 'teacher'),
-    ).exclude(payment__status='cancelled').select_related('group', 'book')
-    if date_from:
-        red_items = red_items.filter(
-            Q(payment__paid_at__date__gte=date_from) | (Q(payment__paid_at__isnull=True) & Q(payment__created_at__date__gte=date_from))
-        )
-    if date_to:
-        red_items = red_items.filter(
-            Q(payment__paid_at__date__lte=date_to) | (Q(payment__paid_at__isnull=True) & Q(payment__created_at__date__lte=date_to))
-        )
-    teacher_reduction_deductions = 0.0
-    for r_item in red_items:
-        tid = None
-        pct = None
-        if r_item.group_id:
-            tid = r_item.group.teacher_id
-        elif r_item.course_id:
-            tid = standalone_course_teacher.get(r_item.course_id)
-        elif r_item.kind == 'book' and r_item.book:
-            tid = r_item.book.author_teacher_id
-            pct = float(book_pct_by_teacher.get(tid) or 0)
+        if item.kind == 'course' and item.course_id in ctx['standalone_course_ids']:
+            if not teacher_waived:
+                row(tid)['standalone_earned'] += teacher_share
+        elif item.kind == 'course' and teacher_waived:
+            key = (tid, item.payment.student_id, item.course_id)
+            waived[key] = waived.get(key, 0.0) + teacher_share
 
-        if not tid:
-            continue
-        if pct is None:
-            pct = float(r_item.teacher_percentage) if r_item.teacher_percentage is not None else float(teacher_pct.get(tid) or 0)
+        reduction = float(item.reduction or 0)
+        if reduction > 0 and not teacher_waived and item.reduction_target in ('teacher', 'total'):
+            ded = reduction if item.reduction_target == 'teacher' else reduction * pct / 100
+            row(tid)['reductions'] += min(ded, teacher_share)
 
-        if r_item.reduction_target == 'teacher':
-            teacher_reduction_deductions += float(r_item.reduction)
-        elif r_item.reduction_target == 'total':
-            teacher_reduction_deductions += float(r_item.reduction) * pct / 100.0
+    for (tid, student_id, course_id), amount in waived.items():
+        row(tid)['waivers'] += min(amount, accrued.get((tid, student_id, course_id), 0.0))
 
-    total = max(0.0, total - teacher_reduction_deductions)
-    return round(total, 2)
+    for r in figures.values():
+        r['session_earned'] = round(r['session_earned'], 2)
+        r['standalone_earned'] = round(r['standalone_earned'], 2)
+        r['waivers'] = round(r['waivers'], 2)
+        r['reductions'] = round(r['reductions'], 2)
+        r['earned'] = round(max(0.0, r['session_earned'] + r['book_earned'] + r['standalone_earned']
+                                - r['waivers'] - r['reductions']), 2)
+    if teacher_id:
+        figures = {k: v for k, v in figures.items() if k == teacher_id}
+    return figures
+
+
+def compute_teacher_earned_total(tenant_id, date_from=None, date_to=None, _context=None):
+    """Total owed to all teachers in an optional date window (dashboard,
+    revenue trend, net profit). Same engine as the Teacher Payments page."""
+    breakdown = compute_teacher_breakdown(tenant_id, date_from=date_from, date_to=date_to, _context=_context)
+    return round(sum(r['earned'] for r in breakdown.values()), 2)
 
 
 def compute_teacher_earnings(tenant_id, request, _context=None):
-    """What each teacher has earned = their percentage of the per-session
-    value of every present-student attendance record across their sessions,
-    minus what's already been paid out. A course's per-session value comes
-    from course_per_session_price() — so for each present student, the
-    teacher earns percentage% of that course's per-session price.
-
-    Driven by attendance rather than payments: a teacher is owed for
-    students who actually showed up and were taught, regardless of whether
-    that student's invoice has been settled yet — collection is the
-    school's problem, not something that should delay a teacher's pay.
-    Pass `_context` (from _teacher_earnings_context) to reuse an
-    already-built session/course lookup for this tenant/request instead of
-    rebuilding it — see compute_teacher_earned_total's docstring."""
+    """Per-teacher rows for the Teacher Payments page: earned (see
+    compute_teacher_breakdown), already paid out, and the balance.
+    Reads ?from=, ?to=, ?teacher_id= and ?group_id= from the request."""
     teachers = Teacher.objects.filter(tenant_id=tenant_id).order_by('first_name', 'last_name')
     teacher_id = request.GET.get('teacher_id')
     if teacher_id:
         teachers = teachers.filter(id=teacher_id)
 
-    attendance = Attendance.objects.filter(tenant_id=tenant_id, status='present').select_related('session')
-    attendance = filter_by_date_range(attendance, request, 'session__start_at__date')
-    group_id = request.GET.get('group_id')
-    if group_id:
-        attendance = attendance.filter(session__group_id=group_id)
+    breakdown = compute_teacher_breakdown(
+        tenant_id, date_from=request.GET.get('from'), date_to=request.GET.get('to'),
+        teacher_id=teacher_id, group_id=request.GET.get('group_id'), _context=_context,
+    )
 
-    # session -> (teacher, course), resolved once so we don't hit the DB per
-    # attendance row. Teacher falls back to the session's own teacher_id when
-    # set (a substitute covering someone else's group), else the group's
-    # regular teacher; course similarly falls back to the group's course.
-    session_info, price_per_session, teacher_pct, standalone_course_ids, standalone_course_teacher, teacher_pardoned_pairs = _context or _teacher_earnings_context(tenant_id)
-
-    present_count = {}
-    base_value = {}
-    for a in attendance:
-        info = session_info.get(a.session_id)
-        tid = info['teacher_id'] if info else None
-        if not tid:
-            continue
-        # Attendance never earns a standalone course's teacher anything —
-        # its cut comes entirely from the standalone_earned stream below.
-        if info['course_id'] in standalone_course_ids:
-            continue
-        present_count[tid] = present_count.get(tid, 0) + 1
-        if (a.student_id, info['course_id']) not in teacher_pardoned_pairs:
-            base_value[tid] = base_value.get(tid, 0.0) + price_per_session.get(info['course_id'], 0.0)
-
-    payouts = TeacherPayout.objects.filter(tenant_id=tenant_id)
-    payouts = filter_by_date_range(payouts, request, 'paid_at')
+    payouts = filter_by_date_range(TeacherPayout.objects.filter(tenant_id=tenant_id), request, 'paid_at')
     paid_out = {}
     for po in payouts:
         paid_out[po.teacher_id] = paid_out.get(po.teacher_id, 0.0) + float(po.amount)
 
-    # Book royalties: PaymentItems for books this teacher authored, on paid
-    # bills, times their book_percentage — a second income stream alongside
-    # session-teaching earnings, driven by sales rather than attendance so
-    # it's computed independently of the attendance loop above. A book item
-    # never carries its own teacher_percentage/school_percentage (that's a
-    # course-item-only mechanism — see PaymentItem), so its own discount is
-    # always 0 here; earlier this used to prorate the *bill's* discount onto
-    # the book regardless of which item actually earned it, which wrongly
-    # docked a book's royalty for an unrelated course item's family discount
-    # in the same multi-item bill.
-    book_items = PaymentItem.objects.filter(
-        payment__tenant_id=tenant_id, payment__status='paid', kind='book',
-        book__author_teacher_id__isnull=False,
-    ).select_related('book')
-    book_items = filter_by_date_range(book_items, request, 'payment__paid_at__date')
-    if teacher_id:
-        book_items = book_items.filter(book__author_teacher_id=teacher_id)
-    book_revenue = {}
-    for item in book_items:
-        author_id = item.book.author_teacher_id
-        book_revenue[author_id] = book_revenue.get(author_id, 0.0) + float(item.amount)
-
-    # Package/standalone-course earnings: driven by bills created/issued
-    # rather than attendance. The teacher earns their cut from the beginning
-    # even while student payment is pending, unless the payment is cancelled.
-    # Uses each PaymentItem's own teacher_percentage (falling back to the
-    # teacher's standing percentage if unset) against that item's own amount,
-    # credited to that group/course's teacher.
-    standalone_items = PaymentItem.objects.filter(
-        payment__tenant_id=tenant_id, kind='course',
-        course_id__in=standalone_course_ids,
-    ).exclude(payment__status='cancelled').select_related('group', 'payment')
-    date_from = request.GET.get('from')
-    date_to = request.GET.get('to')
-    if date_from:
-        standalone_items = standalone_items.filter(
-            Q(payment__paid_at__date__gte=date_from) | (Q(payment__paid_at__isnull=True) & Q(payment__created_at__date__gte=date_from))
-        )
-    if date_to:
-        standalone_items = standalone_items.filter(
-            Q(payment__paid_at__date__lte=date_to) | (Q(payment__paid_at__isnull=True) & Q(payment__created_at__date__lte=date_to))
-        )
-    standalone_revenue = {}
-    for item in standalone_items:
-        tid = item.group.teacher_id if item.group_id else standalone_course_teacher.get(item.course_id)
-        if not tid or (teacher_id and tid != teacher_id):
-            continue
-        p_type = item.pardon_type or getattr(item.payment, 'pardon_type', None)
-        if p_type in ('teacher', 'both') or (item.status in ('pardoned', 'pardonned') and not p_type):
-            continue
-        pct = float(item.teacher_percentage) if item.teacher_percentage is not None else float(teacher_pct.get(tid) or 0)
-        standalone_revenue[tid] = standalone_revenue.get(tid, 0.0) + float(item.amount or 0) * pct / 100
-
-    # Reduction deductions per teacher
-    red_items = PaymentItem.objects.filter(
-        payment__tenant_id=tenant_id,
-        reduction__gt=0,
-        reduction_target__in=('total', 'teacher'),
-    ).exclude(payment__status='cancelled').select_related('group', 'book')
-    if date_from:
-        red_items = red_items.filter(
-            Q(payment__paid_at__date__gte=date_from) | (Q(payment__paid_at__isnull=True) & Q(payment__created_at__date__gte=date_from))
-        )
-    if date_to:
-        red_items = red_items.filter(
-            Q(payment__paid_at__date__lte=date_to) | (Q(payment__paid_at__isnull=True) & Q(payment__created_at__date__lte=date_to))
-        )
-    teacher_reductions = {}
-    book_pct_by_teacher = dict(Teacher.objects.filter(tenant_id=tenant_id).values_list('id', 'book_percentage'))
-    for r_item in red_items:
-        tid = None
-        pct = None
-        if r_item.group_id:
-            tid = r_item.group.teacher_id
-        elif r_item.course_id:
-            tid = standalone_course_teacher.get(r_item.course_id)
-        elif r_item.kind == 'book' and r_item.book:
-            tid = r_item.book.author_teacher_id
-            pct = float(book_pct_by_teacher.get(tid) or 0)
-
-        if not tid or (teacher_id and tid != teacher_id):
-            continue
-        if pct is None:
-            pct = float(r_item.teacher_percentage) if r_item.teacher_percentage is not None else float(teacher_pct.get(tid) or 0)
-
-        if r_item.reduction_target == 'teacher':
-            ded = float(r_item.reduction)
-        elif r_item.reduction_target == 'total':
-            ded = float(r_item.reduction) * pct / 100.0
-        else:
-            ded = 0.0
-        teacher_reductions[tid] = teacher_reductions.get(tid, 0.0) + ded
-
+    empty = {'present_count': 0, 'session_earned': 0.0, 'book_earned': 0.0, 'standalone_earned': 0.0,
+             'waivers': 0.0, 'reductions': 0.0, 'earned': 0.0}
     rows = []
     for t in teachers:
-        count = present_count.get(t.id, 0)
-        pct = float(t.payment_percentage or 0)
-        session_earned = base_value.get(t.id, 0.0) * pct / 100
-        book_pct = float(t.book_percentage or 0)
-        book_earned = round(book_revenue.get(t.id, 0.0) * book_pct / 100, 2)
-        standalone_earned = round(standalone_revenue.get(t.id, 0.0), 2)
-        earned = round(max(0.0, session_earned + book_earned + standalone_earned - teacher_reductions.get(t.id, 0.0)), 2)
+        b = breakdown.get(t.id, empty)
         already = round(paid_out.get(t.id, 0.0), 2)
         rows.append({
             'teacher_id': t.id,
             'teacher_name': f'{t.first_name} {t.last_name}',
-            'percentage': pct,
-            'present_count': count,
-            'book_percentage': book_pct,
-            'book_earned': book_earned,
-            'standalone_earned': standalone_earned,
-            'earned': earned,
+            'percentage': float(t.payment_percentage or 0),
+            'present_count': b['present_count'],
+            'book_percentage': float(t.book_percentage or 0),
+            'session_earned': b['session_earned'],
+            'book_earned': b['book_earned'],
+            'standalone_earned': b['standalone_earned'],
+            'waivers_deducted': b['waivers'],
+            'reductions_deducted': b['reductions'],
+            'earned': b['earned'],
             'paid_out': already,
-            'balance': round(earned - already, 2),
+            'balance': round(b['earned'] - already, 2),
         })
     return rows
 
@@ -451,7 +341,7 @@ def teacher_payments_history(request, teacher_id):
     attendance_counts = {}
     if session_ids:
         for row in Attendance.objects.filter(
-            session_id__in=session_ids, status='present'
+            session_id__in=session_ids, status__in=ATTENDED_STATUSES
         ).values('session_id').annotate(c=Count('id')):
             attendance_counts[row['session_id']] = row['c']
 
@@ -519,7 +409,8 @@ def teacher_payments_history(request, teacher_id):
 
         pct = float(item.teacher_percentage) if item.teacher_percentage is not None else teacher_pct
         amount = float(item.amount or 0)
-        earned = round(amount * pct / 100, 2)
+        waived_by_teacher = _item_pardon_type(item) in ('teacher', 'both')
+        earned = 0.0 if waived_by_teacher else round(amount * pct / 100, 2)
         packages_earned_total += earned
 
         dt = item.payment.paid_at or item.payment.created_at
@@ -554,7 +445,12 @@ def teacher_payments_history(request, teacher_id):
     book_pct = float(teacher.book_percentage or 0)
     books_earned_total = round(book_rev * book_pct / 100, 2)
 
-    total_earned = round(sessions_earned_total + packages_earned_total + books_earned_total, 2)
+    # The headline total comes from the shared engine, so it always matches
+    # the Teacher Payments table (waivers and discounts included).
+    engine = compute_teacher_breakdown(tid, date_from=date_from, date_to=date_to, teacher_id=teacher.id).get(teacher.id, {})
+    waivers_deducted = engine.get('waivers', 0.0)
+    reductions_deducted = engine.get('reductions', 0.0)
+    total_earned = round(engine.get('earned', 0.0), 2)
     payouts_total = TeacherPayout.objects.filter(tenant_id=tid, teacher_id=teacher.id).aggregate(t=Sum('amount'))['t'] or 0
     payouts_total = round(float(payouts_total), 2)
 
@@ -571,6 +467,8 @@ def teacher_payments_history(request, teacher_id):
             'packages_count': len(packages_list),
             'packages_earned': round(packages_earned_total, 2),
             'books_earned': books_earned_total,
+            'waivers_deducted': waivers_deducted,
+            'reductions_deducted': reductions_deducted,
             'total_earned': total_earned,
             'paid_out': payouts_total,
             'balance': round(total_earned - payouts_total, 2),
