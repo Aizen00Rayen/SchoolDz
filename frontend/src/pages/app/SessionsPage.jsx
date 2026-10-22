@@ -11,10 +11,22 @@ import { api } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
+import { formatDate, formatTime } from "@/lib/format";
+import { DateInput } from "@/components/DateInput";
 
-const DEFAULT_FORM = {
-  group_id: "", teacher_id: "", room_id: "", start_at: new Date().toISOString(), end_at: new Date().toISOString(),
-  topic: "", status: "scheduled",
+const DEFAULT_DURATION_MIN = 90;
+
+/** A new session starts at the next round hour and lasts 1h30 by default —
+ * not "now" to "now", which had to be fixed by hand every time. */
+const defaultForm = () => {
+  const start = new Date();
+  start.setMinutes(0, 0, 0);
+  start.setHours(start.getHours() + 1);
+  const end = new Date(start.getTime() + DEFAULT_DURATION_MIN * 60000);
+  return {
+    group_id: "", teacher_id: "", room_id: "", start_at: start.toISOString(), end_at: end.toISOString(),
+    topic: "", status: "scheduled",
+  };
 };
 
 
@@ -38,8 +50,14 @@ function SessionRangePicker({ form, setForm }) {
       end_at: localInputToIso(`${newDate}T${endTime || "00:00"}`),
     });
   };
+  // Moving the start keeps the session's length, so the end follows along.
   const onStartTime = (newTime) => {
-    setForm({ ...form, start_at: localInputToIso(`${date}T${newTime}`) });
+    if (!newTime) return;
+    const oldStart = new Date(form.start_at).getTime();
+    const oldEnd = new Date(form.end_at).getTime();
+    const duration = oldEnd > oldStart ? oldEnd - oldStart : DEFAULT_DURATION_MIN * 60000;
+    const startIso = localInputToIso(`${date}T${newTime}`);
+    setForm({ ...form, start_at: startIso, end_at: new Date(new Date(startIso).getTime() + duration).toISOString() });
   };
   const onEndTime = (newTime) => {
     setForm({ ...form, end_at: localInputToIso(`${date}T${newTime}`) });
@@ -48,7 +66,7 @@ function SessionRangePicker({ form, setForm }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:col-span-2">
       <Field label={t("field.date")} required>
-        <Input type="date" value={date} onChange={(e) => onDate(e.target.value)} required />
+        <DateInput value={date} onChange={(e) => onDate(e.target.value)} required />
       </Field>
       <Field label={t("field.start_time")} required>
         <Input type="time" value={startTime} onChange={(e) => onStartTime(e.target.value)} required />
@@ -88,7 +106,7 @@ export default function SessionsPage() {
       title={t("menu.sessions")}
       subtitle={t("subtitle.sessions")}
       emptyIcon={CalendarClock}
-      defaultForm={DEFAULT_FORM}
+      defaultForm={defaultForm}
       canEdit={canModify}
       canDelete={canDelete}
       canCreate={canAdd}
@@ -116,9 +134,9 @@ export default function SessionsPage() {
           key: "when", label: t("field.when"),
           render: (r) => (
             <div className="font-mono text-xs">
-              <div>{new Date(r.start_at).toLocaleDateString()}</div>
+              <div>{formatDate(r.start_at, "short")}</div>
               <div className="text-muted-foreground">
-                {new Date(r.start_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} → {new Date(r.end_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                {formatTime(r.start_at)} → {formatTime(r.end_at)}
               </div>
             </div>
           ),

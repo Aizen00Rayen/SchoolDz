@@ -194,7 +194,7 @@ export default function WebsitePage() {
         subtitle={t("subtitle.website")}
         actions={
           <>
-            <Button type="button" variant="outline" size="icon" onClick={() => { navigator.clipboard.writeText(siteUrl); toast.success(t("settings.link_copied")); }}>
+            <Button aria-label={t("a11y.copy")} title={t("a11y.copy")} type="button" variant="outline" size="icon" onClick={() => { navigator.clipboard.writeText(siteUrl); toast.success(t("settings.link_copied")); }}>
               <Copy className="w-3.5 h-3.5" />
             </Button>
             <a href={siteUrl} target="_blank" rel="noreferrer">
@@ -293,16 +293,16 @@ export default function WebsitePage() {
                 <img src={resolveFileUrl(p.image_url)} alt={p.caption || ""} className="w-full h-28 object-cover" />
                 <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-1">
                   {i > 0 && (
-                    <Button size="icon" variant="secondary" className="h-7 w-7" onClick={() => reorderGalleryMut.mutate({ photoId: p.id, swapWithId: galleryItems[i - 1].id })}>
+                    <Button aria-label={t("a11y.move_up")} title={t("a11y.move_up")} size="icon" variant="secondary" className="h-7 w-7" onClick={() => reorderGalleryMut.mutate({ photoId: p.id, swapWithId: galleryItems[i - 1].id })}>
                       <ArrowUp className="w-3.5 h-3.5" />
                     </Button>
                   )}
                   {i < galleryItems.length - 1 && (
-                    <Button size="icon" variant="secondary" className="h-7 w-7" onClick={() => reorderGalleryMut.mutate({ photoId: p.id, swapWithId: galleryItems[i + 1].id })}>
+                    <Button aria-label={t("a11y.move_down")} title={t("a11y.move_down")} size="icon" variant="secondary" className="h-7 w-7" onClick={() => reorderGalleryMut.mutate({ photoId: p.id, swapWithId: galleryItems[i + 1].id })}>
                       <ArrowDown className="w-3.5 h-3.5" />
                     </Button>
                   )}
-                  <Button size="icon" variant="destructive" className="h-7 w-7" onClick={() => deleteGalleryMut.mutate(p.id)}>
+                  <Button aria-label={t("actions.delete")} title={t("actions.delete")} size="icon" variant="destructive" className="h-7 w-7" onClick={() => deleteGalleryMut.mutate(p.id)}>
                     <Trash2 className="w-3.5 h-3.5" />
                   </Button>
                 </div>

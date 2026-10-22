@@ -19,7 +19,11 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { PageHeader, EmptyState, LoadingRows, Field, groupOptionLabel } from "./_shared";
+import { PageHeader, EmptyState, LoadingRows, Field, groupOptionLabel, FilterPanel, MobileFab } from "./_shared";
+import { currencyLabel, formatDate } from "@/lib/format";
+import { formatDate as fmtDate, formatTime as fmtTime } from "@/lib/format";
+import { DateInput } from "@/components/DateInput";
+import { Amount } from "@/components/Amount";
 
 const EMPTY_PAYOUT = {
   teacher_id: "", amount: "", paid_at: new Date().toISOString().slice(0, 10),
@@ -69,7 +73,7 @@ export default function TeacherPaymentsPage() {
 
   const rows = data?.items || [];
   const totals = data?.totals || {};
-  const currency = tenant?.currency || "DZD";
+  const currency = currencyLabel(tenant?.currency);
 
   const payoutMut = useMutation({
     mutationFn: (payload) => api.post("/teacher-payouts", payload).then((r) => r.data),
@@ -147,6 +151,26 @@ export default function TeacherPaymentsPage() {
   };
 
   const money = (v) => `${Number(v || 0).toLocaleString()} ${currency}`;
+  // "Sessions 1,800 + Books 80 + Packages 0 − Waivers 0 − Discounts 1,000"
+  const deductionsOf = (r) => (r.waivers_deducted || 0) + (r.reductions_deducted || 0);
+  const breakdownOf = (r) => [
+    `${t("tp.sessions_tab")} ${money(r.session_earned)}`,
+    `+ ${t("tp.book_earned")} ${money(r.book_earned)}`,
+    `+ ${t("tp.standalone_earned")} ${money(r.standalone_earned)}`,
+    `− ${t("tp.waivers")} ${money(r.waivers_deducted)}`,
+    `− ${t("tp.discounts")} ${money(r.reductions_deducted)}`,
+    `= ${money(r.earned)}`,
+  ].join("\n");
+  const EarnedCell = ({ r }) => (
+    <span title={breakdownOf(r)} className="inline-flex flex-col cursor-help">
+      <span>{money(r.earned)}</span>
+      {deductionsOf(r) > 0 && (
+        <span className="text-[10px] font-normal text-destructive">
+          {t("tp.deductions")}: −{money(deductionsOf(r))}
+        </span>
+      )}
+    </span>
+  );
 
   return (
     <div>
@@ -170,13 +194,14 @@ export default function TeacherPaymentsPage() {
           </>
         }
       />
+      {canAdd && <MobileFab onClick={() => { setForm(EMPTY_PAYOUT); setOpen(true); }} label={t("tp.record_payout")} testId={"teacher-payout-fab"} />}
 
-      <div className="surface-card p-4 mb-4 grid grid-cols-1 md:grid-cols-4 gap-3">
+      <FilterPanel className="grid grid-cols-1 md:grid-cols-4 gap-3" activeCount={Object.values(filters).filter(Boolean).length}>
         <Field label={t("reports.from")}>
-          <Input type="date" value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
+          <DateInput value={filters.from} onChange={(e) => setFilters({ ...filters, from: e.target.value })} />
         </Field>
         <Field label={t("reports.to")}>
-          <Input type="date" value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
+          <DateInput value={filters.to} onChange={(e) => setFilters({ ...filters, to: e.target.value })} />
         </Field>
         <Field label={t("menu.teachers")}>
           <Select
@@ -206,7 +231,7 @@ export default function TeacherPaymentsPage() {
             </SelectContent>
           </Select>
         </Field>
-      </div>
+      </FilterPanel>
 
       {/* Top Financial KPI Row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-4">
@@ -232,8 +257,8 @@ export default function TeacherPaymentsPage() {
             <div className="text-[11px] uppercase tracking-wider font-semibold text-emerald-700 dark:text-emerald-300">
               {t("tp.earned", "المستحقات")}
             </div>
-            <div className="font-mono font-bold text-xl sm:text-2xl text-emerald-600 dark:text-emerald-400 truncate">
-              {money(totals.earned)}
+            <div className="font-mono font-bold text-xl sm:text-2xl text-emerald-600 dark:text-emerald-400 leading-tight">
+              <Amount value={totals.earned} currency={currency} />
             </div>
           </div>
         </div>
@@ -246,8 +271,8 @@ export default function TeacherPaymentsPage() {
             <div className="text-[11px] uppercase tracking-wider font-semibold text-blue-700 dark:text-blue-300">
               {t("tp.paid_out", "المسدد")}
             </div>
-            <div className="font-mono font-bold text-xl sm:text-2xl text-blue-600 dark:text-blue-400 truncate">
-              {money(totals.paid_out)}
+            <div className="font-mono font-bold text-xl sm:text-2xl text-blue-600 dark:text-blue-400 leading-tight">
+              <Amount value={totals.paid_out} currency={currency} />
             </div>
           </div>
         </div>
@@ -260,8 +285,8 @@ export default function TeacherPaymentsPage() {
             <div className="text-[11px] uppercase tracking-wider font-semibold text-amber-700 dark:text-amber-300">
               {t("tp.balance", "الرصيد المتبقي")}
             </div>
-            <div className="font-mono font-bold text-xl sm:text-2xl text-amber-600 dark:text-amber-400 truncate">
-              {money(totals.balance)}
+            <div className="font-mono font-bold text-xl sm:text-2xl text-amber-600 dark:text-amber-400 leading-tight">
+              <Amount value={totals.balance} currency={currency} />
             </div>
           </div>
         </div>
@@ -298,7 +323,7 @@ export default function TeacherPaymentsPage() {
                     <div className="grid grid-cols-3 gap-2 text-xs bg-muted/40 p-2.5 rounded-lg text-center">
                       <div>
                         <span className="text-muted-foreground block text-[10px] uppercase">{t("tp.earned")}</span>
-                        <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">{money(r.earned)}</span>
+                        <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400"><EarnedCell r={r} /></span>
                       </div>
                       <div>
                         <span className="text-muted-foreground block text-[10px] uppercase">{t("tp.paid_out")}</span>
@@ -413,7 +438,7 @@ export default function TeacherPaymentsPage() {
                       </td>
                       <td className="px-4 py-3.5 font-mono text-xs text-muted-foreground">{money(r.book_earned)}</td>
                       <td className="px-4 py-3.5 font-mono text-xs text-muted-foreground">{money(r.standalone_earned)}</td>
-                      <td className="px-4 py-3.5 font-mono font-bold text-emerald-600 dark:text-emerald-400">{money(r.earned)}</td>
+                      <td className="px-4 py-3.5 font-mono font-bold text-emerald-600 dark:text-emerald-400"><EarnedCell r={r} /></td>
                       <td className="px-4 py-3.5 font-mono text-xs text-muted-foreground">{money(r.paid_out)}</td>
                       <td className={`px-4 py-3.5 font-mono font-bold ${r.balance > 0 ? "text-amber-600 dark:text-amber-400" : "text-foreground"}`}>
                         {money(r.balance)}
@@ -475,11 +500,11 @@ export default function TeacherPaymentsPage() {
               <tbody>
                 {(payouts?.items || []).map((p) => (
                   <tr key={p.id} className="border-b border-border last:border-0">
-                    <td className="px-4 py-3 font-mono text-xs">{p.paid_at}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{fmtDate(p.paid_at, "short")}</td>
                     <td className="px-4 py-3">{p.teacher_name}</td>
                     <td className="px-4 py-3 font-mono">{money(p.amount)}</td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">
-                      {p.period_start || p.period_end ? `${p.period_start || "…"} → ${p.period_end || "…"}` : "—"}
+                      {p.period_start || p.period_end ? `${p.period_start ? fmtDate(p.period_start, "short") : "…"} → ${p.period_end ? fmtDate(p.period_end, "short") : "…"}` : "—"}
                     </td>
                     <td className="px-4 py-3 text-xs">{p.notes || "—"}</td>
                   </tr>
@@ -513,13 +538,13 @@ export default function TeacherPaymentsPage() {
               <Input type="number" step="0.01" min="0" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} required data-testid="payout-amount" />
             </Field>
             <Field label={t("field.paid_at")} required>
-              <Input type="date" value={form.paid_at} onChange={(e) => setForm({ ...form, paid_at: e.target.value })} required />
+              <DateInput value={form.paid_at} onChange={(e) => setForm({ ...form, paid_at: e.target.value })} required />
             </Field>
             <Field label={t("reports.from")}>
-              <Input type="date" value={form.period_start} onChange={(e) => setForm({ ...form, period_start: e.target.value })} />
+              <DateInput value={form.period_start} onChange={(e) => setForm({ ...form, period_start: e.target.value })} />
             </Field>
             <Field label={t("reports.to")}>
-              <Input type="date" value={form.period_end} onChange={(e) => setForm({ ...form, period_end: e.target.value })} />
+              <DateInput value={form.period_end} onChange={(e) => setForm({ ...form, period_end: e.target.value })} />
             </Field>
             <div className="md:col-span-2">
               <Field label={t("field.notes")}>
@@ -634,7 +659,7 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
     try {
       const d = new Date(iso);
       if (isNaN(d.getTime())) return iso;
-      return `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+      return `${fmtDate(d, "short")} ${fmtTime(d)}`;
     } catch {
       return iso;
     }
@@ -645,7 +670,7 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
     try {
       const d = new Date(iso);
       if (isNaN(d.getTime())) return iso;
-      return d.toLocaleDateString();
+      return fmtDate(d, "short");
     } catch {
       return iso;
     }
@@ -673,15 +698,13 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
               </DialogDescription>
             </div>
             <div className="flex items-center gap-2">
-              <Input
-                type="date"
+              <DateInput
                 value={dateFilters.from}
                 onChange={(e) => setDateFilters((prev) => ({ ...prev, from: e.target.value }))}
                 className="h-8 text-xs w-32"
               />
               <span className="text-xs text-muted-foreground">→</span>
-              <Input
-                type="date"
+              <DateInput
                 value={dateFilters.to}
                 onChange={(e) => setDateFilters((prev) => ({ ...prev, to: e.target.value }))}
                 className="h-8 text-xs w-32"
@@ -690,6 +713,8 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
                 <Button
                   variant="ghost"
                   size="sm"
+                  aria-label={t("a11y.clear")}
+                  title={t("a11y.clear")}
                   onClick={() => setDateFilters({ from: "", to: "" })}
                   className="h-8 px-2 text-xs"
                 >
@@ -806,7 +831,7 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
                       <td className="px-3 py-2.5 font-mono font-semibold text-foreground">{money(s.earned)}</td>
                       {canRemove && (
                         <td className="px-3 py-2.5 text-end">
-                          <Button
+                          <Button aria-label={t("actions.delete")}
                             variant="ghost"
                             size="icon"
                             className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
@@ -873,7 +898,7 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
                       <td className="px-3 py-2.5 font-mono font-semibold text-foreground">{money(p.earned)}</td>
                       {canRemove && (
                         <td className="px-3 py-2.5 text-end">
-                          <Button
+                          <Button aria-label={t("actions.delete")}
                             variant="ghost"
                             size="icon"
                             className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"

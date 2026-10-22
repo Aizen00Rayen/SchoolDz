@@ -41,6 +41,7 @@ class ErrorBoundary extends React.Component {
 }
 
 import { AuthProvider, useAuth } from "@/lib/auth";
+import { AppSkeleton } from "@/components/AppSkeleton";
 import { I18nProvider } from "@/lib/i18n";
 import { ThemeProvider } from "@/lib/theme";
 import { ConfirmProvider } from "@/lib/confirm";
@@ -104,11 +105,7 @@ function RequireAuth({ children }) {
   const { user, loading } = useAuth();
   const location = useLocation();
   if (loading)
-    return (
-      <div className="min-h-screen flex items-center justify-center text-muted-foreground text-sm">
-        Loading…
-      </div>
-    );
+    return <AppSkeleton />;
   if (!user) return <Navigate to="/login" state={{ from: location.pathname }} replace />;
   return children;
 }
@@ -125,11 +122,7 @@ function RequireActiveTenant({ children }) {
   const { user, tenant, loading } = useAuth();
   const location = useLocation();
   if (loading)
-    return (
-      <div className="min-h-screen flex items-center justify-center text-muted-foreground text-sm">
-        Loading…
-      </div>
-    );
+    return <AppSkeleton />;
   if (!user) return <Navigate to="/login" state={{ from: location.pathname }} replace />;
   if (user.role === "parent") return <Navigate to="/portal" replace />;
   if (tenant?.status === "pending_payment" || tenant?.status === "expired") return <Navigate to="/billing" replace />;
@@ -142,11 +135,7 @@ function RequirePortalAccess({ children }) {
   const { user, loading } = useAuth();
   const location = useLocation();
   if (loading)
-    return (
-      <div className="min-h-screen flex items-center justify-center text-muted-foreground text-sm">
-        Loading…
-      </div>
-    );
+    return <AppSkeleton />;
   if (!user) return <Navigate to="/login" state={{ from: location.pathname }} replace />;
   if (user.role !== "parent") return <Navigate to="/app" replace />;
   return children;
@@ -154,7 +143,7 @@ function RequirePortalAccess({ children }) {
 
 function AppIndexRedirect() {
   const { user, tenant, loading } = useAuth();
-  if (loading) return null;
+  if (loading) return <AppSkeleton />;
   if (!user) return <Navigate to="/login" replace />;
   return <Navigate to={getDefaultAppPath(user, tenant)} replace />;
 }

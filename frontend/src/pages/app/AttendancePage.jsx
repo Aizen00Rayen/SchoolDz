@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  Calendar, CheckCircle2, ClipboardCheck, Clock, ExternalLink, FileText,
+  Calendar, CheckCheck, CheckCircle2, ClipboardCheck, Clock, ExternalLink, FileText,
   Loader2, Printer, RotateCcw, Save, Search, Upload,
 } from "lucide-react";
 
@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { formatDate, formatTime } from "@/lib/format";
 
 const STATUS_KEYS = [
   { key: "present", cls: "bg-success text-success-foreground" },
@@ -307,6 +308,25 @@ export default function AttendancePage() {
     }
   }, [existing, sessionId]);
 
+  // Marks differ from what's saved -> warn before leaving or switching.
+  const savedMarks = useMemo(
+    () => Object.fromEntries((existing?.items || []).map((a) => [a.student_id, a.status])),
+    [existing],
+  );
+  const isDirty = Object.keys(marks).length > 0
+    && Object.entries(marks).some(([id, st]) => savedMarks[id] !== st);
+  useEffect(() => {
+    if (!isDirty) return undefined;
+    const warn = (e) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [isDirty]);
+  const changeSession = (id) => {
+    if (id === sessionId) return;
+    if (isDirty && !window.confirm(t("attendance.unsaved_confirm"))) return;
+    setSessionId(id);
+  };
+
   const saveMut = useMutation({
     mutationFn: async () => {
       const payload = {
@@ -377,6 +397,11 @@ export default function AttendancePage() {
                 {printing ? <Loader2 className="w-4 h-4 me-2 animate-spin" /> : <Printer className="w-4 h-4 me-2" />}
                 {t("attendance.print")}
               </Button>
+            )}
+            {canEdit && isDirty && (
+              <span className="self-center text-xs font-medium text-warning" data-testid="attendance-unsaved">
+                {t("attendance.unsaved")}
+              </span>
             )}
             {canEdit && (
               <Button
@@ -506,7 +531,7 @@ export default function AttendancePage() {
                 </button>
               )}
             </div>
-            <Select value={sessionId} onValueChange={setSessionId}>
+            <Select value={sessionId} onValueChange={changeSession}>
               <SelectTrigger className="bg-background h-9" data-testid="attendance-session-select">
                 <SelectValue
                   placeholder={
@@ -538,7 +563,7 @@ export default function AttendancePage() {
                     return (
                       <SelectItem key={s.id} value={s.id}>
                         <span className="font-medium">
-                          {new Date(s.start_at).toLocaleString([], { dateStyle: "short", timeStyle: "short" })}
+                          {formatDate(s.start_at, "short")} {formatTime(s.start_at)}
                         </span>
                         {" — "}
                         {groupLabel}
@@ -594,6 +619,22 @@ export default function AttendancePage() {
             <div className="text-xs text-muted-foreground font-mono">
               {visibleEnrolled.length} / {enrolled.length} {t("field.students")}
             </div>
+            {canEdit && enrolled.some((st) => !marks[st.id]) && (
+              <Button
+                type="button" size="sm" variant="outline" className="h-9 ms-auto"
+                onClick={() => setMarks((m) => {
+                  // Only fills students not marked yet — never overrides a
+                  // late/absent/excused already chosen.
+                  const next = { ...m };
+                  for (const st of enrolled) if (!next[st.id]) next[st.id] = "present";
+                  return next;
+                })}
+                data-testid="attendance-mark-all-present"
+              >
+                <CheckCheck className="w-4 h-4 me-1.5" />
+                {t("attendance.mark_rest_present")}
+              </Button>
+            )}
           </div>
           <div className="surface-card overflow-hidden">
           <div className="overflow-x-auto">

@@ -178,7 +178,7 @@ export function StudentPicker({ selected, onChange, max, showGrade = true }) {
               data-testid={`student-picker-chip-${id}`}
             >
               {labels[id] || "…"}
-              <button type="button" onClick={() => toggle(id)} className="text-muted-foreground hover:text-destructive">
+              <button aria-label={t("a11y.clear")} title={t("a11y.clear")} type="button" onClick={() => toggle(id)} className="text-muted-foreground hover:text-destructive">
                 <X className="w-3 h-3" />
               </button>
             </span>
@@ -230,7 +230,7 @@ export default function ParentsPage() {
       rowClassName={approvalRowClass}
       renderRowActions={(row) => row.approval_status === "pending" && canModify ? (
         <>
-          <Button
+          <Button aria-label={t("parents.approve")}
             size="icon" variant="ghost"
             onClick={() => approveMut.mutate(row.id)}
             className="h-8 w-8 text-success hover:bg-success/10"
@@ -239,7 +239,7 @@ export default function ParentsPage() {
           >
             <Check className="w-3.5 h-3.5" />
           </Button>
-          <Button
+          <Button aria-label={t("parents.reject")}
             size="icon" variant="ghost"
             onClick={() => rejectMut.mutate(row.id)}
             className="h-8 w-8 text-destructive hover:bg-destructive/10"

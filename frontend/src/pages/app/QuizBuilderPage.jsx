@@ -16,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import { formatDateTime } from "@/lib/format";
 
 const ACCEPT = "image/png,image/jpeg,image/webp,image/gif,application/pdf";
 
@@ -247,7 +248,7 @@ export default function QuizBuilderPage() {
                     <td className="px-4 py-3 text-xs">
                       {a.student_name || <span className="text-muted-foreground">{t("quiz.unmatched")}</span>}
                     </td>
-                    <td className="px-4 py-3 font-mono text-[11px]">{new Date(a.created_at).toLocaleString()}</td>
+                    <td className="px-4 py-3 font-mono text-[11px]">{formatDateTime(a.created_at)}</td>
                     <td className="px-4 py-3 font-mono">
                       {a.score != null
                         ? `${a.score} / ${a.max_score ?? maxScore}`
@@ -285,7 +286,7 @@ export default function QuizBuilderPage() {
           </DialogHeader>
           <div className="flex items-center gap-2">
             <Input readOnly value={publishResult?.take_url || ""} className="font-mono text-xs bg-muted/40" />
-            <Button
+            <Button aria-label={t("a11y.copy")} title={t("a11y.copy")}
               type="button" variant="outline" size="icon"
               onClick={() => {
                 navigator.clipboard.writeText(publishResult?.take_url || "");

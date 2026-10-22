@@ -20,6 +20,7 @@ import {
 import { api, extractError, openSessionSheetPdf } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
+import { formatDate } from "@/lib/format";
 
 // Course.pricing_type -> the PaymentItem "kind" that best represents a
 // quick one-off payment for that course, matching the choices PaymentsPage
@@ -280,7 +281,7 @@ export default function SessionSheetPage() {
                       key={s.id || `slot-${idx}`}
                       className="px-2 py-2.5 text-[10px] font-mono text-muted-foreground text-center whitespace-nowrap"
                     >
-                      {s.date || "—"}
+                      {formatDate(s.date, "short")}
                     </th>
                   ))}
                 </tr>
@@ -465,7 +466,7 @@ export default function SessionSheetPage() {
                 className="bg-background pl-8 h-9 text-xs"
               />
               {searchQuery && (
-                <button
+                <button aria-label={t("a11y.clear")} title={t("a11y.clear")}
                   type="button"
                   onClick={() => setSearchQuery("")}
                   className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground"
@@ -631,7 +632,7 @@ export default function SessionSheetPage() {
                   onClick={() => setActiveTab(String(id))}
                 >
                   <span>{g.name}</span>
-                  <button
+                  <button aria-label={t("a11y.clear")} title={t("a11y.clear")}
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();

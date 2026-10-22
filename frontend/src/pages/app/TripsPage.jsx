@@ -8,6 +8,8 @@ import { StudentPicker } from "./ParentsPage";
 import { useI18n } from "@/lib/i18n";
 import { useAuth } from "@/lib/auth";
 import { usePermission } from "@/lib/permissions";
+import { currencyLabel } from "@/lib/format";
+import { DateInput } from "@/components/DateInput";
 
 const DEFAULT_FORM = {
   title: "", destination: "", price: 0, trip_date: "", notes: "", student_ids: [],
@@ -44,7 +46,7 @@ export default function TripsPage() {
           key: "price", label: t("field.price"),
           render: (r) => (
             <span className="font-mono font-semibold">
-              {Math.round(r.price || 0).toLocaleString()} {tenant?.currency || "DZD"}
+              {Math.round(r.price || 0).toLocaleString()} {currencyLabel(tenant?.currency)}
             </span>
           ),
         },
@@ -62,7 +64,7 @@ export default function TripsPage() {
             <Input type="number" step="0.01" min="0" value={form.price ?? 0} onChange={(e) => setForm({ ...form, price: parseFloat(e.target.value) || 0 })} required />
           </Field>
           <Field label={t("field.trip_date")}>
-            <Input type="date" value={form.trip_date || ""} onChange={(e) => setForm({ ...form, trip_date: e.target.value })} />
+            <DateInput value={form.trip_date || ""} onChange={(e) => setForm({ ...form, trip_date: e.target.value })} />
           </Field>
           <div className="md:col-span-2">
             <Field label={t("field.notes")}>

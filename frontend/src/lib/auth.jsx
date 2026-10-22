@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { api, setAccessToken, getAccessToken, extractError } from "@/lib/api";
 
 const AuthContext = createContext(null);
@@ -24,7 +24,29 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  const loadMe = useCallback(async () => {
+  // One /auth/me (+ /owner/schools) at a time: concurrent callers (mount,
+  // focus and visibilitychange all fire together when a tab comes back)
+  // share the same in-flight request, and a background refresh within 30s
+  // of the last one is skipped.
+  const inFlight = useRef(null);
+  const lastLoaded = useRef(0);
+
+  const loadMe = useCallback(async ({ background = false, force = false } = {}) => {
+    if (inFlight.current) {
+      if (!force) return inFlight.current;
+      // After login/switch the answer must reflect the new token.
+      await inFlight.current.catch(() => {});
+    }
+    if (background && Date.now() - lastLoaded.current < 30_000) return undefined;
+    inFlight.current = loadMeNow().finally(() => {
+      inFlight.current = null;
+      lastLoaded.current = Date.now();
+    });
+    return inFlight.current;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const loadMeNow = async () => {
     try {
       const { data } = await api.get("/auth/me");
       setUser(data.user);
@@ -41,7 +63,7 @@ export function AuthProvider({ children }) {
     } finally {
       setLoading(false);
     }
-  }, [loadMyTenants]);
+  };
 
   useEffect(() => {
     loadMe();
@@ -58,7 +80,7 @@ export function AuthProvider({ children }) {
   // session state on tab-switch-back.
   useEffect(() => {
     const revalidate = () => {
-      if (document.visibilityState === "visible" && getAccessToken()) loadMe();
+      if (document.visibilityState === "visible" && getAccessToken()) loadMe({ background: true });
     };
     document.addEventListener("visibilitychange", revalidate);
     window.addEventListener("focus", revalidate);
@@ -76,7 +98,7 @@ export function AuthProvider({ children }) {
     });
     if (data.access_token) setAccessToken(data.access_token);
     setUser(data.user);
-    await loadMe();
+    await loadMe({ force: true });
     return data.user;
   };
 
@@ -84,7 +106,7 @@ export function AuthProvider({ children }) {
     const { data } = await api.post("/auth/register", payload);
     if (data.access_token) setAccessToken(data.access_token);
     setUser(data.user);
-    await loadMe();
+    await loadMe({ force: true });
     return data.user;
   };
 
@@ -94,7 +116,7 @@ export function AuthProvider({ children }) {
   const loginWithToken = async (token, initialUser) => {
     setAccessToken(token);
     if (initialUser) setUser(initialUser);
-    await loadMe();
+    await loadMe({ force: true });
   };
 
   const loginWithGoogleCode = async (code) => {
@@ -104,7 +126,7 @@ export function AuthProvider({ children }) {
     // Set user immediately from the exchange response — no need to race with /auth/me
     if (data.user) setUser(data.user);
     // Now fetch full profile (includes tenant) with the token already stored
-    await loadMe();
+    await loadMe({ force: true });
     return data.user;
   };
 
@@ -120,7 +142,7 @@ export function AuthProvider({ children }) {
   };
 
   const refreshTenant = async () => {
-    await loadMe();
+    await loadMe({ force: true });
   };
 
   /** Switches the caller's active school, then does a full hard navigation

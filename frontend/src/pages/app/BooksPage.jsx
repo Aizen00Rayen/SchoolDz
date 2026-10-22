@@ -18,6 +18,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { currencyLabel, formatDateTime } from "@/lib/format";
 
 const DEFAULT_FORM = { title: "", description: "", price: 0, author_teacher_id: "" };
 const SCHOOL_AUTHOR = "__school";
@@ -127,7 +128,7 @@ function CopiesDialog({ book, onClose }) {
                     <td className="px-3 py-2 text-xs">{c.buyer_name || <span className="text-muted-foreground">—</span>}</td>
                     <td className="px-3 py-2 text-xs">{c.sold_by_name || <span className="text-muted-foreground">—</span>}</td>
                     <td className="px-3 py-2 font-mono text-[11px] text-muted-foreground">
-                      {c.sold_at ? new Date(c.sold_at).toLocaleString() : "—"}
+                      {formatDateTime(c.sold_at)}
                     </td>
                   </tr>
                 ))}
@@ -163,6 +164,13 @@ export default function BooksPage() {
         canEdit={canModify}
         canDelete={canDelete}
         canCreate={canAdd}
+        preparePayload={({ initial_stock, ...rest }) => rest}
+        onCreated={async (book, form) => {
+          const quantity = parseInt(form?.initial_stock, 10);
+          if (book?.id && quantity > 0) {
+            await api.post(`/books/${book.id}/restock`, { quantity });
+          }
+        }}
         columns={[
           {
             key: "title", label: t("field.title"),
@@ -177,7 +185,7 @@ export default function BooksPage() {
             key: "price", label: t("field.price"),
             render: (r) => (
               <span className="font-mono font-semibold">
-                {Math.round(r.price || 0).toLocaleString()} {tenant?.currency || "DZD"}
+                {Math.round(r.price || 0).toLocaleString()} {currencyLabel(tenant?.currency)}
               </span>
             ),
           },
@@ -218,9 +226,22 @@ export default function BooksPage() {
             <Field label={t("field.title")} required>
               <Input value={form.title || ""} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
             </Field>
-            <Field label={t("field.price")} required>
-              <Input type="number" step="0.01" min="0" value={form.price ?? 0} onChange={(e) => setForm({ ...form, price: parseFloat(e.target.value) || 0 })} required />
-            </Field>
+            <div className="grid grid-cols-2 gap-4">
+              <Field label={t("field.price")} required>
+                <Input type="number" step="0.01" min="0" value={form.price ?? 0} onChange={(e) => setForm({ ...form, price: parseFloat(e.target.value) || 0 })} required />
+              </Field>
+              {!form.id && (
+                <Field label={t("books.initial_stock")}>
+                  <Input
+                    type="number" min="0" max="1000" step="1"
+                    value={form.initial_stock ?? ""}
+                    placeholder="0"
+                    onChange={(e) => setForm({ ...form, initial_stock: e.target.value })}
+                    data-testid="books-initial-stock"
+                  />
+                </Field>
+              )}
+            </div>
             <Field label={t("field.description")}>
               <Textarea value={form.description || ""} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} />
             </Field>

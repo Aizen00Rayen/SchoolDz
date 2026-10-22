@@ -21,6 +21,8 @@ import { useAuth } from "@/lib/auth";
 import { useI18n } from "@/lib/i18n";
 import { categoryLabel } from "./ExpensesPage";
 import { otherIncomeCategoryLabel } from "./OtherIncomesPage";
+import { currencyLabel, formatDate, formatTime } from "@/lib/format";
+import { DateInput } from "@/components/DateInput";
 
 function currentMonthValue() {
   const d = new Date();
@@ -93,11 +95,9 @@ function escapeHtml(str) {
 
 function formatPrintDate(d) {
   if (!d) return "—";
-  try {
-    return String(d).slice(0, 16).replace("T", " ");
-  } catch {
-    return String(d);
-  }
+  const str = String(d);
+  // Date-only values print as 22/10/2026; timestamps add the time.
+  return str.length > 10 ? `${formatDate(d, "short")} ${formatTime(d)}` : formatDate(d, "short");
 }
 
 function getSharedDossierStyles(isRtl) {
@@ -1038,7 +1038,7 @@ export default function ReportsPage() {
     enabled: Boolean(selectedTeacherId),
   });
 
-  const currency = tenant?.currency || "DZD";
+  const currency = currencyLabel(tenant?.currency);
   const money = (v) => `${Number(v || 0).toLocaleString()} ${currency}`;
   const byCategory = Object.entries(finance?.expenses_by_category || {});
 
@@ -1171,7 +1171,7 @@ export default function ReportsPage() {
               className="ps-9 pe-9 text-xs sm:text-sm bg-background h-10"
             />
             {searchQuery && (
-              <button
+              <button aria-label={t("a11y.clear")} title={t("a11y.clear")}
                 type="button"
                 onClick={() => setSearchQuery("")}
                 className="absolute end-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
@@ -1888,8 +1888,7 @@ export default function ReportsPage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 pt-2 border-t border-border/50">
               <Field label={t("reports.from")}>
-                <Input
-                  type="date"
+                <DateInput
                   value={filters.from}
                   onChange={(e) => {
                     const newFrom = e.target.value;
@@ -1903,8 +1902,7 @@ export default function ReportsPage() {
                 />
               </Field>
               <Field label={t("reports.to")}>
-                <Input
-                  type="date"
+                <DateInput
                   value={filters.to}
                   onChange={(e) => setFilters({ ...filters, to: e.target.value })}
                   data-testid="reports-to"
@@ -2069,7 +2067,7 @@ export default function ReportsPage() {
                       <tbody>
                         {sessionRealizations.map((sr) => (
                           <tr key={sr.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
-                            <td className="px-3 py-2 font-mono text-xs text-muted-foreground" dir="ltr">{sr.date || "—"}</td>
+                            <td className="px-3 py-2 font-mono text-xs text-muted-foreground" dir="ltr">{formatDate(sr.date, "short")}</td>
                             <td className="px-3 py-2 font-medium text-foreground">{sr.student_name}</td>
                             <td className="px-3 py-2 text-xs">
                               <div>{sr.course_title}</div>
@@ -2139,7 +2137,7 @@ export default function ReportsPage() {
                       <tbody>
                         {finance.transactions.map((tx, i) => (
                           <tr key={i} className="border-b border-border last:border-0">
-                            <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{tx.date || "—"}</td>
+                            <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{formatDate(tx.date, "short")}</td>
                             <td className="px-3 py-2">
                               <div className="font-medium">{tx.description}</div>
                               {tx.reference && <div className="text-[11px] font-mono text-muted-foreground">{tx.reference}</div>}

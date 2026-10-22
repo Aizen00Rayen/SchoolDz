@@ -10,6 +10,7 @@ import { PageHeader, LoadingRows, StatusPill, CalendarGrid, CalendarMonthNav } f
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { currencyLabel, formatDate } from "@/lib/format";
 
 const downloadInvoice = (paymentId) => openInvoicePdf(paymentId).catch((e) => toast.error(extractError(e)));
 
@@ -134,7 +135,7 @@ export default function PortalChildDetailPage() {
             rows={attendanceQ.data?.items || []}
             empty="No attendance records yet."
             columns={[
-              { key: "marked_at", label: "Date", render: (r) => <span className="font-mono text-xs">{new Date(r.marked_at).toLocaleDateString()}</span> },
+              { key: "marked_at", label: "Date", render: (r) => <span className="font-mono text-xs">{formatDate(r.marked_at, "short")}</span> },
               { key: "status", label: "Status", render: (r) => <StatusPill status={r.status} /> },
               { key: "note", label: "Note", render: (r) => r.note || <span className="text-muted-foreground">—</span> },
             ]}
@@ -169,7 +170,7 @@ export default function PortalChildDetailPage() {
                   {overduePayments.length} overdue payment{overduePayments.length > 1 ? "s" : ""}
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {Math.round(overdueTotal).toLocaleString()} {tenant?.currency || "DZD"} past the due date
+                  {Math.round(overdueTotal).toLocaleString()} {currencyLabel(tenant?.currency)} past the due date
                 </div>
               </div>
             </div>
@@ -184,7 +185,7 @@ export default function PortalChildDetailPage() {
                 render: (r) => (
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-xs">{r.invoice_number}</span>
-                    <Button
+                    <Button aria-label="Download invoice PDF"
                       type="button" variant="ghost" size="icon" className="h-7 w-7"
                       onClick={() => downloadInvoice(r.id)} title="Download invoice PDF"
                     >
@@ -195,7 +196,7 @@ export default function PortalChildDetailPage() {
               },
               {
                 key: "amount", label: "Amount",
-                render: (r) => <span className="font-mono font-semibold">{Math.round(r.amount).toLocaleString()} {tenant?.currency || "DZD"}</span>,
+                render: (r) => <span className="font-mono font-semibold">{Math.round(r.amount).toLocaleString()} {currencyLabel(tenant?.currency)}</span>,
               },
               { key: "status", label: "Status", render: (r) => <StatusPill status={r.status} /> },
             ]}
@@ -210,7 +211,7 @@ export default function PortalChildDetailPage() {
             columns={[
               { key: "title", label: "Title", render: (r) => <span className="font-medium">{r.title}</span> },
               { key: "score", label: "Score", render: (r) => <span className="font-mono">{r.score} / {r.max_score}</span> },
-              { key: "date", label: "Date", render: (r) => <span className="font-mono text-xs">{(r.date || "").slice(0, 10)}</span> },
+              { key: "date", label: "Date", render: (r) => <span className="font-mono text-xs">{formatDate(r.date, "short")}</span> },
             ]}
           />
         </TabsContent>
@@ -226,7 +227,7 @@ export default function PortalChildDetailPage() {
                 <div key={n.id} className="surface-card p-4">
                   <div className="flex items-center gap-2 mb-1.5">
                     <StickyNote className="w-3.5 h-3.5 text-muted-foreground" />
-                    <span className="text-xs font-mono text-muted-foreground">{new Date(n.date).toLocaleDateString()}</span>
+                    <span className="text-xs font-mono text-muted-foreground">{formatDate(n.date, "short")}</span>
                     {n.title && <span className="text-xs font-medium">· {n.title}</span>}
                     {n.status && <StatusPill status={n.status} />}
                   </div>

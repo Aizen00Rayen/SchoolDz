@@ -17,6 +17,8 @@ import { api, extractError, openStudentIdCardsPdf } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
 import { useConfirm } from "@/lib/confirm";
+import { DateInput } from "@/components/DateInput";
+import { formatDate } from "@/lib/format";
 
 const BLOOD_TYPES = ["O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"];
 
@@ -169,7 +171,7 @@ export default function StudentsPage() {
             <span key={m.id} className="ps-2" style={{ display: "block", marginTop: 4 }}>
               {"• "}{m.first_name} {m.last_name}
               {m.parent_name ? ` — ${m.parent_name}` : ""}
-              {m.birth_date ? ` (${m.birth_date})` : ""}
+              {m.birth_date ? ` (${formatDate(m.birth_date, "short")})` : ""}
               {" "}<span className="font-mono text-xs text-muted-foreground">{m.student_code}</span>
             </span>
           ))}
@@ -235,7 +237,7 @@ export default function StudentsPage() {
         <>
           {row.approval_status === "pending" && canModify && (
             <>
-              <Button
+              <Button aria-label={t("students.approve")}
                 size="icon" variant="ghost"
                 onClick={() => approveMut.mutate(row.id)}
                 className="h-8 w-8 text-success hover:bg-success/10"
@@ -244,7 +246,7 @@ export default function StudentsPage() {
               >
                 <Check className="w-3.5 h-3.5" />
               </Button>
-              <Button
+              <Button aria-label={t("students.reject")}
                 size="icon" variant="ghost"
                 onClick={() => rejectMut.mutate(row.id)}
                 className="h-8 w-8 text-destructive hover:bg-destructive/10"
@@ -255,7 +257,7 @@ export default function StudentsPage() {
               </Button>
             </>
           )}
-          <Button
+          <Button aria-label={t("students.print_id_card")}
             size="icon" variant="ghost"
             onClick={() => printCards(row.id)}
             disabled={printing}
@@ -383,7 +385,7 @@ export default function StudentsPage() {
             </Field>
           </div>
           <Field label={t("field.birth_date")}>
-            <Input type="date" value={(form.birth_date || "").slice(0, 10)} onChange={(e) => setForm({ ...form, birth_date: e.target.value })} />
+            <DateInput value={(form.birth_date || "").slice(0, 10)} onChange={(e) => setForm({ ...form, birth_date: e.target.value })} />
           </Field>
           <Field label={t("field.email")}>
             <Input type="email" value={form.email || ""} onChange={(e) => setForm({ ...form, email: e.target.value })} data-testid="student-form-email" />
