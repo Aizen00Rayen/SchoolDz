@@ -1,4 +1,5 @@
 from django.db import migrations
+from ._mysql_only import mysql_only
 
 
 class Migration(migrations.Migration):
@@ -15,7 +16,7 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunSQL(
+        mysql_only(
             sql="ALTER TABLE payments MODIFY COLUMN kind VARCHAR(50) NOT NULL DEFAULT 'monthly';",
             reverse_sql=(
                 "ALTER TABLE payments MODIFY COLUMN kind "

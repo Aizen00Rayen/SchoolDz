@@ -69,49 +69,53 @@ class QuizSubmitRateThrottle(AnonRateThrottle):
     scope = 'quiz_submit'
 
 
-from chargily_pay import ChargilyClient as SDKChargilyClient
-from chargily_pay.entity import Checkout as SDKCheckout
-
 class ChargilyClient:
+    """Minimal client for the Chargily Pay v2 API (checkouts + webhook
+    signatures) — the only parts this app uses. It replaces the
+    `chargily-pay` SDK, which pinned `requests==2.31` (known CVEs) and sent
+    requests without any timeout. Same calls and payloads as the SDK."""
+    TIMEOUT = 20  # seconds
+
     def __init__(self):
         self.key = getattr(settings, 'CHARGILY_KEY', '')
         self.secret = getattr(settings, 'CHARGILY_SECRET', '')
         self.url = getattr(settings, 'CHARGILY_URL', 'https://pay.chargily.net/test/api/v2/')
-        
-        # Initialize the official SDK client
-        self.sdk_client = SDKChargilyClient(
-            key=self.key,
-            secret=self.secret,
-            url=self.url
-        )
+        if not self.url.endswith('/'):
+            self.url += '/'
+
+    def _headers(self):
+        return {'Authorization': f'Bearer {self.secret}', 'Content-Type': 'application/json'}
 
     def createCheckout(self, data):
         if not self.secret:
             raise RuntimeError('Chargily is not configured (CHARGILY_SECRET_KEY missing).')
-        
-        # Construct Checkout entity for the SDK
-        checkout = SDKCheckout(
-            success_url=data.get('success_url'),
-            amount=data.get('amount'),
-            currency=data.get('currency', 'dzd'),
-            failure_url=data.get('failure_url'),
-            description=data.get('description'),
-            locale=data.get('locale'),
-            webhook_endpoint=data.get('webhook_endpoint'),
-            metadata=data.get('metadata')
-        )
-        return self.sdk_client.create_checkout(checkout)
+        amount = data.get('amount')
+        if not amount or amount <= 10:
+            raise ValueError('amount should be greater than 10 DZD')
+        payload = {
+            'success_url': data.get('success_url'),
+            'amount': amount,
+            'currency': data.get('currency', 'dzd'),
+            'failure_url': data.get('failure_url'),
+            'description': data.get('description'),
+            'locale': data.get('locale'),
+            'webhook_endpoint': data.get('webhook_endpoint'),
+            'metadata': data.get('metadata'),
+        }
+        payload = {k: v for k, v in payload.items() if v is not None}
+        response = requests.post(self.url + 'checkouts', headers=self._headers(), json=payload, timeout=self.TIMEOUT)
+        response.raise_for_status()
+        return response.json()
 
     def getCheckout(self, chargily_checkout_id):
         if not self.secret:
             raise RuntimeError('Chargily is not configured (CHARGILY_SECRET_KEY missing).')
-        
-        try:
-            return self.sdk_client.retrieve_checkout(chargily_checkout_id)
-        except requests.exceptions.HTTPError as e:
-            if hasattr(e, 'response') and e.response is not None and e.response.status_code == 404:
-                return None
-            raise
+        response = requests.get(self.url + f'checkouts/{chargily_checkout_id}', headers=self._headers(),
+                                timeout=self.TIMEOUT)
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()
 
     def verifyWebhookSignature(self, raw_body_bytes, signature_header):
         if not signature_header or not self.secret:
@@ -120,19 +124,21 @@ class ChargilyClient:
             payload_str = raw_body_bytes.decode('utf-8') if isinstance(raw_body_bytes, bytes) else raw_body_bytes
         except UnicodeDecodeError:
             # A genuine Chargily payload is always UTF-8 JSON — a body that
-            # isn't decodable at all can't possibly carry a valid signature,
-            # so this is just another way to fail verification, not a
-            # reason to 500.
+            # isn't decodable at all can't possibly carry a valid signature.
             return False
-        return self.sdk_client.validate_signature(signature_header, payload_str)
+        computed = hmac.new(self.secret.encode('utf-8'), payload_str.encode('utf-8'), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(str(signature_header), computed)
 
 
 class GoogleOAuthService:
     @staticmethod
-    def get_signed_state(intent, tenant_name=None, tenant_slug=None, center_type=None):
+    def get_signed_state(intent, tenant_name=None, tenant_slug=None, center_type=None, nonce=None):
         payload = {
             'intent': intent,
-            'exp': int(time.time()) + 600 # 10 minutes expiry
+            'exp': int(time.time()) + 600, # 10 minutes expiry
+            # Ties the state to the browser that started the flow (the same
+            # value sits in an HttpOnly cookie) to stop login-CSRF.
+            'nonce': nonce,
         }
         if intent == 'register':
             payload['tenant_name'] = tenant_name

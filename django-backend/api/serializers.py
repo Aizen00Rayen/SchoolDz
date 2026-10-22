@@ -1,5 +1,18 @@
+import re
 from decimal import Decimal
 from rest_framework import serializers
+
+# Colors are written straight into inline styles and printable HTML, so only
+# plain hex values (#RGB / #RRGGBB / #RRGGBBAA) are accepted.
+HEX_COLOR_RE = re.compile(r'^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$')
+
+
+def validate_hex_color(value):
+    if value in (None, ''):
+        return value
+    if not isinstance(value, str) or not HEX_COLOR_RE.match(value.strip()):
+        raise serializers.ValidationError('Use a hex color such as #E53935.')
+    return value.strip()
 
 # NOTE: every `tenant_id` below is deliberately read_only. It used to be a
 # writable PrimaryKeyRelatedField over Tenant.objects.all(), which meant any
@@ -112,6 +125,9 @@ class CourseSerializer(serializers.ModelSerializer):
     class Meta:
         model = Course
         exclude = ['tenant']
+
+    def validate_color(self, value):
+        return validate_hex_color(value)
 
     def validate(self, attrs):
         # Merge onto the existing instance so a PATCH that only touches an
@@ -621,6 +637,9 @@ class TimetableEntrySerializer(serializers.ModelSerializer):
         Room, source='room', allow_null=True, required=False
     )
     room_name = serializers.CharField(source='room.name', read_only=True, default=None)
+
+    def validate_color(self, value):
+        return validate_hex_color(value)
 
     class Meta:
         model = TimetableEntry

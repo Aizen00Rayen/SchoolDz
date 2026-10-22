@@ -109,12 +109,12 @@ class PardonTypeTestCase(SimpleTestCase):
 
 
 class StudentBalancePardonDebtTestCase(SimpleTestCase):
-    @patch('api.views.Attendance')
-    @patch('api.views.ClassSession')
-    @patch('api.views.Course')
-    @patch('api.views.Group')
-    @patch('api.views.PaymentItem')
-    @patch('api.views.DebtWaiver')
+    @patch('api.views.payments.Attendance')
+    @patch('api.views.payments.ClassSession')
+    @patch('api.views.payments.Course')
+    @patch('api.views.payments.Group')
+    @patch('api.views.payments.PaymentItem')
+    @patch('api.views.payments.DebtWaiver')
     def test_side_pardon_pending_shows_in_debts(self, mock_dw, mock_pi, mock_group, mock_course, mock_cs, mock_att):
         mock_att.objects.filter.return_value.values.return_value = []
         mock_cs.objects.filter.return_value.values.return_value = []
@@ -150,12 +150,12 @@ class StudentBalancePardonDebtTestCase(SimpleTestCase):
         self.assertEqual(student_bal['paid'], 0.0)
         self.assertEqual(student_bal['balance'], -1000.0)
 
-    @patch('api.views.Attendance')
-    @patch('api.views.ClassSession')
-    @patch('api.views.Course')
-    @patch('api.views.Group')
-    @patch('api.views.PaymentItem')
-    @patch('api.views.DebtWaiver')
+    @patch('api.views.payments.Attendance')
+    @patch('api.views.payments.ClassSession')
+    @patch('api.views.payments.Course')
+    @patch('api.views.payments.Group')
+    @patch('api.views.payments.PaymentItem')
+    @patch('api.views.payments.DebtWaiver')
     def test_side_pardon_teacher_pending_shows_in_debts(self, mock_dw, mock_pi, mock_group, mock_course, mock_cs, mock_att):
         mock_att.objects.filter.return_value.values.return_value = []
         mock_cs.objects.filter.return_value.values.return_value = []
@@ -194,12 +194,12 @@ class StudentBalancePardonDebtTestCase(SimpleTestCase):
 
 
 class OtherIncomeFinanceCalculationTestCase(SimpleTestCase):
-    @patch('api.views.compute_realized_revenue')
-    @patch('api.views.StudentInsurance')
-    @patch('api.views.compute_teacher_earnings')
-    @patch('api.views.OtherIncome')
-    @patch('api.views.Expense')
-    @patch('api.views.Payment')
+    @patch('api.views.reports.compute_realized_revenue')
+    @patch('api.views.reports.StudentInsurance')
+    @patch('api.views.reports.compute_teacher_earnings')
+    @patch('api.views.reports.OtherIncome')
+    @patch('api.views.reports.Expense')
+    @patch('api.views.reports.Payment')
     def test_finance_report_includes_other_income(self, mock_payment, mock_expense, mock_other_income, mock_cte, mock_insurance, mock_crr):
         mock_crr.return_value = {
             'realized_tuition': 0.0,
@@ -252,7 +252,7 @@ class OtherIncomeFinanceCalculationTestCase(SimpleTestCase):
         # Mock insurances: 0
         mock_insurance.objects.filter.return_value.select_related.return_value = []
 
-        with patch('api.views.filter_by_date_range', side_effect=lambda qs, req, field: qs):
+        with patch('api.views.reports.filter_by_date_range', side_effect=lambda qs, req, field: qs):
             result = _compute_finance_report_data('tenant-1', request)
 
         self.assertEqual(result['collected'], 10000.0)
@@ -272,8 +272,8 @@ class OtherIncomeFinanceCalculationTestCase(SimpleTestCase):
 
 
 class RealizedRevenueCalculationTestCase(SimpleTestCase):
-    @patch('api.views.Attendance')
-    @patch('api.views.PaymentItem')
+    @patch('api.views.reports.Attendance')
+    @patch('api.views.reports.PaymentItem')
     def test_compute_realized_revenue_attendance_deduction(self, mock_payment_item, mock_attendance):
         from api.views import compute_realized_revenue
         from unittest.mock import MagicMock
@@ -345,8 +345,8 @@ class RealizedRevenueCalculationTestCase(SimpleTestCase):
         self.assertEqual(result['course_breakdown'][0]['realized_revenue'], 1000.0)
         self.assertEqual(result['course_breakdown'][0]['teacher_payout'], 1000.0)
 
-    @patch('api.views.Attendance')
-    @patch('api.views.PaymentItem')
+    @patch('api.views.reports.Attendance')
+    @patch('api.views.reports.PaymentItem')
     def test_compute_realized_revenue_filtered_by_day(self, mock_payment_item, mock_attendance):
         from api.views import compute_realized_revenue
         from unittest.mock import MagicMock
@@ -390,10 +390,11 @@ class RealizedRevenueCalculationTestCase(SimpleTestCase):
         self.assertEqual(len(result['session_realizations']), 1)
         self.assertEqual(result['session_realizations'][0]['id'], 'att1')
 
-    @patch('api.views.OtherIncomeCategory')
-    @patch('api.views.Tenant')
+    @patch('api.views.expenses.OtherIncomeCategory')
+    @patch('api.views.expenses.Tenant')
     def test_ensure_default_other_income_categories_seeding(self, mock_tenant, mock_oic):
-        from api.views import ensure_default_other_income_categories, DEFAULT_OTHER_INCOME_CATEGORIES
+        from api.views import ensure_default_other_income_categories
+        from api.models import DEFAULT_OTHER_INCOME_CATEGORIES
 
         # Case 1: Already seeded (update returns 0) -> does nothing
         mock_tenant.objects.filter.return_value.update.return_value = 0
@@ -414,12 +415,12 @@ class DebtPayTestCase(SimpleTestCase):
         from rest_framework.test import APIRequestFactory
         self.factory = APIRequestFactory()
 
-    @patch('api.views.transaction.atomic')
-    @patch('api.views.log_activity')
-    @patch('api.views.compute_student_balances')
-    @patch('api.views.Payment')
-    @patch('api.views.Student')
-    @patch('api.views.require_staff_tenant')
+    @patch('api.views.payments.transaction.atomic')
+    @patch('api.views.payments.log_activity')
+    @patch('api.views.payments.compute_student_balances')
+    @patch('api.views.payments.Payment')
+    @patch('api.views.payments.Student')
+    @patch('api.views.payments.require_staff_tenant')
     def test_debts_pay_validation(self, mock_tenant, mock_student, mock_payment, mock_balances, mock_log, mock_atomic):
         from rest_framework.test import force_authenticate
         from api.views import debts_pay
@@ -457,12 +458,12 @@ class DebtPayTestCase(SimpleTestCase):
         resp = debts_pay(req, 's1')
         self.assertEqual(resp.status_code, 400)
 
-    @patch('api.views.transaction.atomic')
-    @patch('api.views.log_activity')
-    @patch('api.views.compute_student_balances')
-    @patch('api.views.Payment')
-    @patch('api.views.Student')
-    @patch('api.views.require_staff_tenant')
+    @patch('api.views.payments.transaction.atomic')
+    @patch('api.views.payments.log_activity')
+    @patch('api.views.payments.compute_student_balances')
+    @patch('api.views.payments.Payment')
+    @patch('api.views.payments.Student')
+    @patch('api.views.payments.require_staff_tenant')
     def test_debts_pay_full_settlement(self, mock_tenant, mock_student, mock_payment, mock_balances, mock_log, mock_atomic):
         from api.views import debts_pay
         from unittest.mock import MagicMock
@@ -500,14 +501,14 @@ class DebtPayTestCase(SimpleTestCase):
         self.assertEqual(resp.data['status'], 'settled')
         self.assertEqual(resp.data['date'], '2026-09-19')
 
-    @patch('api.views.transaction.atomic')
-    @patch('api.views._next_sequence_code', return_value='INV-000100')
-    @patch('api.views.PaymentItem')
-    @patch('api.views.log_activity')
-    @patch('api.views.compute_student_balances')
-    @patch('api.views.Payment')
-    @patch('api.views.Student')
-    @patch('api.views.require_staff_tenant')
+    @patch('api.views.payments.transaction.atomic')
+    @patch('api.views.payments._next_sequence_code', return_value='INV-000100')
+    @patch('api.views.payments.PaymentItem')
+    @patch('api.views.payments.log_activity')
+    @patch('api.views.payments.compute_student_balances')
+    @patch('api.views.payments.Payment')
+    @patch('api.views.payments.Student')
+    @patch('api.views.payments.require_staff_tenant')
     def test_debts_pay_partial_settlement(self, mock_tenant, mock_student, mock_payment, mock_balances, mock_log, mock_pi, mock_seq, mock_atomic):
         from api.views import debts_pay
         from rest_framework.test import force_authenticate
@@ -564,14 +565,14 @@ class DebtPayTestCase(SimpleTestCase):
         for k in pi_kwargs.keys():
             self.assertTrue(k in real_fields or k.endswith('_id'), f"Invalid field {k} passed to PaymentItem")
 
-    @patch('api.views.transaction.atomic')
-    @patch('api.views._next_sequence_code', return_value='INV-000101')
-    @patch('api.views.PaymentItem')
-    @patch('api.views.log_activity')
-    @patch('api.views.compute_student_balances')
-    @patch('api.views.Payment')
-    @patch('api.views.Student')
-    @patch('api.views.require_staff_tenant')
+    @patch('api.views.payments.transaction.atomic')
+    @patch('api.views.payments._next_sequence_code', return_value='INV-000101')
+    @patch('api.views.payments.PaymentItem')
+    @patch('api.views.payments.log_activity')
+    @patch('api.views.payments.compute_student_balances')
+    @patch('api.views.payments.Payment')
+    @patch('api.views.payments.Student')
+    @patch('api.views.payments.require_staff_tenant')
     def test_debts_pay_attendance_debt_without_bill(self, mock_tenant, mock_student, mock_payment, mock_balances, mock_log, mock_pi, mock_seq, mock_atomic):
         from api.views import debts_pay
         from rest_framework.test import force_authenticate
@@ -619,8 +620,8 @@ class DebtPayTestCase(SimpleTestCase):
         for k in pi_kwargs.keys():
             self.assertTrue(k in real_fields or k.endswith('_id'), f"Invalid field {k} passed to PaymentItem")
 
-    @patch('api.views.Student')
-    @patch('api.views.require_staff_tenant')
+    @patch('api.views.payments.Student')
+    @patch('api.views.payments.require_staff_tenant')
     def test_debts_pay_student_not_found(self, mock_tenant, mock_student):
         from api.views import debts_pay
         from rest_framework.test import force_authenticate
@@ -639,9 +640,9 @@ class DebtPayTestCase(SimpleTestCase):
         self.assertEqual(resp.status_code, 404)
         self.assertEqual(resp.data['detail'], 'Student not found')
 
-    @patch('api.views.compute_student_balances')
-    @patch('api.views.Student')
-    @patch('api.views.require_staff_tenant')
+    @patch('api.views.payments.compute_student_balances')
+    @patch('api.views.payments.Student')
+    @patch('api.views.payments.require_staff_tenant')
     def test_debts_pay_validation_errors(self, mock_tenant, mock_student, mock_balances):
         from api.views import debts_pay
         from rest_framework.test import force_authenticate
@@ -862,7 +863,7 @@ class ReportsAndArchiveTestCase(SimpleTestCase):
         factory = APIRequestFactory()
         request = factory.get('/api/v1/dashboard/summary')
         force_authenticate(request, user=u_restricted)
-        with patch('api.views.require_staff_tenant', return_value='t1'):
+        with patch('api.views.reports.require_staff_tenant', return_value='t1'):
             response = dashboard_summary(request)
             self.assertEqual(response.status_code, 403)
 

@@ -1,4 +1,5 @@
 from django.db import migrations
+from ._mysql_only import mysql_only
 
 
 class Migration(migrations.Migration):
@@ -8,11 +9,11 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunSQL(
+        mysql_only(
             sql="ALTER TABLE payments MODIFY COLUMN status VARCHAR(50) NOT NULL DEFAULT 'paid';",
             reverse_sql="",
         ),
-        migrations.RunSQL(
+        mysql_only(
             sql="ALTER TABLE payment_items MODIFY COLUMN status VARCHAR(20) NOT NULL DEFAULT 'paid';",
             reverse_sql="",
         ),

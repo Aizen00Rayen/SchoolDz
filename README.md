@@ -114,9 +114,15 @@ SchoolDz/
 │   │   ├── migrations/         # Database migrations (0001 - 0044)
 │   │   ├── models.py           # Enterprise relational data models
 │   │   ├── serializers.py      # DRF ModelSerializers & validation
-│   │   ├── views.py            # Business logic, finance engines & endpoints
+│   │   ├── views/              # Endpoints split by area (re-exported from views/__init__.py)
+│   │   │   ├── common.py       # Shared helpers + TenantScopedViewSet (tenant isolation)
+│   │   │   ├── auth.py, public.py, billing.py, portal.py, platform_admin.py
+│   │   │   ├── people.py, academics.py, attendance.py, dashboard.py
+│   │   │   ├── payments.py, expenses.py, teacher_payments.py, reports.py
 │   │   ├── services.py         # Third-party integrations (Chargily, Google)
 │   │   ├── tests.py            # Financial & core unit tests
+│   │   ├── test_security.py    # DB-backed tenant isolation & permission tests
+│   │   ├── test_teacher_earnings.py # DB-backed teacher % (sessions, books) tests
 │   │   └── templates/          # HTML templates for WeasyPrint PDFs (Invoices, ID cards)
 │   ├── schooldz/               # Django root project configuration (settings, WSGI, URLs)
 │   ├── requirements.txt        # Backend dependencies
