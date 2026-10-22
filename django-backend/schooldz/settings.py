@@ -178,7 +178,7 @@ STATIC_URL = 'static/'
 # The built React app (npm run build in frontend/). When present, Django
 # serves index.html for any non-API route so the whole site — API and SPA —
 # can run from a single free-tier host with one WSGI app (see serve_frontend
-# in api/views.py and the catch-all route in schooldz/urls.py).
+# in api/views/public.py and the catch-all route in schooldz/urls.py).
 FRONTEND_BUILD_DIR = BASE_DIR.parent / 'frontend' / 'build'
 
 # CRA's build output already lives under build/static/, matching STATIC_URL.
@@ -235,6 +235,13 @@ REST_FRAMEWORK = {
     # and three mobile apps. Applied per-view (see LoginRateThrottle /
     # PasswordResetRateThrottle in api/services.py), not globally, so
     # everything else is unaffected.
+    # How many reverse proxies (nginx, PythonAnywhere's front end) sit in
+    # front of Django. DRF's rate limiter identifies a client by IP; with
+    # this unset it trusts the whole client-supplied X-Forwarded-For header,
+    # so rotating that header bypassed every login/reset/enrollment limit.
+    # 1 = trust only the address our own proxy appended. Local runserver has
+    # no proxy, so DEBUG defaults to 0 (use the socket address).
+    'NUM_PROXIES': int(os.environ.get('NUM_PROXIES', '0' if DEBUG else '1')),
     'DEFAULT_THROTTLE_RATES': {
         'login': '10/min',
         'password_reset': '5/min',

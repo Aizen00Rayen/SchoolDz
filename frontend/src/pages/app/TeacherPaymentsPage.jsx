@@ -737,6 +737,11 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
             <div className="text-[11px] text-muted-foreground">
               {t("tp.paid_out")}: {money(totals.paid_out)}
             </div>
+            {(totals.waivers_deducted || 0) + (totals.reductions_deducted || 0) > 0 && (
+              <div className="text-[11px] text-destructive">
+                {t("tp.deductions")}: −{money((totals.waivers_deducted || 0) + (totals.reductions_deducted || 0))}
+              </div>
+            )}
           </div>
 
           <div className="bg-muted/30 border rounded-lg p-3">

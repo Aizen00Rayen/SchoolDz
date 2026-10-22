@@ -2,7 +2,7 @@
 
 The whole site — API and React frontend — runs from **one** Django WSGI app.
 Django serves `/api/v1/*` as usual and now also serves the built React app
-for every other route (see `serve_frontend` in `api/views.py` and the
+for every other route (see `serve_frontend` in `api/views/public.py` and the
 catch-all in `schooldz/urls.py`), so a single free PythonAnywhere web app is
 enough. No second host, no separate static site needed.
 

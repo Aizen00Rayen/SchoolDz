@@ -382,7 +382,7 @@ function generateCourseDossierHtml({ courseDossier, selectedYear, tenant, user, 
     <header class="school-header">
       <div class="header-brand">
         ${schoolLogo
-          ? `<img src="${schoolLogo}" alt="Logo" class="school-logo" />`
+          ? `<img src="${escapeHtml(schoolLogo)}" alt="Logo" class="school-logo" />`
           : `<div class="school-logo-fallback">${escapeHtml(schoolName[0]?.toUpperCase() || "S")}</div>`
         }
         <div class="school-info">
@@ -407,7 +407,7 @@ function generateCourseDossierHtml({ courseDossier, selectedYear, tenant, user, 
     <div class="profile-card">
       <div>
         <div class="profile-name" style="display: flex; align-items: center; gap: 8px;">
-          <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: ${c.color || '#0f172a'};"></span>
+          <span style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: ${escapeHtml(c.color || '#0f172a')};"></span>
           <span>${escapeHtml(c.title)}</span>
         </div>
         <div class="profile-chips">

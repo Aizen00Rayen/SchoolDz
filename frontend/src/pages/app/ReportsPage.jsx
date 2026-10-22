@@ -473,7 +473,7 @@ function generateStudentDossierHtml({ studentReport, tenant, user, currency, t, 
     <header class="school-header">
       <div class="header-brand">
         ${schoolLogo
-          ? `<img src="${schoolLogo}" alt="Logo" class="school-logo" />`
+          ? `<img src="${escapeHtml(schoolLogo)}" alt="Logo" class="school-logo" />`
           : `<div class="school-logo-fallback">${escapeHtml(schoolName[0]?.toUpperCase() || "S")}</div>`
         }
         <div class="school-info">
@@ -700,7 +700,7 @@ function generateTeacherDossierHtml({ teacherReport, tenant, user, currency, t, 
     <header class="school-header">
       <div class="header-brand">
         ${schoolLogo
-          ? `<img src="${schoolLogo}" alt="Logo" class="school-logo" />`
+          ? `<img src="${escapeHtml(schoolLogo)}" alt="Logo" class="school-logo" />`
           : `<div class="school-logo-fallback">${escapeHtml(schoolName[0]?.toUpperCase() || "S")}</div>`
         }
         <div class="school-info">

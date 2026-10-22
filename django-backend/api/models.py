@@ -14,7 +14,7 @@ def generate_uuid():
 # Roles that belong inside the staff workspace at all. 'parent'/'student' are
 # external-facing logins served by their own dedicated endpoints (the portal
 # and the public badge lookup), and must never reach a staff-only view — see
-# require_staff_tenant() in views.py.
+# require_staff_tenant() in views/common.py.
 STAFF_ROLES = ('owner', 'director', 'secretary', 'accountant', 'teacher')
 
 PERMISSION_MODULES = [
@@ -227,7 +227,7 @@ class User(AbstractBaseUser):
 class TenantMembership(models.Model):
     """Marks a User as an owner of a Tenant beyond whichever one is
     currently their `tenant` FK (their "active" workspace — see
-    auth_switch_tenant in views.py). A school owner who buys a second
+    auth_switch_tenant in views/auth.py). A school owner who buys a second
     school keeps their single login/User row; switching schools just
     updates `User.tenant` to point at a Tenant they hold a membership for,
     which is why every existing `request.user.tenant_id`-scoped check in
@@ -243,7 +243,7 @@ class TenantMembership(models.Model):
     # purely a label the owner/admin sets (doesn't affect access or scoping
     # at all), surfaced in the workspace switcher and the admin panel.
     # Enforced as at-most-one-per-user at the application layer (see
-    # admin_set_tenant_ownership / TenantViewSet.create in views.py), not a
+    # admin_set_tenant_ownership / TenantViewSet.create in views/), not a
     # DB constraint, since "no primary yet" is a valid transient state.
     is_primary = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
