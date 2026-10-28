@@ -30,6 +30,9 @@ def _item_pardon_type(item):
     An item marked pardoned with no explicit type means a full waiver. The
     bill-level type is only used for items that are themselves pardoned, so
     one waived line doesn't spill onto the other lines of the same bill."""
+    fully = item.status in PARDONED_STATUSES or getattr(item.payment, 'status', None) in PARDONED_STATUSES
+    if item.pardon_type == 'both' and not fully:
+        return None  # a leftover "both" tag on a paid/pending line is not a waiver
     if item.pardon_type:
         return item.pardon_type
     if item.status in PARDONED_STATUSES:

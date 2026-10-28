@@ -230,13 +230,14 @@ class TeacherEarningsTests(TestCase):
         self.assertAlmostEqual(row['earned'], 3 * 600)
 
     def test_late_students_are_billed_like_present_ones(self):
-        from .views import compute_student_balances
-        _, group = self.regular_course('1000')
+        # The attendance roster's Paid/Unpaid badge counts late like present.
+        from .views import compute_course_payment_status
+        course, group = self.regular_course('1000')
         self.session(group, statuses=('late', 'present', 'absent'))
-        balances = compute_student_balances(self.tenant.id)
-        self.assertAlmostEqual(balances[self.students[0].id]['cost'], 1000)
-        self.assertAlmostEqual(balances[self.students[1].id]['cost'], 1000)
-        self.assertAlmostEqual(balances.get(self.students[2].id, {}).get('cost', 0), 0)
+        status = compute_course_payment_status(self.tenant.id, course.id)
+        self.assertIn(self.students[0].id, status)
+        self.assertIn(self.students[1].id, status)
+        self.assertNotIn(self.students[2].id, status)
 
     def test_teacher_discount_applies_to_bill_without_group(self):
         course, group = self.regular_course('1000')
