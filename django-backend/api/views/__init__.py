@@ -181,6 +181,7 @@ from .teacher_payments import (  # noqa: F401
     compute_teacher_earnings,
     teacher_payments_summary,
     teacher_payments_history,
+    teacher_payments_session_students,
     teacher_payment_remove_package_item,
     teacher_payment_remove_session,
     TeacherPayoutViewSet,

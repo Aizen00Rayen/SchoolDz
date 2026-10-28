@@ -18,6 +18,7 @@ from .common import (
 from .payments import (
     BALANCE_THRESHOLD,
     _payment_item_discount,
+    compute_course_payment_status,
 )
 
 
@@ -181,6 +182,7 @@ def compute_teacher_breakdown(tenant_id, date_from=None, date_to=None, teacher_i
     ).exclude(kind__in=('trip',)).exclude(payment__status='cancelled').exclude(status='cancelled').select_related(
         'group', 'payment', 'book', 'course'), date_from, date_to)
     waivers = {}  # (teacher, student, course) -> [(bill date, bill kind, session units waived)]
+    school_pardons = {}  # same shape, for lines only the school waived (teacher still paid)
     for item in items:
         amount = float(item.amount or 0)
         if item.kind == 'book':
@@ -200,15 +202,16 @@ def compute_teacher_breakdown(tenant_id, date_from=None, date_to=None, teacher_i
         if item.kind == 'course' and item.course_id in ctx['standalone_course_ids']:
             if not teacher_waived:
                 row(tid)['standalone_earned'] += teacher_share
-        elif item.kind != 'book' and teacher_waived:
+        elif item.kind != 'book' and (teacher_waived or p_type == 'school'):
             price = ctx['price_per_session'].get(item.course_id, 0.0)
             if price <= 0 and item.course_id:
                 price = course_per_session_price(item.course.price, item.course.pricing_type, item.course.sessions_count)
             # How many sessions this bill line pays for.
             units = amount / price if price > 0 else 1.0
             when = item.payment.paid_at or item.payment.created_at
-            waivers.setdefault((tid, item.payment.student_id, item.course_id), []).append(
-                (when.date() if when else None, item.kind, units))
+            (waivers if teacher_waived else school_pardons).setdefault(
+                (tid, item.payment.student_id, item.course_id), []).append(
+                (when.date() if when else None, item.kind, units, p_type))
 
         reduction = float(item.reduction or 0)
         if reduction > 0 and not teacher_waived and item.reduction_target in ('teacher', 'total'):
@@ -223,17 +226,21 @@ def compute_teacher_breakdown(tenant_id, date_from=None, date_to=None, teacher_i
     for rec in records:
         by_key.setdefault((rec[2], rec[3], rec[4]), []).append(rec)
     absorbed_by_session = {}  # (session, student) -> fraction of the session waived (0..1)
+    pardon_types = {}         # (session, student) -> {'teacher', 'both'}
+    school_flag = set()       # (session, student) covered by a school-only pardon
+
+    def window_for(recs, kind, bill_date):
+        if kind == 'per_session':
+            return [r for r in recs if r[0] and bill_date and r[0].date() == bill_date]
+        if kind == 'monthly':
+            return [r for r in recs if r[0] and bill_date and (r[0].year, r[0].month) == (bill_date.year, bill_date.month)]
+        return recs
+
     for key, lines in waivers.items():
         recs = sorted(by_key.get(key, []), key=lambda x: (x[0] is None, x[0]))
-        for bill_date, kind, units in sorted(lines, key=lambda x: (x[0] is None, x[0])):
-            if kind == 'per_session':
-                window = [r for r in recs if r[0] and bill_date and r[0].date() == bill_date]
-            elif kind == 'monthly':
-                window = [r for r in recs if r[0] and bill_date and (r[0].year, r[0].month) == (bill_date.year, bill_date.month)]
-            else:
-                window = recs
+        for bill_date, kind, units, p_type in sorted(lines, key=lambda x: (x[0] is None, x[0])):
             left = units
-            for rec in window:
+            for rec in window_for(recs, kind, bill_date):
                 if left <= 0.005:
                     break
                 used = absorbed_by_session.get((rec[1], rec[3]), 0.0)
@@ -241,7 +248,17 @@ def compute_teacher_breakdown(tenant_id, date_from=None, date_to=None, teacher_i
                 if take <= 0:
                     continue
                 absorbed_by_session[(rec[1], rec[3])] = used + take
+                pardon_types.setdefault((rec[1], rec[3]), set()).add(p_type)
                 left -= take
+    for key, lines in school_pardons.items():
+        recs = sorted(by_key.get(key, []), key=lambda x: (x[0] is None, x[0]))
+        for bill_date, kind, units, _p in lines:
+            left = units
+            for rec in window_for(recs, kind, bill_date):
+                if left <= 0.005:
+                    break
+                school_flag.add((rec[1], rec[3]))
+                left -= 1.0
 
     for start, session_id, tid, student_id, course_id, share in sorted(records, key=lambda x: (x[0] is None, x[0])):
         fraction = min(1.0, absorbed_by_session.get((session_id, student_id), 0.0))
@@ -254,11 +271,16 @@ def compute_teacher_breakdown(tenant_id, date_from=None, date_to=None, teacher_i
         else:
             r['present_count'] += 1
         if detail:
-            d = r.setdefault('sessions', {}).setdefault(session_id, {'attended': 0, 'pardoned': 0, 'waived': 0.0, 'gross': 0.0})
+            d = r.setdefault('sessions', {}).setdefault(session_id, {'attended': 0, 'pardoned': 0, 'waived': 0.0, 'gross': 0.0, 'students': {}})
             d['attended'] += 1
             d['pardoned'] += 1 if fully else 0
             d['waived'] += absorbed
             d['gross'] += share
+            d['students'][student_id] = {
+                'gross': share, 'waived': absorbed, 'pardoned': fully,
+                'pardon_types': sorted(pardon_types.get((session_id, student_id), [])),
+                'school_pardon': (session_id, student_id) in school_flag,
+            }
 
     for r in figures.values():
         r['session_earned'] = round(r['session_earned'], 2)
@@ -528,6 +550,80 @@ def teacher_payments_history(request, teacher_id):
         },
         'sessions': sessions_list,
         'packages': packages_list,
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def teacher_payments_session_students(request, teacher_id, session_id):
+    """The students who attended one of a teacher's sessions, with what each
+    means for the teacher's pay: counted, pardoned by the teacher (no pay),
+    pardoned by the school only (teacher still paid), and whether the student
+    has paid for the course. Powers the expandable rows in the teacher
+    history dialog. Accepts the dialog's ?from=&to= so waivers are matched
+    exactly as the history totals are."""
+    user = request.user
+    tid = require_staff_tenant(user)
+    if not user.can_view('teacher_payments') and not user.can_view('teachers'):
+        raise PermissionDenied('Forbidden')
+
+    teacher = Teacher.objects.filter(id=teacher_id, tenant_id=tid).first()
+    session = ClassSession.objects.filter(id=session_id, tenant_id=tid).select_related('group', 'course', 'group__course').first()
+    if not teacher or not session:
+        raise NotFound('Not found')
+    session_teacher = session.teacher_id or (session.group.teacher_id if session.group_id else None)
+    if session_teacher != teacher.id:
+        raise NotFound('Not found')
+
+    engine = compute_teacher_breakdown(
+        tid, date_from=request.GET.get('from'), date_to=request.GET.get('to'),
+        teacher_id=teacher.id, detail=True,
+    ).get(teacher.id, {})
+    detail = engine.get('sessions', {}).get(session.id, {}).get('students', {})
+
+    course = session.course or (session.group.course if session.group_id else None)
+    attended = list(Attendance.objects.filter(
+        tenant_id=tid, session_id=session.id, status__in=ATTENDED_STATUSES,
+    ).select_related('student').order_by('student__first_name', 'student__last_name'))
+    paid_status = compute_course_payment_status(
+        tid, course.id, student_ids=[a.student_id for a in attended],
+    ) if course else {}
+
+    rows = []
+    for a in attended:
+        d = detail.get(a.student_id, {})
+        gross = round(float(d.get('gross', 0.0)), 2)
+        waived = round(float(d.get('waived', 0.0)), 2)
+        pardoned = bool(d.get('pardoned'))
+        rows.append({
+            'student_id': a.student_id,
+            'name': f'{a.student.first_name} {a.student.last_name}'.strip(),
+            'student_code': a.student.student_code,
+            'attendance': a.status,
+            'pardoned': pardoned,
+            'partly_pardoned': (not pardoned) and waived > 0,
+            'pardon_types': d.get('pardon_types', []),
+            'school_pardon': bool(d.get('school_pardon')),
+            'paid': paid_status.get(a.student_id),
+            'gross': gross,
+            'earned': round(max(0.0, gross - waived), 2),
+        })
+    return Response({
+        'session_id': session.id,
+        'start_at': session.start_at.isoformat() if session.start_at else None,
+        'group_name': session.group.name if session.group_id else None,
+        'course_title': course.title if course else None,
+        'teacher_percentage': float(teacher.payment_percentage or 0),
+        'students': rows,
+        'counts': {
+            'attended': len(rows),
+            'counted': sum(1 for r in rows if not r['pardoned']),
+            'pardoned': sum(1 for r in rows if r['pardoned']),
+            'school_pardon': sum(1 for r in rows if r['school_pardon'] and not r['pardoned']),
+            'paid': sum(1 for r in rows if r['paid'] is True and not r['pardoned']),
+            'unpaid': sum(1 for r in rows if r['paid'] is False and not r['pardoned']),
+        },
+        'total_earned': round(sum(r['earned'] for r in rows), 2),
     })
 
 

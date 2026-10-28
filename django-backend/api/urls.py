@@ -141,6 +141,8 @@ urlpatterns = [
     *_both('teacher-payments/summary', views.teacher_payments_summary, 'teacher_payments_summary'),
     path('teacher-payments/<str:teacher_id>/history/', views.teacher_payments_history, name='teacher_payments_history'),
     path('teacher-payments/<str:teacher_id>/history', views.teacher_payments_history, name='teacher_payments_history_noslash'),
+    path('teacher-payments/<str:teacher_id>/sessions/<str:session_id>/students/', views.teacher_payments_session_students, name='teacher_payments_session_students'),
+    path('teacher-payments/<str:teacher_id>/sessions/<str:session_id>/students', views.teacher_payments_session_students, name='teacher_payments_session_students_noslash'),
     path('teacher-payments/package-items/<str:item_id>/', views.teacher_payment_remove_package_item, name='teacher_payment_remove_package_item'),
     path('teacher-payments/package-items/<str:item_id>', views.teacher_payment_remove_package_item, name='teacher_payment_remove_package_item_noslash'),
     path('teacher-payments/sessions/<str:session_id>/', views.teacher_payment_remove_session, name='teacher_payment_remove_session'),

@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Calendar, Download, History, Package, Plus, Trash2, Wallet, Users, HandCoins, CheckCircle2, Banknote, AlertCircle } from "lucide-react";
+import { Calendar, ChevronDown, ChevronRight, Download, History, Package, Plus, Trash2, Wallet, Users, HandCoins, CheckCircle2, Banknote, AlertCircle } from "lucide-react";
 
 import { api, extractError, downloadFrom } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
@@ -20,7 +20,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { PageHeader, EmptyState, LoadingRows, Field, groupOptionLabel, FilterPanel, MobileFab } from "./_shared";
-import { currencyLabel, formatDate } from "@/lib/format";
+import { currencyLabel, formatDate, formatNumber } from "@/lib/format";
 import { formatDate as fmtDate, formatTime as fmtTime } from "@/lib/format";
 import { DateInput } from "@/components/DateInput";
 import { Amount } from "@/components/Amount";
@@ -580,6 +580,101 @@ export default function TeacherPaymentsPage() {
   );
 }
 
+/** The students who attended one session, with what each means for the
+ * teacher: counted, pardoned (no pay) and whether they have paid. Loaded
+ * only when the row is opened. */
+function SessionStudentsPanel({ teacherId, sessionId, query, currency, colSpan }) {
+  const { t } = useI18n();
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ["teacher-session-students", teacherId, sessionId, query],
+    queryFn: () =>
+      api.get(`/teacher-payments/${teacherId}/sessions/${sessionId}/students${query ? `?${query}` : ""}`).then((r) => r.data),
+  });
+  const money = (v) => `${formatNumber(v)} ${currency}`;
+  const counts = data?.counts || {};
+
+  const paymentBadge = (r) => {
+    if (r.pardoned) {
+      return (
+        <span className="px-1.5 py-0.5 rounded-full bg-violet-500/10 text-violet-700 dark:text-violet-300 font-medium whitespace-nowrap">
+          {t(r.pardon_types.includes("both") ? "tp.pardoned_both" : "tp.pardoned_teacher")}
+        </span>
+      );
+    }
+    if (r.school_pardon) {
+      return (
+        <span className="px-1.5 py-0.5 rounded-full bg-sky-500/10 text-sky-700 dark:text-sky-300 font-medium whitespace-nowrap" title={t("tp.school_pardon_hint")}>
+          {t("tp.pardoned_school")}
+        </span>
+      );
+    }
+    if (r.paid === true) {
+      return <span className="px-1.5 py-0.5 rounded-full bg-success/10 text-success font-medium">{t("attendance.paid")}</span>;
+    }
+    if (r.paid === false) {
+      return <span className="px-1.5 py-0.5 rounded-full bg-destructive/10 text-destructive font-medium">{t("attendance.unpaid")}</span>;
+    }
+    return <span className="text-muted-foreground">—</span>;
+  };
+
+  return (
+    <tr className="bg-muted/20">
+      <td colSpan={colSpan} className="px-3 py-3" data-testid="tp-session-students">
+        {isLoading ? (
+          <LoadingRows />
+        ) : isError ? (
+          <div className="text-destructive text-xs">{extractError(error)}</div>
+        ) : (data?.students || []).length === 0 ? (
+          <div className="text-muted-foreground text-xs">{t("tp.no_students_attended")}</div>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-1.5 text-[11px]">
+              <span className="px-2 py-0.5 rounded-full bg-muted font-medium">{t("tp.counted")}: {counts.counted}</span>
+              {counts.pardoned > 0 && <span className="px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-700 dark:text-violet-300 font-medium">{t("tp.pardoned")}: {counts.pardoned}</span>}
+              {counts.school_pardon > 0 && <span className="px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-700 dark:text-sky-300 font-medium">{t("tp.pardoned_school")}: {counts.school_pardon}</span>}
+              <span className="px-2 py-0.5 rounded-full bg-success/10 text-success font-medium">{t("attendance.paid")}: {counts.paid}</span>
+              <span className="px-2 py-0.5 rounded-full bg-destructive/10 text-destructive font-medium">{t("attendance.unpaid")}: {counts.unpaid}</span>
+            </div>
+            <div className="rounded-md border bg-background overflow-hidden">
+              <table className="w-full text-xs">
+                <thead className="bg-muted/40 border-b">
+                  <tr>
+                    <th className="text-start px-3 py-1.5 font-medium text-muted-foreground">{t("field.student")}</th>
+                    <th className="text-start px-3 py-1.5 font-medium text-muted-foreground">{t("field.code")}</th>
+                    <th className="text-start px-3 py-1.5 font-medium text-muted-foreground">{t("field.status")}</th>
+                    <th className="text-start px-3 py-1.5 font-medium text-muted-foreground">{t("tp.payment")}</th>
+                    <th className="text-end px-3 py-1.5 font-medium text-muted-foreground">{t("tp.teacher_pay")}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {data.students.map((r) => (
+                    <tr key={r.student_id} className={r.pardoned ? "bg-violet-500/5" : ""} data-testid={`tp-student-${r.student_id}`}>
+                      <td className={`px-3 py-1.5 font-medium ${r.pardoned ? "line-through decoration-violet-400/60 text-muted-foreground" : ""}`}>{r.name}</td>
+                      <td className="px-3 py-1.5 font-mono text-muted-foreground">{r.student_code || "—"}</td>
+                      <td className="px-3 py-1.5">{t(`status.${r.attendance}`)}</td>
+                      <td className="px-3 py-1.5">{paymentBadge(r)}</td>
+                      <td className={`px-3 py-1.5 text-end font-mono font-semibold ${r.pardoned ? "text-muted-foreground" : ""}`} dir="ltr">
+                        {money(r.earned)}
+                        {r.partly_pardoned && <span className="block text-[10px] font-normal text-violet-600 dark:text-violet-400">{t("tp.partly_pardoned")}</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-muted/30 border-t">
+                  <tr>
+                    <td colSpan={4} className="px-3 py-1.5 font-medium">{t("tp.session_total")}</td>
+                    <td className="px-3 py-1.5 text-end font-mono font-bold" dir="ltr">{money(data.total_earned)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        )}
+      </td>
+    </tr>
+  );
+}
+
 function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
   const { t } = useI18n();
   const qc = useQueryClient();
@@ -590,6 +685,7 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
   const canRemove = canModify || canDelete || canDeleteSessions || canModifySessions || canDeletePayments || canModifyPayments;
 
   const teacherId = teacher?.teacher_id || teacher?.id;
+  const [openSessionId, setOpenSessionId] = useState(null);
 
   const [dateFilters, setDateFilters] = useState({
     from: initialFilters?.from || "",
@@ -820,8 +916,9 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
               </div>
             ) : (
               <table className="w-full text-xs">
-                <thead className="bg-muted/50 sticky top-0 border-b z-10">
+                <thead className="bg-muted sticky top-0 border-b z-10">
                   <tr>
+                    <th className="w-6 px-1 py-2"></th>
                     <th className="text-start px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground">{t("field.date")}</th>
                     <th className="text-start px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground">{t("menu.courses")}</th>
                     <th className="text-start px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground">{t("menu.groups")}</th>
@@ -833,8 +930,27 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {sessions.map((s) => (
-                    <tr key={s.id} className="hover:bg-muted/30 transition-colors">
+                  {sessions.map((s) => {
+                    const isOpen = openSessionId === s.id;
+                    return (
+                    <Fragment key={s.id}>
+                    <tr
+                      className={`hover:bg-muted/30 transition-colors cursor-pointer ${isOpen ? "bg-muted/30" : ""}`}
+                      onClick={() => setOpenSessionId(isOpen ? null : s.id)}
+                      data-testid={`tp-session-row-${s.id}`}
+                    >
+                      <td className="px-1 py-2.5 text-muted-foreground">
+                        <button
+                          type="button"
+                          aria-expanded={isOpen}
+                          aria-label={t("tp.show_students")}
+                          title={t("tp.show_students")}
+                          onClick={(e) => { e.stopPropagation(); setOpenSessionId(isOpen ? null : s.id); }}
+                          className="h-6 w-6 grid place-items-center rounded hover:bg-muted"
+                        >
+                          {isOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5 rtl:rotate-180" />}
+                        </button>
+                      </td>
                       <td className="px-3 py-2.5 font-mono whitespace-nowrap">
                         {formatDateTime(s.start_at)}
                       </td>
@@ -857,7 +973,7 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
                             variant="ghost"
                             size="icon"
                             className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                            onClick={() => handleRemoveSession(s)}
+                            onClick={(e) => { e.stopPropagation(); handleRemoveSession(s); }}
                             disabled={removeSessionMut.isPending}
                             title={t("actions.delete")}
                           >
@@ -866,7 +982,15 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
                         </td>
                       )}
                     </tr>
-                  ))}
+                    {isOpen && (
+                      <SessionStudentsPanel
+                        teacherId={teacherId} sessionId={s.id} query={query} currency={currency}
+                        colSpan={canRemove ? 9 : 8}
+                      />
+                    )}
+                    </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             )}
@@ -885,7 +1009,7 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
               </div>
             ) : (
               <table className="w-full text-xs">
-                <thead className="bg-muted/50 sticky top-0 border-b z-10">
+                <thead className="bg-muted sticky top-0 border-b z-10">
                   <tr>
                     <th className="text-start px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground">{t("field.date")}</th>
                     <th className="text-start px-3 py-2 font-medium uppercase tracking-wider text-muted-foreground">{t("menu.courses")}</th>
