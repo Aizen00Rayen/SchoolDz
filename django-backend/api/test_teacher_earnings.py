@@ -55,7 +55,7 @@ class TeacherEarningsTests(TestCase):
                 Attendance.objects.create(tenant=self.tenant, session=s, student=student, status=st)
         return s
 
-    def bill(self, student, amount, status='paid', **item):
+    def bill(self, student, amount, status='paid', paid_at=None, **item):
         """Create a bill through the real POST /payments endpoint, so the
         same code that runs in production decides the bill's status,
         waiver type and discount."""
@@ -65,7 +65,10 @@ class TeacherEarningsTests(TestCase):
                 payload[f'{key}_id'] = value.pk
             else:
                 payload[key] = str(value)
-        res = self.client.post(f'{API}payments', {'student_id': student.pk, 'items': [payload]}, format='json')
+        body = {'student_id': student.pk, 'items': [payload]}
+        if paid_at:
+            body['paid_at'] = paid_at
+        res = self.client.post(f'{API}payments', body, format='json')
         self.assertIn(res.status_code, (200, 201), res.content[:500])
         payment = Payment.objects.get(pk=res.json()['id'])
         return payment
@@ -372,3 +375,54 @@ class TeacherEarningsTests(TestCase):
         self.assertEqual(row['present_count'], 3)
         self.assertEqual(row['pardoned_count'], 0)
         self.assertAlmostEqual(row['earned'], 1800)
+
+
+    # ---- bill types used in practice: per_session and monthly -------------
+    def _day(self, days_ago):
+        return (timezone.now() - timedelta(days=days_ago)).date().isoformat()
+
+    def test_pardoned_per_session_bill_pardons_that_days_session(self):
+        course, group = self.regular_course('500', 'per_session')
+        self.session(group, days_ago=7)   # all 3 present
+        self.session(group, days_ago=0)   # all 3 present
+        # Student 0 pardoned by both sides for today's session only.
+        self.bill(self.students[0], '500', kind='per_session', course=course, group=group,
+                  status='pardoned', pardon_type='both', paid_at=self._day(0))
+        history = self.client.get(f'{API}teacher-payments/{self.teacher.id}/history').json()
+        by_age = sorted(history['sessions'], key=lambda s: s['start_at'])
+        self.assertEqual([x['pardoned_count'] for x in by_age], [0, 1])
+        self.assertEqual([x['present_count'] for x in by_age], [3, 2])
+        self.assertEqual([round(x['earned']) for x in by_age], [3 * 300, 2 * 300])
+        row = self.summary()
+        self.assertEqual(row['pardoned_count'], 1)
+        self.assertAlmostEqual(row['earned'], 5 * 300)
+
+    def test_pardoned_monthly_bill_pardons_that_months_sessions(self):
+        course, group = self.regular_course('2000', 'per_month', 4)  # 500 per session
+        self.session(group, days_ago=0, statuses=('present', None, None))
+        self.session(group, days_ago=1, statuses=('present', None, None))
+        self.bill(self.students[0], '2000', kind='monthly', course=course, group=group,
+                  status='pardoned', pardon_type='both', paid_at=self._day(0))
+        row = self.summary()
+        # Both of the month's sessions are covered (a 4-session bill, 2 attended).
+        # (If the two days straddle a month boundary only one is; accept either.)
+        self.assertIn(row['pardoned_count'], (1, 2))
+        self.assertAlmostEqual(row['earned'], (2 - row['pardoned_count']) * 300)
+
+    def test_per_session_pardon_for_a_day_without_attendance_pardons_nothing(self):
+        course, group = self.regular_course('500', 'per_session')
+        self.session(group, days_ago=0)
+        self.bill(self.students[0], '500', kind='per_session', course=course, group=group,
+                  status='pardoned', pardon_type='both', paid_at=self._day(20))
+        row = self.summary()
+        self.assertEqual(row['pardoned_count'], 0)
+        self.assertAlmostEqual(row['earned'], 3 * 300)
+
+    def test_teacher_discount_on_a_per_session_bill_applies(self):
+        course, group = self.regular_course('500', 'per_session')
+        self.session(group)
+        self.bill(self.students[0], '500', kind='per_session', course=course, group=group,
+                  reduction=Decimal('100'), reduction_target='teacher')
+        row = self.summary()
+        self.assertAlmostEqual(row['reductions_deducted'], 100)
+        self.assertAlmostEqual(row['earned'], 3 * 300 - 100)
