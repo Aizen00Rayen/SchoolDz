@@ -426,3 +426,64 @@ class TeacherEarningsTests(TestCase):
         row = self.summary()
         self.assertAlmostEqual(row['reductions_deducted'], 100)
         self.assertAlmostEqual(row['earned'], 3 * 300 - 100)
+
+    # ---- per-session student list (history dialog drill-down) -------------
+    def _students_url(self, session):
+        return f'{API}teacher-payments/{self.teacher.id}/sessions/{session.pk}/students'
+
+    def test_session_students_shows_pardoned_paid_and_unpaid(self):
+        course, group = self.regular_course('500', 'per_session')
+        session = self.session(group, statuses=('present', 'late', 'present'))
+        # 0: pardoned by both -> no pay; 1: school-only pardon -> still paid;
+        # 2: paid in full for the session.
+        self.bill(self.students[0], '500', kind='per_session', course=course, group=group,
+                  status='pardoned', pardon_type='both', paid_at=self._day(0))
+        self.bill(self.students[1], '500', kind='per_session', course=course, group=group,
+                  status='pardoned', pardon_type='school', paid_at=self._day(0))
+        self.bill(self.students[2], '500', kind='per_session', course=course, group=group,
+                  paid_at=self._day(0))
+        data = self.client.get(self._students_url(session)).json()
+        by_name = {r['student_id']: r for r in data['students']}
+        s0, s1, s2 = (by_name[st.pk] for st in self.students)
+        self.assertTrue(s0['pardoned']); self.assertEqual(s0['earned'], 0)
+        self.assertFalse(s1['pardoned']); self.assertTrue(s1['school_pardon'])
+        self.assertAlmostEqual(s1['earned'], 300); self.assertEqual(s1['attendance'], 'late')
+        self.assertFalse(s2['pardoned']); self.assertAlmostEqual(s2['earned'], 300)
+        self.assertTrue(s2['paid'])
+        self.assertEqual(data['counts']['attended'], 3)
+        self.assertEqual(data['counts']['counted'], 2)
+        self.assertEqual(data['counts']['pardoned'], 1)
+        self.assertAlmostEqual(data['total_earned'], 600)
+        # Same figure the history row shows.
+        hist = self.client.get(f'{API}teacher-payments/{self.teacher.id}/history').json()
+        self.assertAlmostEqual(hist['sessions'][0]['earned'], data['total_earned'])
+
+    def test_session_students_unpaid_student(self):
+        _, group = self.regular_course('500', 'per_session')
+        session = self.session(group, statuses=('present', None, None))
+        data = self.client.get(self._students_url(session)).json()
+        self.assertEqual(len(data['students']), 1)
+        self.assertIs(data['students'][0]['paid'], False)
+        self.assertEqual(data['counts']['unpaid'], 1)
+
+    def test_session_students_is_limited_to_the_teachers_own_sessions(self):
+        _, group = self.regular_course('500', 'per_session')
+        session = self.session(group)
+        other = Teacher.objects.create(tenant=self.tenant, first_name='Other', last_name='T')
+        res = self.client.get(f'{API}teacher-payments/{other.id}/sessions/{session.pk}/students')
+        self.assertEqual(res.status_code, 404)
+
+    def test_session_students_requires_permission_and_same_school(self):
+        _, group = self.regular_course('500', 'per_session')
+        session = self.session(group)
+        secretary = User.objects.create_user(email='sec@s.test', password='pw-12345678', name='S',
+                                             tenant=self.tenant, role='secretary')
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f'Bearer {Token.objects.create(user=secretary).key}')
+        self.assertEqual(client.get(self._students_url(session)).status_code, 403)
+        other_tenant = Tenant.objects.create(name='Other', slug='other', plan='premium', status='active')
+        stranger = User.objects.create_user(email='o@other.test', password='pw-12345678', name='O',
+                                            tenant=other_tenant, role='owner')
+        client2 = APIClient()
+        client2.credentials(HTTP_AUTHORIZATION=f'Bearer {Token.objects.create(user=stranger).key}')
+        self.assertEqual(client2.get(self._students_url(session)).status_code, 404)
