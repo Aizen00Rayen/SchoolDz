@@ -172,12 +172,15 @@ def compute_teacher_breakdown(tenant_id, date_from=None, date_to=None, teacher_i
     for tid, r in figures.items():
         r['book_earned'] = round(r['book_revenue'] * ctx['book_pct'].get(tid, 0.0) / 100, 2)
 
-    # 3 + 4 + 5: every non-cancelled course or book line, once.
+    # 3 + 4 + 5: every non-cancelled course or book line, once. A "course
+    # line" is any bill line tied to a course whatever its type (course,
+    # monthly, per_session, ...): staff pick the type per line, and monthly /
+    # per-session lines are the common ones.
     items = _in_bill_window(PaymentItem.objects.filter(payment__tenant_id=tenant_id).filter(
-        Q(kind='course', course_id__isnull=False) | Q(kind='book', book__author_teacher_id__isnull=False)
-    ).exclude(payment__status='cancelled').exclude(status='cancelled').select_related(
-        'group', 'payment', 'book'), date_from, date_to)
-    waived = {}  # (teacher, student, course) -> teacher share waived
+        Q(course_id__isnull=False) | Q(kind='book', book__author_teacher_id__isnull=False)
+    ).exclude(kind__in=('trip',)).exclude(payment__status='cancelled').exclude(status='cancelled').select_related(
+        'group', 'payment', 'book', 'course'), date_from, date_to)
+    waivers = {}  # (teacher, student, course) -> [(bill date, bill kind, session units waived)]
     for item in items:
         amount = float(item.amount or 0)
         if item.kind == 'book':
@@ -197,24 +200,53 @@ def compute_teacher_breakdown(tenant_id, date_from=None, date_to=None, teacher_i
         if item.kind == 'course' and item.course_id in ctx['standalone_course_ids']:
             if not teacher_waived:
                 row(tid)['standalone_earned'] += teacher_share
-        elif item.kind == 'course' and teacher_waived:
-            key = (tid, item.payment.student_id, item.course_id)
-            waived[key] = waived.get(key, 0.0) + teacher_share
+        elif item.kind != 'book' and teacher_waived:
+            price = ctx['price_per_session'].get(item.course_id, 0.0)
+            if price <= 0 and item.course_id:
+                price = course_per_session_price(item.course.price, item.course.pricing_type, item.course.sessions_count)
+            # How many sessions this bill line pays for.
+            units = amount / price if price > 0 else 1.0
+            when = item.payment.paid_at or item.payment.created_at
+            waivers.setdefault((tid, item.payment.student_id, item.course_id), []).append(
+                (when.date() if when else None, item.kind, units))
 
         reduction = float(item.reduction or 0)
         if reduction > 0 and not teacher_waived and item.reduction_target in ('teacher', 'total'):
             ded = reduction if item.reduction_target == 'teacher' else reduction * pct / 100
             row(tid)['reductions'] += min(ded, teacher_share)
 
-    # Apply each teacher waiver to that student's earliest attended sessions.
-    remaining = dict(waived)
-    sessions_detail = {}
+    # Apply each teacher waiver to the sessions it pays for. A per-session
+    # line is dated the day of its session, a monthly line covers that month;
+    # any other line type is spread over the student's earliest sessions.
+    # Fully covered sessions are "pardoned" (not counted, no pay).
+    by_key = {}
+    for rec in records:
+        by_key.setdefault((rec[2], rec[3], rec[4]), []).append(rec)
+    absorbed_by_session = {}  # (session, student) -> fraction of the session waived (0..1)
+    for key, lines in waivers.items():
+        recs = sorted(by_key.get(key, []), key=lambda x: (x[0] is None, x[0]))
+        for bill_date, kind, units in sorted(lines, key=lambda x: (x[0] is None, x[0])):
+            if kind == 'per_session':
+                window = [r for r in recs if r[0] and bill_date and r[0].date() == bill_date]
+            elif kind == 'monthly':
+                window = [r for r in recs if r[0] and bill_date and (r[0].year, r[0].month) == (bill_date.year, bill_date.month)]
+            else:
+                window = recs
+            left = units
+            for rec in window:
+                if left <= 0.005:
+                    break
+                used = absorbed_by_session.get((rec[1], rec[3]), 0.0)
+                take = min(1.0 - used, left)
+                if take <= 0:
+                    continue
+                absorbed_by_session[(rec[1], rec[3])] = used + take
+                left -= take
+
     for start, session_id, tid, student_id, course_id, share in sorted(records, key=lambda x: (x[0] is None, x[0])):
-        left = remaining.get((tid, student_id, course_id), 0.0)
-        absorbed = min(left, share) if left > 0.005 else 0.0
-        if absorbed:
-            remaining[(tid, student_id, course_id)] = left - absorbed
-        fully = share > 0 and absorbed >= share - 0.005
+        fraction = min(1.0, absorbed_by_session.get((session_id, student_id), 0.0))
+        absorbed = share * fraction
+        fully = share > 0 and fraction >= 0.995
         r = row(tid)
         r['waivers'] += absorbed
         if fully:
