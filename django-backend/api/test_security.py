@@ -533,3 +533,17 @@ class ChargilyWebhookTests(TestCase):
         self.tenant.refresh_from_db()
         self.assertEqual(self.tenant.status, 'active')
         self.assertEqual(self.tenant.plan, 'standard')
+
+
+class SessionSheetDateTests(SecurityTestBase):
+    def test_sheet_slots_carry_the_real_date_of_each_session(self):
+        client = self.client_for(self.a['owner'])
+        res = client.get(f"{API}groups/session-sheet", {'group_id': self.a['group'].pk})
+        self.assertEqual(res.status_code, 200)
+        slot = res.json()['sheets'][0]['sessions'][0]
+        session = self.a['session']
+        from django.utils import timezone as tz
+        local = tz.localtime(session.start_at)
+        self.assertEqual(slot['id'], session.pk)
+        self.assertEqual(slot['date'], local.strftime('%d/%m'))
+        self.assertEqual(slot['iso'], local.date().isoformat())

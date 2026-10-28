@@ -70,6 +70,14 @@ function toDate(value) {
     const [y, m, d] = value.split("-").map(Number);
     return new Date(y, m - 1, d);
   }
+  // Day-first text such as "22/10/2026" (new Date() would read it month-first).
+  if (typeof value === "string") {
+    const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value.trim());
+    if (m) {
+      const d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+  }
   const d = new Date(value);
   return Number.isNaN(d.getTime()) ? null : d;
 }
@@ -79,6 +87,7 @@ const DATE_STYLES = {
   medium: { day: "numeric", month: "short", year: "numeric" },            // 22 Oct 2026
   long: { weekday: "long", day: "numeric", month: "long", year: "numeric" }, // Thursday 22 October 2026
   month: { month: "short" },                                              // Oct
+  dayMonth: { day: "2-digit", month: "2-digit" },                         // 22/10
   monthYear: { month: "long", year: "numeric" },                          // October 2026
 };
 

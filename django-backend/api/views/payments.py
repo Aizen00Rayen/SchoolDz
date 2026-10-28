@@ -267,7 +267,13 @@ def _payment_item_discount(item_payload):
             reduction = float(getattr(item_payload, 'reduction', 0) or 0)
 
         base_discount = 0.0
-        if status in ('pardoned', 'pardonned') or (pardon_type in ('both', 'school', 'teacher') and pardon_type) or payment_status in ('pardoned', 'pardonned'):
+        fully_pardoned = status in ('pardoned', 'pardonned') or payment_status in ('pardoned', 'pardonned')
+        # A "both" tag on a line that is NOT marked pardoned (e.g. a debt
+        # payment recorded as paid) is a leftover, not a waiver: the money
+        # was really received. School/teacher tags stay valid on a pending or
+        # paid line (the student pays the other party's share).
+        partly_pardoned = pardon_type in ('school', 'teacher')
+        if fully_pardoned or partly_pardoned:
             p_type = pardon_type or 'both'
             if p_type == 'both':
                 base_discount = amount
@@ -831,6 +837,33 @@ def payments_overdue(request):
 BALANCE_THRESHOLD = 1.0  # DZD-scale rounding noise shouldn't read as owing/overpaid
 
 
+def _pending_debt_by_student(tenant_id):
+    """{student_id: amount still waiting to be paid} from pending bills.
+
+    A line counts while it is pending (or has no status on a pending bill);
+    its debt is its amount minus its own pardon/discount, the same figure the
+    bill itself shows as to-pay. Bills without lines (older data) count their
+    amount minus discount. Cancelled/refunded/paid/pardoned bills never count."""
+    debt = {}
+    lines = PaymentItem.objects.filter(
+        payment__tenant_id=tenant_id, payment__status__in=('pending', 'partial'),
+    ).filter(
+        Q(status='pending') | (Q(status__in=['', None]) & Q(payment__status='pending'))
+    ).values(
+        'payment__student_id', 'amount', 'teacher_percentage', 'school_percentage', 'status',
+        'pardon_type', 'payment__pardon_type', 'payment__status', 'reduction',
+    )
+    for row in lines:
+        net = float(row['amount'] or 0) - _payment_item_discount(row)
+        if net > 0:
+            debt[row['payment__student_id']] = debt.get(row['payment__student_id'], 0.0) + net
+    for p in Payment.objects.filter(tenant_id=tenant_id, status='pending', items__isnull=True).values('student_id', 'amount', 'discount'):
+        net = float(p['amount'] or 0) - float(p['discount'] or 0)
+        if net > 0:
+            debt[p['student_id']] = debt.get(p['student_id'], 0.0) + net
+    return debt
+
+
 def compute_student_balances(tenant_id):
     """Per-student running balance = actual cash collected from COURSE items
     only (paid/partial PaymentItem rows with a course set, net of any
@@ -1076,8 +1109,15 @@ def compute_student_balances(tenant_id):
             if discount:
                 active_discount[row['payment__student_id']] = active_discount.get(row['payment__student_id'], 0.0) + discount
 
+    # What a student OWES is what is still waiting to be paid on their bills:
+    # the net amount of every line on a pending bill (after any pardon or
+    # discount). A student with no pending bill owes nothing, however many
+    # sessions they have attended; attendance only feeds the prepaid
+    # ("overpaid") figure below.
+    debt = _pending_debt_by_student(tenant_id)
+
     balances = {}
-    candidate_students = set(cost) | set(paid) | set(active_discount) | {row['payment__student_id'] for row in active_items}
+    candidate_students = set(cost) | set(paid) | set(active_discount) | set(debt) | {row['payment__student_id'] for row in active_items}
     for student_id in candidate_students:
         paid_amount = round(paid.get(student_id, 0.0), 2)
         cost_amount = round(max(0.0, (
@@ -1086,14 +1126,22 @@ def compute_student_balances(tenant_id):
             - waived.get(student_id, 0.0)
             - active_discount.get(student_id, 0.0)
         )), 2)
-        balance = round(paid_amount - cost_amount, 2)
-        if balance > BALANCE_THRESHOLD:
-            balance_status = 'overpaid'
-        elif balance < -BALANCE_THRESHOLD:
+        owed = round(debt.get(student_id, 0.0), 2)
+        if owed > BALANCE_THRESHOLD:
             balance_status = 'owes'
+            balance = -owed
+            cost_amount = round(paid_amount + owed, 2)
         else:
-            balance_status = 'settled'
-        balances[student_id] = {'paid': paid_amount, 'cost': cost_amount, 'balance': balance, 'status': balance_status}
+            owed = 0.0
+            attendance_balance = round(paid_amount - cost_amount, 2)
+            if attendance_balance > BALANCE_THRESHOLD:
+                balance_status = 'overpaid'
+                balance = attendance_balance
+            else:
+                balance_status = 'settled'
+                balance = 0.0
+                cost_amount = paid_amount
+        balances[student_id] = {'paid': paid_amount, 'cost': cost_amount, 'balance': balance, 'status': balance_status, 'debt': owed}
     return balances
 
 
@@ -1376,13 +1424,12 @@ def payments_student_summary(request):
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def debts_waive(request, student_id):
-    """The Debts page's delete button. A debt isn't a stored row — it's
-    compute_student_balances() finding cost > paid for this student — so
-    "deleting" it writes off the exact amount currently owed (looked up
-    server-side, never trusted from the client) as a DebtWaiver, which that
-    same function already knows to subtract from cost. Nothing to touch on
-    the revenue side: an unpaid debt was never counted as revenue to begin
-    with, only as cost the student hadn't covered yet."""
+    """The Debts page's delete button: writes off the debt, which is what is
+    still pending on the student's bills (looked up server-side, never
+    trusted from the client). The pending bills are cancelled, and a
+    DebtWaiver row plus the activity log keep the record of what was
+    forgiven. Nothing to touch on the revenue side: an unpaid debt was never
+    counted as revenue."""
     user = request.user
     tid = require_staff_tenant(user)
     if not user.is_super_admin() and not user.can_delete('debts'):
@@ -1397,30 +1444,69 @@ def debts_waive(request, student_id):
     if owed <= 0:
         raise ValidationError('This student has no outstanding debt to write off.')
 
-    waiver = DebtWaiver.objects.create(tenant_id=tid, student_id=student_id, amount=round(owed, 2), created_by=user)
-    log_activity(
-        request, tid, 'delete', category='data', entity_type='debts', entity_id=waiver.id,
-        description=f'Wrote off {waiver.amount} owed by {student.first_name} {student.last_name}',
-    )
+    with transaction.atomic():
+        waiver = DebtWaiver.objects.create(tenant_id=tid, student_id=student_id, amount=round(owed, 2), created_by=user)
+        # The debt IS the pending bills, so writing it off cancels them (the
+        # waiver row and the log line keep the record of what was forgiven).
+        note = 'تم شطب الدين'
+        for p in Payment.objects.filter(tenant_id=tid, student_id=student_id, status__in=('pending', 'partial')):
+            p.items.filter(status='pending').update(status='cancelled')
+            active = list(p.items.exclude(status='cancelled'))
+            if not active:
+                p.status = 'cancelled'          # nothing left on the bill (or an older bill without lines)
+            elif any(it.status in ('paid', 'partial') for it in active):
+                p.status = 'paid'
+            else:
+                p.status = 'pardoned'
+            p.notes = f"{p.notes}\n{note}".strip() if p.notes else note
+            p.save()
+            if active:
+                _recompute_payment_totals(p)
+        log_activity(
+            request, tid, 'delete', category='data', entity_type='debts', entity_id=waiver.id,
+            description=f'Wrote off {waiver.amount} owed by {student.first_name} {student.last_name}',
+        )
     return Response({'waived': float(waiver.amount)})
+
+
+def _pending_lines(payment):
+    """[(line, net still to pay)] for a bill's pending lines (oldest first)."""
+    lines = []
+    for it in payment.items.order_by('id'):
+        pending = it.status == 'pending' or (not it.status and payment.status == 'pending')
+        if not pending:
+            continue
+        net = round(float(it.amount or 0) - _payment_item_discount(it), 2)
+        if net > 0:
+            lines.append((it, net))
+    return lines
+
+
+def _recompute_payment_totals(payment):
+    """Re-derive a bill's amount and discount from its (non-cancelled) lines."""
+    amount = discount = 0.0
+    for it in payment.items.exclude(status='cancelled'):
+        gross = float(it.amount or 0)
+        amount += gross
+        discount += min(gross, _payment_item_discount(it))
+    payment.amount = Decimal(str(round(amount, 2)))
+    payment.discount = Decimal(str(round(discount, 2)))
+    payment.save(update_fields=['amount', 'discount'])
 
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def debts_pay(request, student_id):
-    """Settles a student's debt, supporting either full or partial payment,
-    labeled with a specified date (defaulting to today).
-    
-    The collected money is recorded as a paid Payment with paid_at set to the
-    chosen payment date (so it enters the income of that specific day, NOT the
-    date of the original pending invoice).
-    
-    If the student has pending invoices:
-      - Any bill covered in full becomes 'paid' with paid_at = date.
-      - If a bill is partially covered, the paid portion is recorded as 'paid'
-        for that date, and the remaining unpaid portion continues as 'pending'.
-    If the student owes debt from attendance without an existing bill:
-      - A new paid Payment and PaymentItem are created for the settled amount.
+    """Pays down a student's debt — the amount still waiting on their pending
+    bills — in full or in part, dated `paid_at` (default today). The money is
+    recorded as paid on that date, not on the original bill's date.
+
+    Pending bills are paid oldest first. A bill the amount covers becomes
+    'paid'. A bill it only partly covers is split proportionally: the paid
+    share moves to a new paid bill (with its share of any pardon/discount)
+    and the rest stays pending, so what remains owed is exactly the old debt
+    minus the payment. A student with no pending bill owes nothing, so there
+    is nothing to pay.
     """
     user = request.user
     tid = require_staff_tenant(user)
@@ -1474,146 +1560,83 @@ def debts_pay(request, student_id):
     paid_payments = []
 
     with transaction.atomic():
-        # Look for pending bills for this student
-        pending_bills = list(Payment.objects.filter(
+        pending_bills = list(Payment.objects.select_for_update().filter(
             tenant_id=tid, student_id=student_id, status__in=('pending', 'partial')
         ).order_by('created_at'))
 
         for p in pending_bills:
             if remaining_to_settle <= 0.001:
                 break
-            # Net unpaid amount on this pending bill
-            bill_net = max(0.0, float(p.amount) - float(p.discount))
+            lines = _pending_lines(p)
+            bill_net = round(sum(net for _, net in lines), 2) if lines else max(0.0, float(p.amount) - float(p.discount))
             if bill_net <= 0.01:
                 continue
 
             if remaining_to_settle >= bill_net - 0.01:
-                # Fully covers this pending bill
-                p.status = 'paid'
+                # Covers what is still pending on this bill: it is now paid.
+                for it, _ in lines:
+                    it.status = 'paid'
+                    it.due_date = paid_at_dt.date()
+                    it.save(update_fields=['status', 'due_date'])
+                p.method = method
                 p.paid_at = paid_at_dt
                 p.due_date = paid_at_dt.date()
-                p.method = method
                 if not p.invoice_number:
                     p.invoice_number = _next_sequence_code(tid, Payment, 'invoice_number', tenant_prefix, 6)
                 if notes:
                     p.notes = f"{p.notes}\n{notes}".strip() if p.notes else notes
+                still_pending = p.items.filter(status='pending').exists()
+                p.status = 'partial' if still_pending else 'paid'
                 p.save()
-                p.items.exclude(status='cancelled').update(status='paid', due_date=paid_at_dt.date())
                 remaining_to_settle = max(0.0, round(remaining_to_settle - bill_net, 2))
                 paid_payments.append(p)
             else:
-                # Partially covers this bill: split it
+                # Part-payment: move `fraction` of the pending lines (amount,
+                # discount and all) into a new paid bill and keep the rest
+                # pending, so the remaining debt is exactly bill_net - portion.
                 portion = round(remaining_to_settle, 2)
+                fraction = portion / bill_net
                 inv_code = _next_sequence_code(tid, Payment, 'invoice_number', tenant_prefix, 6)
-
+                keep_pardon = p.pardon_type if p.pardon_type in ('school', 'teacher') else None
                 paid_p = Payment.objects.create(
-                    tenant_id=tid,
-                    student_id=student_id,
-                    course_id=p.course_id,
-                    group_id=p.group_id,
-                    trip_id=p.trip_id,
-                    book_id=p.book_id,
-                    kind=p.kind or 'course',
-                    amount=Decimal(str(portion)),
-                    discount=Decimal('0'),
-                    method=method,
-                    status='paid',
-                    paid_at=paid_at_dt,
-                    due_date=paid_at_dt.date(),
+                    tenant_id=tid, student_id=student_id,
+                    course_id=p.course_id, group_id=p.group_id, trip_id=p.trip_id, book_id=p.book_id,
+                    kind=p.kind or 'course', amount=Decimal('0'), discount=Decimal('0'),
+                    method=method, status='paid', paid_at=paid_at_dt, due_date=paid_at_dt.date(),
+                    pardon_type=keep_pardon,
                     notes=notes or f"دفعة من الفاتورة {p.invoice_number or p.id}",
                     invoice_number=inv_code,
                 )
-
-                first_item = p.items.first()
-                c_id = first_item.course_id if first_item else p.course_id
-                g_id = first_item.group_id if first_item else p.group_id
-                trip_id = first_item.trip_id if first_item else p.trip_id
-                book_id = first_item.book_id if first_item else p.book_id
-                t_pct = first_item.teacher_percentage if first_item else Decimal('0')
-                s_pct = first_item.school_percentage if first_item else Decimal('100')
-
-                PaymentItem.objects.create(
-                    payment=paid_p,
-                    course_id=c_id,
-                    group_id=g_id,
-                    trip_id=trip_id,
-                    book_id=book_id,
-                    amount=Decimal(str(portion)),
-                    reduction=Decimal('0'),
-                    due_date=paid_at_dt.date(),
-                    teacher_percentage=t_pct,
-                    school_percentage=s_pct,
-                    status='paid',
-                    kind=p.kind or 'course',
-                )
-
-                # Reduce original pending bill and its items
-                new_pending_amt = max(0.0, round(float(p.amount) - portion, 2))
-                p.amount = Decimal(str(new_pending_amt))
-                rem_deduct = portion
-                for it in p.items.order_by('id'):
-                    if rem_deduct <= 0:
-                        break
-                    it_amt = float(it.amount)
-                    if rem_deduct >= it_amt:
-                        it.amount = Decimal('0')
-                        it.save()
-                        rem_deduct = round(rem_deduct - it_amt, 2)
-                    else:
-                        it.amount = Decimal(str(round(it_amt - rem_deduct, 2)))
-                        it.save()
-                        rem_deduct = 0.0
-                p.items.filter(amount=Decimal('0')).delete()
-                p.save()
-
+                for it, _ in lines:
+                    part_amount = round(float(it.amount) * fraction, 2)
+                    part_reduction = round(float(it.reduction or 0) * fraction, 2)
+                    PaymentItem.objects.create(
+                        payment=paid_p, kind=it.kind, course_id=it.course_id, group_id=it.group_id,
+                        trip_id=it.trip_id, book_id=it.book_id, book_copy_id=None,
+                        amount=Decimal(str(part_amount)), reduction=Decimal(str(part_reduction)),
+                        reduction_target=it.reduction_target, due_date=paid_at_dt.date(),
+                        teacher_percentage=it.teacher_percentage, school_percentage=it.school_percentage,
+                        pardon_type=it.pardon_type if it.pardon_type in ('school', 'teacher') else None,
+                        status='paid',
+                    )
+                    it.amount = Decimal(str(round(float(it.amount) - part_amount, 2)))
+                    it.reduction = Decimal(str(round(float(it.reduction or 0) - part_reduction, 2)))
+                    it.save(update_fields=['amount', 'reduction'])
+                if not lines:
+                    # Older bill with no lines: scale its own totals.
+                    part_amount = round(float(p.amount) * fraction, 2)
+                    paid_p.amount = Decimal(str(part_amount))
+                    paid_p.discount = Decimal(str(round(float(p.discount) * fraction, 2)))
+                    paid_p.save(update_fields=['amount', 'discount'])
+                    p.amount = Decimal(str(round(float(p.amount) - part_amount, 2)))
+                    p.discount = Decimal(str(round(float(p.discount) - float(paid_p.discount), 2)))
+                    p.save(update_fields=['amount', 'discount'])
+                else:
+                    _recompute_payment_totals(paid_p)
+                    _recompute_payment_totals(p)
                 paid_payments.append(paid_p)
                 remaining_to_settle = 0.0
                 break
-
-        # If still remaining (e.g. debt originated directly from attendance cost without a bill)
-        if remaining_to_settle > 0.001:
-            portion = round(remaining_to_settle, 2)
-            inv_code = _next_sequence_code(tid, Payment, 'invoice_number', tenant_prefix, 6)
-
-            primary_group = student.groups.first()
-            c_id = primary_group.course_id if primary_group else None
-            g_id = primary_group.id if primary_group else None
-            if not c_id:
-                last_att = Attendance.objects.filter(tenant_id=tid, student_id=student_id).select_related('session').last()
-                if last_att and last_att.session:
-                    c_id = last_att.session.course_id or getattr(last_att.session.group, 'course_id', None)
-                    g_id = last_att.session.group_id
-            if not c_id:
-                c_id = Course.objects.filter(tenant_id=tid).values_list('id', flat=True).first()
-
-            paid_p = Payment.objects.create(
-                tenant_id=tid,
-                student_id=student_id,
-                course_id=c_id,
-                group_id=g_id,
-                kind='course' if c_id else 'other',
-                amount=Decimal(str(portion)),
-                discount=Decimal('0'),
-                method=method,
-                status='paid',
-                paid_at=paid_at_dt,
-                due_date=paid_at_dt.date(),
-                notes=notes or "تسديد دين",
-                invoice_number=inv_code,
-            )
-            PaymentItem.objects.create(
-                payment=paid_p,
-                course_id=c_id,
-                group_id=g_id,
-                amount=Decimal(str(portion)),
-                reduction=Decimal('0'),
-                due_date=paid_at_dt.date(),
-                teacher_percentage=Decimal('0'),
-                school_percentage=Decimal('100'),
-                status='paid',
-                kind='course' if c_id else 'other',
-            )
-            paid_payments.append(paid_p)
 
         log_activity(
             request, tid, 'create', category='financial', entity_type='payments',

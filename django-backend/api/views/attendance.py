@@ -457,8 +457,14 @@ def _build_session_sheet(tid, group):
     box_count = max(nominal_count or 0, len(sessions))
 
     session_ids = [s.id for s in sessions]
-    session_slots = [{'id': s.id, 'date': timezone.localtime(s.start_at).strftime('%d/%m')} for s in sessions]
-    session_slots += [{'id': None, 'date': None}] * (box_count - len(session_slots))
+    # `date` is the short dd/mm text used by the printed sheet; `iso` is the
+    # full calendar date for the web page to format in the user's language.
+    session_slots = [{
+        'id': s.id,
+        'date': timezone.localtime(s.start_at).strftime('%d/%m'),
+        'iso': timezone.localtime(s.start_at).date().isoformat(),
+    } for s in sessions]
+    session_slots += [{'id': None, 'date': None, 'iso': None}] * (box_count - len(session_slots))
 
     paid_status = compute_course_payment_status(tid, course.id) if course else {}
 

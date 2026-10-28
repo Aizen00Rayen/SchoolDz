@@ -281,7 +281,7 @@ export default function SessionSheetPage() {
                       key={s.id || `slot-${idx}`}
                       className="px-2 py-2.5 text-[10px] font-mono text-muted-foreground text-center whitespace-nowrap"
                     >
-                      {formatDate(s.date, "short")}
+                      {s.id ? <span title={formatDate(s.iso || s.date, "long")}>{formatDate(s.iso || s.date, "dayMonth")}</span> : "—"}
                     </th>
                   ))}
                 </tr>
