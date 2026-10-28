@@ -327,3 +327,48 @@ class TeacherEarningsTests(TestCase):
         dash = self.client.get(f'{API}dashboard/summary').json()
         self.assertAlmostEqual(dash['kpis']['teacher_earnings_month'] if 'kpis' in dash
                                else dash['teacher_earnings_month'], expected)
+
+    # ---- pardoned students in the history dialog / counts ----------------
+    def test_pardoned_present_student_is_not_counted_or_paid(self):
+        course, group = self.regular_course('1000')
+        self.session(group)  # 3 present
+        self.bill(self.students[0], '1000', kind='course', course=course, group=group,
+                  status='pardoned', pardon_type='teacher')
+        row = self.summary()
+        self.assertEqual(row['present_count'], 2)
+        self.assertEqual(row['pardoned_count'], 1)
+        self.assertAlmostEqual(row['earned'], 2 * 600)
+
+        history = self.client.get(f'{API}teacher-payments/{self.teacher.id}/history').json()
+        s = history['sessions'][0]
+        self.assertEqual(s['present_count'], 2)
+        self.assertEqual(s['pardoned_count'], 1)
+        self.assertAlmostEqual(s['earned'], 2 * 600)
+        self.assertAlmostEqual(history['totals']['sessions_earned'], 2 * 600)
+        self.assertAlmostEqual(history['totals']['total_earned'], row['earned'])
+
+    def test_waiver_covers_earliest_sessions_first_across_the_history(self):
+        # 4000/month over 4 sessions = 1000 per session -> 600 teacher share.
+        course, group = self.regular_course('4000', 'per_month', 4)
+        self.session(group, days_ago=10, statuses=('present', None, None))
+        self.session(group, days_ago=5, statuses=('present', None, None))
+        self.session(group, days_ago=0, statuses=('present', None, None))
+        # Two sessions' worth waived (2 x 600 = 1200 = 2000 x 60%).
+        self.bill(self.students[0], '2000', kind='course', course=course, group=group,
+                  status='pardoned', pardon_type='teacher')
+        history = self.client.get(f'{API}teacher-payments/{self.teacher.id}/history').json()
+        by_age = sorted(history['sessions'], key=lambda s: s['start_at'])
+        self.assertEqual([x['pardoned_count'] for x in by_age], [1, 1, 0])
+        self.assertEqual([x['present_count'] for x in by_age], [0, 0, 1])
+        self.assertEqual([round(x['earned']) for x in by_age], [0, 0, 600])
+        self.assertAlmostEqual(history['totals']['total_earned'], 600)
+
+    def test_school_only_pardon_still_counts_and_pays(self):
+        course, group = self.regular_course('1000')
+        self.session(group)
+        self.bill(self.students[0], '1000', kind='course', course=course, group=group,
+                  status='pardoned', pardon_type='school')
+        row = self.summary()
+        self.assertEqual(row['present_count'], 3)
+        self.assertEqual(row['pardoned_count'], 0)
+        self.assertAlmostEqual(row['earned'], 1800)

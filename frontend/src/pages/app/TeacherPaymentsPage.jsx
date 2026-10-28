@@ -310,7 +310,7 @@ export default function TeacherPaymentsPage() {
                       <div>
                         <div className="font-bold text-base text-foreground">{r.teacher_name}</div>
                         <div className="text-xs text-muted-foreground flex items-center gap-2 mt-0.5">
-                          <span>{t("tp.present_count")}: <strong className="font-mono text-foreground">{r.present_count}</strong></span>
+                          <span>{t("tp.present_count")}: <strong className="font-mono text-foreground">{r.present_count}</strong>{r.pardoned_count > 0 && <span className="ms-1 text-violet-600 dark:text-violet-400">(+{r.pardoned_count} {t("tp.pardoned")})</span>}</span>
                           <span>&bull;</span>
                           <span>{t("tp.percentage")}: <strong className="font-mono text-foreground">{r.percentage}%</strong></span>
                         </div>
@@ -415,7 +415,14 @@ export default function TeacherPaymentsPage() {
                           </div>
                         )}
                       </td>
-                      <td className="px-4 py-3.5 font-mono text-xs font-semibold">{r.present_count}</td>
+                      <td className="px-4 py-3.5 font-mono text-xs font-semibold">
+                        {r.present_count}
+                        {r.pardoned_count > 0 && (
+                          <span className="block text-[10px] font-normal text-violet-600 dark:text-violet-400" title={t("tp.pardoned_hint")}>
+                            +{r.pardoned_count} {t("tp.pardoned")}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3.5 font-mono text-xs" onClick={(e) => e.stopPropagation()}>
                         {!canEditPercentage ? (
                           `${r.book_percentage}%`
@@ -762,9 +769,17 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
             <div className="text-[11px] text-muted-foreground">
               {t("tp.paid_out")}: {money(totals.paid_out)}
             </div>
-            {(totals.waivers_deducted || 0) + (totals.reductions_deducted || 0) > 0 && (
+            {/* Teacher waivers are already left out of the sessions above
+                (pardoned students aren't counted), so only discounts are
+                shown as a deduction here. */}
+            {(totals.reductions_deducted || 0) > 0 && (
               <div className="text-[11px] text-destructive">
-                {t("tp.deductions")}: −{money((totals.waivers_deducted || 0) + (totals.reductions_deducted || 0))}
+                {t("tp.discounts")}: −{money(totals.reductions_deducted)}
+              </div>
+            )}
+            {(totals.pardoned_count || 0) > 0 && (
+              <div className="text-[11px] text-violet-600 dark:text-violet-400">
+                {totals.pardoned_count} {t("tp.pardoned")}
               </div>
             )}
           </div>
@@ -825,7 +840,14 @@ function TeacherHistoryDialog({ teacher, initialFilters, onClose, currency }) {
                       </td>
                       <td className="px-3 py-2.5 font-medium">{s.course_title}</td>
                       <td className="px-3 py-2.5 text-muted-foreground">{s.group_name}</td>
-                      <td className="px-3 py-2.5 font-mono font-semibold">{s.present_count}</td>
+                      <td className="px-3 py-2.5 font-mono font-semibold">
+                        {s.present_count}
+                        {s.pardoned_count > 0 && (
+                          <span className="ms-1.5 text-[10px] font-normal text-violet-600 dark:text-violet-400" title={t("tp.pardoned_hint")}>
+                            +{s.pardoned_count} {t("tp.pardoned")}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-3 py-2.5 font-mono text-muted-foreground">{money(s.price_per_session)}</td>
                       <td className="px-3 py-2.5 font-mono">{s.teacher_percentage}%</td>
                       <td className="px-3 py-2.5 font-mono font-semibold text-foreground">{money(s.earned)}</td>

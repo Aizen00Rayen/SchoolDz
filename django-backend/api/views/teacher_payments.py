@@ -112,16 +112,20 @@ def _item_teacher(item, ctx):
             or ctx['course_teacher'].get(item.course_id))
 
 
-def compute_teacher_breakdown(tenant_id, date_from=None, date_to=None, teacher_id=None, group_id=None, _context=None):
+def compute_teacher_breakdown(tenant_id, date_from=None, date_to=None, teacher_id=None, group_id=None, _context=None, detail=False):
     """The single teacher-pay engine. Returns {teacher_id: figures}.
 
     1. Sessions: for every attended student (present or late) in a regular
        course, the teacher earns their % of that course's per-session price.
     2. Books: their book % of every paid sale of a book they authored.
     3. Package/standalone courses: their % of each bill line, from billing.
-    4. Waivers: a bill line the teacher waived (teacher/both) removes the
-       teacher's share of THAT bill only, never more than they earned from
-       that student in that course.
+    4. Waivers: a bill line the teacher waived (teacher/both) covers the
+       teacher's share of THAT bill only. Bills carry no period, so the
+       waived amount is applied to that student's attended sessions in that
+       course in date order: sessions it fully covers are "pardoned" (the
+       student is not counted and earns the teacher nothing), a partly
+       covered session is reduced. With detail=True each teacher's row also
+       has `sessions`: {session_id: attended / pardoned / waived / gross}.
     5. Discounts: "deduct from teacher" takes the discount from the teacher,
        "total" takes their % of it; either way capped at the teacher's share
        of that bill line.
@@ -131,7 +135,7 @@ def compute_teacher_breakdown(tenant_id, date_from=None, date_to=None, teacher_i
 
     def row(tid):
         return figures.setdefault(tid, {
-            'present_count': 0, 'session_earned': 0.0, 'book_revenue': 0.0, 'book_earned': 0.0,
+            'present_count': 0, 'pardoned_count': 0, 'session_earned': 0.0, 'book_revenue': 0.0, 'book_earned': 0.0,
             'standalone_earned': 0.0, 'waivers': 0.0, 'reductions': 0.0, 'earned': 0.0,
         })
 
@@ -143,18 +147,15 @@ def compute_teacher_breakdown(tenant_id, date_from=None, date_to=None, teacher_i
         attendance = attendance.filter(session__start_at__date__lte=date_to)
     if group_id:
         attendance = attendance.filter(session__group_id=group_id)
-    accrued = {}  # (teacher, student, course) -> earned from sessions
-    for a in attendance.values('session_id', 'student_id'):
+    records = []  # (start, session, teacher, student, course, share)
+    for a in attendance.values('session_id', 'student_id', 'session__start_at'):
         info = ctx['session_info'].get(a['session_id'])
         if not info or not info['teacher_id'] or info['course_id'] in ctx['standalone_course_ids']:
             continue
         tid = info['teacher_id']
         share = ctx['price_per_session'].get(info['course_id'], 0.0) * ctx['teacher_pct'].get(tid, 0.0) / 100
-        r = row(tid)
-        r['present_count'] += 1
-        r['session_earned'] += share
-        key = (tid, a['student_id'], info['course_id'])
-        accrued[key] = accrued.get(key, 0.0) + share
+        row(tid)['session_earned'] += share
+        records.append((a['session__start_at'], a['session_id'], tid, a['student_id'], info['course_id'], share))
 
     # 2. Books
     book_items = PaymentItem.objects.filter(
@@ -205,8 +206,27 @@ def compute_teacher_breakdown(tenant_id, date_from=None, date_to=None, teacher_i
             ded = reduction if item.reduction_target == 'teacher' else reduction * pct / 100
             row(tid)['reductions'] += min(ded, teacher_share)
 
-    for (tid, student_id, course_id), amount in waived.items():
-        row(tid)['waivers'] += min(amount, accrued.get((tid, student_id, course_id), 0.0))
+    # Apply each teacher waiver to that student's earliest attended sessions.
+    remaining = dict(waived)
+    sessions_detail = {}
+    for start, session_id, tid, student_id, course_id, share in sorted(records, key=lambda x: (x[0] is None, x[0])):
+        left = remaining.get((tid, student_id, course_id), 0.0)
+        absorbed = min(left, share) if left > 0.005 else 0.0
+        if absorbed:
+            remaining[(tid, student_id, course_id)] = left - absorbed
+        fully = share > 0 and absorbed >= share - 0.005
+        r = row(tid)
+        r['waivers'] += absorbed
+        if fully:
+            r['pardoned_count'] += 1
+        else:
+            r['present_count'] += 1
+        if detail:
+            d = r.setdefault('sessions', {}).setdefault(session_id, {'attended': 0, 'pardoned': 0, 'waived': 0.0, 'gross': 0.0})
+            d['attended'] += 1
+            d['pardoned'] += 1 if fully else 0
+            d['waived'] += absorbed
+            d['gross'] += share
 
     for r in figures.values():
         r['session_earned'] = round(r['session_earned'], 2)
@@ -246,7 +266,7 @@ def compute_teacher_earnings(tenant_id, request, _context=None):
     for po in payouts:
         paid_out[po.teacher_id] = paid_out.get(po.teacher_id, 0.0) + float(po.amount)
 
-    empty = {'present_count': 0, 'session_earned': 0.0, 'book_earned': 0.0, 'standalone_earned': 0.0,
+    empty = {'present_count': 0, 'pardoned_count': 0, 'session_earned': 0.0, 'book_earned': 0.0, 'standalone_earned': 0.0,
              'waivers': 0.0, 'reductions': 0.0, 'earned': 0.0}
     rows = []
     for t in teachers:
@@ -257,6 +277,7 @@ def compute_teacher_earnings(tenant_id, request, _context=None):
             'teacher_name': f'{t.first_name} {t.last_name}',
             'percentage': float(t.payment_percentage or 0),
             'present_count': b['present_count'],
+            'pardoned_count': b['pardoned_count'],
             'book_percentage': float(t.book_percentage or 0),
             'session_earned': b['session_earned'],
             'book_earned': b['book_earned'],
@@ -338,22 +359,21 @@ def teacher_payments_history(request, teacher_id):
 
     session_rows = list(sessions_qs[:1000])
     session_ids = [s.id for s in session_rows]
-    attendance_counts = {}
-    if session_ids:
-        for row in Attendance.objects.filter(
-            session_id__in=session_ids, status__in=ATTENDED_STATUSES
-        ).values('session_id').annotate(c=Count('id')):
-            attendance_counts[row['session_id']] = row['c']
-
     teacher_pct = float(teacher.payment_percentage or 0)
+    # The shared engine decides which students count: attended students the
+    # teacher waived (pardoned) are not counted and earn nothing.
+    engine = compute_teacher_breakdown(tid, date_from=date_from, date_to=date_to, teacher_id=teacher.id, detail=True).get(teacher.id, {})
+    session_detail = engine.get('sessions', {})
     sessions_list = []
     sessions_earned_total = 0.0
 
     for s in session_rows:
         course = s.course or (s.group.course if s.group else None)
         price_per_session = course_per_session_price(course.price, course.pricing_type, course.sessions_count) if course else 0.0
-        present_count = attendance_counts.get(s.id, 0)
-        earned = round(present_count * price_per_session * teacher_pct / 100, 2)
+        d = session_detail.get(s.id, {'attended': 0, 'pardoned': 0, 'waived': 0.0, 'gross': 0.0})
+        pardoned_count = d['pardoned']
+        present_count = d['attended'] - pardoned_count
+        earned = round(max(0.0, d['gross'] - d['waived']), 2)
         sessions_earned_total += earned
 
         sessions_list.append({
@@ -368,6 +388,7 @@ def teacher_payments_history(request, teacher_id):
             'topic': s.topic or '',
             'status': s.status,
             'present_count': present_count,
+            'pardoned_count': pardoned_count,
             'price_per_session': price_per_session,
             'teacher_percentage': teacher_pct,
             'earned': earned,
@@ -447,7 +468,6 @@ def teacher_payments_history(request, teacher_id):
 
     # The headline total comes from the shared engine, so it always matches
     # the Teacher Payments table (waivers and discounts included).
-    engine = compute_teacher_breakdown(tid, date_from=date_from, date_to=date_to, teacher_id=teacher.id).get(teacher.id, {})
     waivers_deducted = engine.get('waivers', 0.0)
     reductions_deducted = engine.get('reductions', 0.0)
     total_earned = round(engine.get('earned', 0.0), 2)
@@ -464,6 +484,7 @@ def teacher_payments_history(request, teacher_id):
         'totals': {
             'sessions_count': len(sessions_list),
             'sessions_earned': round(sessions_earned_total, 2),
+            'pardoned_count': engine.get('pardoned_count', 0),
             'packages_count': len(packages_list),
             'packages_earned': round(packages_earned_total, 2),
             'books_earned': books_earned_total,
