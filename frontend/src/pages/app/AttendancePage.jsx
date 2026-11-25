@@ -9,6 +9,7 @@ import {
 import { api, extractError, openPrivateFile, resolveFileUrl } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
+import { useStudentsByIds } from "@/lib/useStudentsByIds";
 import { APPUI } from "@/constants/testIds";
 import { PageHeader, EmptyState, groupOptionLabel } from "./_shared";
 import { Button } from "@/components/ui/button";
@@ -287,10 +288,9 @@ export default function AttendancePage() {
     () => (groups?.items || []).find((g) => g.id === selectedSession?.group_id),
     [groups, selectedSession],
   );
-  const studentMap = useMemo(
-    () => Object.fromEntries((students?.items || []).map((s) => [s.id, s])),
-    [students],
-  );
+  // /students only returns the newest 500, so the group's own students that
+  // fall outside it are fetched by id — otherwise they vanish from the roster.
+  const studentMap = useStudentsByIds(selectedGroup?.student_ids, students?.items);
 
   const { data: existing } = useQuery({
     queryKey: ["attendance", sessionId],
