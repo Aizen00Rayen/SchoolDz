@@ -883,6 +883,19 @@ class StudentViewSet(TenantScopedViewSet):
         status_val = request.GET.get('status')
         if status_val:
             queryset = queryset.filter(status=status_val)
+        # Filter by grade: level (or 'none' for students with no grade set),
+        # then optionally year and specialty within it.
+        level = request.GET.get('school_level')
+        if level == 'none':
+            queryset = queryset.filter(school_level__isnull=True) | queryset.filter(school_level='')
+        elif level:
+            queryset = queryset.filter(school_level=level)
+        year = request.GET.get('school_year')
+        if year and year.isdigit():
+            queryset = queryset.filter(school_year=int(year))
+        specialty = request.GET.get('specialty')
+        if specialty:
+            queryset = queryset.filter(specialty=specialty)
         q = request.GET.get('q')
         if q:
             # Also matches the raw id exactly — a PC-connected QR scanner
