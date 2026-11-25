@@ -772,7 +772,7 @@ export default function PaymentsPage() {
                 <div className="flex items-center h-10 px-3 rounded-lg border border-border bg-muted/40 text-sm font-medium">
                   {(() => {
                     const s = stuMap[form.student_id];
-                    return s ? `${s.first_name} ${s.last_name}` : form.student_id;
+                    return s ? `${s.first_name} ${s.last_name}` : (form.student_name || form.student_id);
                   })()}
                 </div>
               ) : (

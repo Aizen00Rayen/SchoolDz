@@ -46,3 +46,10 @@ class StudentsListCapTests(TestCase):
         stranger = Student.objects.create(tenant=other, first_name='Z', last_name='Y')
         items = self.client.get(f'{API}students', {'ids': stranger.id}).json()['items']
         self.assertEqual(items, [])
+
+    def test_grade_rows_carry_the_student_name_even_for_the_oldest_student(self):
+        from .models import Grade
+        Grade.objects.create(tenant=self.tenant, student=self.oldest, title='Exam', score=10, max_score=20,
+                             date=timezone.now().date())
+        rows = self.client.get(f'{API}grades').json()['items']
+        self.assertEqual(rows[0]['student_name'], 'S0 X')
