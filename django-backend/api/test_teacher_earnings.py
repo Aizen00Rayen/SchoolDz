@@ -559,4 +559,20 @@ class TeacherDiscountTests(TeacherEarningsTests.__bases__[0]):
         data = self.client.get(f'{API}teacher-payments/{self.teacher.id}/sessions/{session.pk}/students').json()
         by_id = {r['student_id']: r for r in data['students']}
         self.assertAlmostEqual(by_id[self.students[0].id]['discount'], 120)
+        self.assertAlmostEqual(by_id[self.students[0].id]['earned'], 600 - 120)
         self.assertAlmostEqual(by_id[self.students[1].id]['discount'], 0)
+        self.assertAlmostEqual(data['total_earned'], 1800 - 120)
+
+    def test_discount_is_taken_once_across_sessions_and_capped_per_session(self):
+        course, group = self.regular_course('1000')
+        s1 = self.session(group, days_ago=7, statuses=('present', None, None))
+        s2 = self.session(group, days_ago=0, statuses=('present', None, None))
+        # teacher share of the discount = 900 * 60% = 540 -> 600 (s1) leaves 60
+        self.bill(self.students[0], '1000', kind='per_session', course=course,
+                  reduction=Decimal('900'), reduction_target='total')
+        url = lambda s: f'{API}teacher-payments/{self.teacher.id}/sessions/{s.pk}/students'
+        d1 = self.client.get(url(s1)).json()
+        d2 = self.client.get(url(s2)).json()
+        self.assertAlmostEqual(d1['total_earned'], 600 - 540)
+        self.assertAlmostEqual(d2['total_earned'], 600)
+        self.assertAlmostEqual(d1['total_earned'] + d2['total_earned'], self.summary()['earned'])
