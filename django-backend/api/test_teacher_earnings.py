@@ -550,3 +550,13 @@ class TeacherDiscountTests(TeacherEarningsTests.__bases__[0]):
         row = self._history()['packages'][0]
         self.assertAlmostEqual(row['earned'], 600)
         self.assertAlmostEqual(row['reduction'], 0)
+
+    def test_session_students_show_the_students_discount(self):
+        course, group = self.regular_course('1000')
+        session = self.session(group)
+        self.bill(self.students[0], '1000', kind='per_session', course=course,
+                  reduction=Decimal('200'), reduction_target='total')
+        data = self.client.get(f'{API}teacher-payments/{self.teacher.id}/sessions/{session.pk}/students').json()
+        by_id = {r['student_id']: r for r in data['students']}
+        self.assertAlmostEqual(by_id[self.students[0].id]['discount'], 120)
+        self.assertAlmostEqual(by_id[self.students[1].id]['discount'], 0)

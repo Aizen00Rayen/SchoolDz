@@ -656,6 +656,7 @@ function SessionStudentsPanel({ teacherId, sessionId, query, currency, colSpan }
                       <td className={`px-3 py-1.5 text-end font-mono font-semibold ${r.pardoned ? "text-muted-foreground" : ""}`} dir="ltr">
                         {money(r.earned)}
                         {r.partly_pardoned && <span className="block text-[10px] font-normal text-violet-600 dark:text-violet-400">{t("tp.partly_pardoned")}</span>}
+                        {r.discount > 0 && <span className="block text-[10px] font-normal text-destructive" title={t("tp.discount_hint")}>{t("tp.discounts")}: −{money(r.discount)}</span>}
                       </td>
                     </tr>
                   ))}

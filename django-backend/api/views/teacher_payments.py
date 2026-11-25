@@ -235,7 +235,12 @@ def compute_teacher_breakdown(tenant_id, date_from=None, date_to=None, teacher_i
             if item.kind != 'book' and not (item.kind == 'course' and item.course_id in ctx['standalone_course_ids']):
                 pct = ctx['teacher_pct'].get(tid, 0.0)
                 teacher_share = amount * pct / 100
-            row(tid)['reductions'] += _discount_on_teacher(reduction, item.reduction_target, pct, teacher_share)
+            ded = _discount_on_teacher(reduction, item.reduction_target, pct, teacher_share)
+            row(tid)['reductions'] += ded
+            if detail and ded > 0 and item.payment.student_id:
+                sd = row(tid).setdefault('student_discounts', {})
+                key = (item.payment.student_id, item.course_id)
+                sd[key] = sd.get(key, 0.0) + ded
 
     # Apply each teacher waiver to the sessions it pays for. A per-session
     # line is dated the day of its session, a monthly line covers that month;
@@ -605,6 +610,7 @@ def teacher_payments_session_students(request, teacher_id, session_id):
     detail = engine.get('sessions', {}).get(session.id, {}).get('students', {})
 
     course = session.course or (session.group.course if session.group_id else None)
+    student_discounts = engine.get('student_discounts', {})
     attended = list(Attendance.objects.filter(
         tenant_id=tid, session_id=session.id, status__in=ATTENDED_STATUSES,
     ).select_related('student').order_by('student__first_name', 'student__last_name'))
@@ -629,6 +635,10 @@ def teacher_payments_session_students(request, teacher_id, session_id):
             'school_pardon': bool(d.get('school_pardon')),
             'paid': paid_status.get(a.student_id),
             'gross': gross,
+            # The teacher's share of this student's bill discount for the
+            # course. It is deducted once from the teacher's total, not from
+            # this session, so `earned` stays the session figure.
+            'discount': round(student_discounts.get((a.student_id, course.id if course else None), 0.0), 2),
             'earned': round(max(0.0, gross - waived), 2),
         })
     return Response({
