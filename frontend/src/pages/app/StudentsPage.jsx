@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import CrudPanel, { StatusPill } from "./CrudPanel";
@@ -18,6 +18,7 @@ import { useI18n } from "@/lib/i18n";
 import { usePermission } from "@/lib/permissions";
 import { useConfirm } from "@/lib/confirm";
 import { DateInput } from "@/components/DateInput";
+import { SCHOOL_LEVELS, SCHOOL_LEVEL_YEAR_COUNT, specialtiesFor } from "@/lib/schoolLevels";
 import { formatDate } from "@/lib/format";
 
 const BLOOD_TYPES = ["O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"];
@@ -140,6 +141,16 @@ export default function StudentsPage() {
   const confirm = useConfirm();
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [printing, setPrinting] = useState(false);
+  // Grade filters: level -> year -> specialty (each narrows the next).
+  const [levelFilter, setLevelFilter] = useState("");
+  const [yearFilter, setYearFilter] = useState("");
+  const [specialtyFilter, setSpecialtyFilter] = useState("");
+  const extraParams = useMemo(() => ({
+    ...(levelFilter ? { school_level: levelFilter } : {}),
+    ...(yearFilter ? { school_year: yearFilter } : {}),
+    ...(specialtyFilter ? { specialty: specialtyFilter } : {}),
+  }), [levelFilter, yearFilter, specialtyFilter]);
+  const specialtyOptions = specialtiesFor(levelFilter, Number(yearFilter));
 
   // Warn (not block) when a new student's name matches one already on file —
   // same-name students are common (siblings, common names) but worth a
@@ -232,6 +243,54 @@ export default function StudentsPage() {
       canDelete={canDelete}
       canCreate={canAdd}
       onBeforeSubmit={checkDuplicateName}
+      extraParams={extraParams}
+      filterBar={(
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Select
+            value={levelFilter || "__all"}
+            onValueChange={(v) => { setLevelFilter(v === "__all" ? "" : v); setYearFilter(""); setSpecialtyFilter(""); }}
+          >
+            <SelectTrigger className="bg-background h-9 w-auto min-w-[130px]" data-testid="students-filter-level">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-popover">
+              <SelectItem value="__all">{t("groups.all_levels")}</SelectItem>
+              {SCHOOL_LEVELS.map((lvl) => (
+                <SelectItem key={lvl} value={lvl}>{t(`school_level.${lvl}`)}</SelectItem>
+              ))}
+              <SelectItem value="none">{t("students.no_grade")}</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={yearFilter || "__all"}
+            onValueChange={(v) => { setYearFilter(v === "__all" ? "" : v); setSpecialtyFilter(""); }}
+            disabled={!levelFilter || levelFilter === "none"}
+          >
+            <SelectTrigger className="bg-background h-9 w-auto min-w-[110px]" data-testid="students-filter-year">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-popover">
+              <SelectItem value="__all">{t("groups.all_years")}</SelectItem>
+              {Array.from({ length: SCHOOL_LEVEL_YEAR_COUNT[levelFilter] || 0 }, (_, i) => i + 1).map((y) => (
+                <SelectItem key={y} value={String(y)}>{t("common.year_n", { n: y })}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {specialtyOptions.length > 0 && (
+            <Select value={specialtyFilter || "__all"} onValueChange={(v) => setSpecialtyFilter(v === "__all" ? "" : v)}>
+              <SelectTrigger className="bg-background h-9 w-auto min-w-[150px]" data-testid="students-filter-specialty">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-popover">
+                <SelectItem value="__all">{t("students.all_specialties")}</SelectItem>
+                {specialtyOptions.map((sp) => (
+                  <SelectItem key={sp} value={sp}>{t(`specialty.${sp}`)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+      )}
       rowClassName={approvalRowClass}
       renderRowActions={(row) => (
         <>

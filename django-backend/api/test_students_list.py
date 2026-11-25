@@ -53,3 +53,43 @@ class StudentsListCapTests(TestCase):
                              date=timezone.now().date())
         rows = self.client.get(f'{API}grades').json()['items']
         self.assertEqual(rows[0]['student_name'], 'S0 X')
+
+
+@override_settings(CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}, REST_FRAMEWORK={
+    'DEFAULT_AUTHENTICATION_CLASSES': ['api.services.BearerTokenAuthentication'],
+    'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticated'],
+    'DEFAULT_THROTTLE_CLASSES': [],
+})
+class StudentsGradeFilterTests(TestCase):
+    def setUp(self):
+        self.tenant = Tenant.objects.create(name='School', slug='school', plan='premium', status='active')
+        owner = User.objects.create_user(email='o@s.test', password='pw-12345678', name='O',
+                                         tenant=self.tenant, role='owner')
+        self.client = APIClient()
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {Token.objects.create(user=owner).key}')
+        mk = lambda name, **kw: Student.objects.create(tenant=self.tenant, first_name=name, last_name='X', **kw)
+        self.p1 = mk('P1', school_level='primary', school_year=1)
+        self.p2 = mk('P2', school_level='primary', school_year=2)
+        self.m1 = mk('M1', school_level='middle', school_year=1)
+        self.h2s = mk('H2S', school_level='high', school_year=2, specialty='math')
+        self.h2o = mk('H2O', school_level='high', school_year=2, specialty='science_exp')
+        self.none = mk('N')
+
+    def names(self, **params):
+        return sorted(s['first_name'] for s in self.client.get(f'{API}students', params).json()['items'])
+
+    def test_filter_by_level(self):
+        self.assertEqual(self.names(school_level='primary'), ['P1', 'P2'])
+
+    def test_filter_by_level_and_year(self):
+        self.assertEqual(self.names(school_level='primary', school_year=2), ['P2'])
+
+    def test_filter_by_specialty(self):
+        self.assertEqual(self.names(school_level='high', school_year=2, specialty='math'), ['H2S'])
+
+    def test_students_without_a_grade_can_be_listed(self):
+        self.assertEqual(self.names(school_level='none'), ['N'])
+
+    def test_no_filter_returns_everyone_and_filters_combine_with_search(self):
+        self.assertEqual(len(self.names()), 6)
+        self.assertEqual(self.names(school_level='primary', q='P1'), ['P1'])
