@@ -40,6 +40,16 @@ def _item_pardon_type(item):
     return None
 
 
+def _discount_on_teacher(reduction, target, pct, teacher_share):
+    """How much of a bill line's discount the teacher absorbs: all of it when
+    charged to the teacher, their % of it when shared ("total"), nothing when
+    charged to the school; never more than the teacher's share of that line."""
+    if reduction <= 0 or target not in ('teacher', 'total'):
+        return 0.0
+    ded = reduction if target == 'teacher' else reduction * pct / 100
+    return min(ded, teacher_share)
+
+
 def _in_bill_window(qs, date_from, date_to):
     """Bills are dated by paid_at, or created_at while still unpaid."""
     if date_from:
@@ -217,9 +227,15 @@ def compute_teacher_breakdown(tenant_id, date_from=None, date_to=None, teacher_i
                 (when.date() if when else None, item.kind, units, p_type))
 
         reduction = float(item.reduction or 0)
-        if reduction > 0 and not teacher_waived and item.reduction_target in ('teacher', 'total'):
-            ded = reduction if item.reduction_target == 'teacher' else reduction * pct / 100
-            row(tid)['reductions'] += min(ded, teacher_share)
+        if reduction > 0 and not teacher_waived:
+            # What the teacher is paid on this line decides what they lose:
+            # standalone courses pay the line's own % (it can be overridden
+            # per bill), but session courses pay the teacher's default %
+            # whatever split was saved on the line (it can even be 0).
+            if item.kind != 'book' and not (item.kind == 'course' and item.course_id in ctx['standalone_course_ids']):
+                pct = ctx['teacher_pct'].get(tid, 0.0)
+                teacher_share = amount * pct / 100
+            row(tid)['reductions'] += _discount_on_teacher(reduction, item.reduction_target, pct, teacher_share)
 
     # Apply each teacher waiver to the sessions it pays for. A per-session
     # line is dated the day of its session, a monthly line covers that month;
@@ -488,7 +504,10 @@ def teacher_payments_history(request, teacher_id):
         pct = float(item.teacher_percentage) if item.teacher_percentage is not None else teacher_pct
         amount = float(item.amount or 0)
         waived_by_teacher = _item_pardon_type(item) in ('teacher', 'both')
-        earned = 0.0 if waived_by_teacher else round(amount * pct / 100, 2)
+        share = amount * pct / 100
+        reduction = 0.0 if waived_by_teacher else round(
+            _discount_on_teacher(float(item.reduction or 0), item.reduction_target, pct, share), 2)
+        earned = 0.0 if waived_by_teacher else round(max(0.0, share - reduction), 2)
         packages_earned_total += earned
 
         dt = item.payment.paid_at or item.payment.created_at
@@ -505,6 +524,7 @@ def teacher_payments_history(request, teacher_id):
             'status': item.payment.status,
             'amount': amount,
             'teacher_percentage': pct,
+            'reduction': reduction,
             'earned': earned,
         })
 
