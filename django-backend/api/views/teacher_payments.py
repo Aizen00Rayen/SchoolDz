@@ -611,6 +611,34 @@ def teacher_payments_session_students(request, teacher_id, session_id):
 
     course = session.course or (session.group.course if session.group_id else None)
     student_discounts = engine.get('student_discounts', {})
+
+    # A bill has no period, so a student's discount is taken off their
+    # earliest attended sessions first (never more than a session earns),
+    # which keeps every session list adding up to the teacher's total.
+    all_sessions = engine.get('sessions', {})
+    session_meta = {
+        row['id']: row for row in ClassSession.objects.filter(
+            tenant_id=tid, id__in=list(all_sessions.keys()),
+        ).values('id', 'start_at', 'course_id', 'group__course_id')
+    }
+    applied = {}  # (session_id, student_id) -> discount taken off that session
+    remaining = dict(student_discounts)
+    ordered = sorted(
+        all_sessions.keys(),
+        key=lambda sid: (session_meta.get(sid, {}).get('start_at') is None, session_meta.get(sid, {}).get('start_at')),
+    )
+    for sid in ordered:
+        meta = session_meta.get(sid)
+        if not meta:
+            continue
+        cid = meta['course_id'] or meta['group__course_id']
+        for stud_id, d in all_sessions[sid].get('students', {}).items():
+            left = remaining.get((stud_id, cid), 0.0)
+            net = max(0.0, d['gross'] - d['waived'])
+            take = min(left, net)
+            if take > 0:
+                applied[(sid, stud_id)] = take
+                remaining[(stud_id, cid)] = left - take
     attended = list(Attendance.objects.filter(
         tenant_id=tid, session_id=session.id, status__in=ATTENDED_STATUSES,
     ).select_related('student').order_by('student__first_name', 'student__last_name'))
@@ -635,11 +663,10 @@ def teacher_payments_session_students(request, teacher_id, session_id):
             'school_pardon': bool(d.get('school_pardon')),
             'paid': paid_status.get(a.student_id),
             'gross': gross,
-            # The teacher's share of this student's bill discount for the
-            # course. It is deducted once from the teacher's total, not from
-            # this session, so `earned` stays the session figure.
-            'discount': round(student_discounts.get((a.student_id, course.id if course else None), 0.0), 2),
-            'earned': round(max(0.0, gross - waived), 2),
+            # The part of this student's bill discount taken off this session
+            # (see the allocation above); `earned` is net of it.
+            'discount': round(applied.get((session.id, a.student_id), 0.0), 2),
+            'earned': round(max(0.0, gross - waived - applied.get((session.id, a.student_id), 0.0)), 2),
         })
     return Response({
         'session_id': session.id,
