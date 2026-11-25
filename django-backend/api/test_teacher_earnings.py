@@ -488,3 +488,65 @@ class TeacherEarningsTests(TestCase):
         client2 = APIClient()
         client2.credentials(HTTP_AUTHORIZATION=f'Bearer {Token.objects.create(user=stranger).key}')
         self.assertEqual(client2.get(self._students_url(session)).status_code, 404)
+
+
+@override_settings(CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}, REST_FRAMEWORK={
+    'DEFAULT_AUTHENTICATION_CLASSES': ['api.services.BearerTokenAuthentication'],
+    'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticated'],
+    'DEFAULT_THROTTLE_CLASSES': [],
+})
+class TeacherDiscountTests(TeacherEarningsTests.__bases__[0]):
+    """A discount on a bill must reach the teacher's pay everywhere it is
+    shown — the summary, the history tiles and the package rows."""
+    def setUp(self):
+        TeacherEarningsTests.setUp(self)
+
+    bill = TeacherEarningsTests.bill
+    session = TeacherEarningsTests.session
+    regular_course = TeacherEarningsTests.regular_course
+    summary = TeacherEarningsTests.summary
+
+    def _history(self):
+        res = self.client.get(f'{API}teacher-payments/{self.teacher.id}/history')
+        self.assertEqual(res.status_code, 200, res.content[:300])
+        return res.json()
+
+    def test_discount_uses_teachers_cut_even_if_line_was_saved_with_zero_percent(self):
+        # The bill form can store teacher_percentage=0 on a line, but the
+        # teacher is still paid their default % for that student's sessions,
+        # so the discount has to come off at that same %.
+        course, group = self.regular_course('1000')
+        self.session(group)  # 3 x 600 = 1800
+        self.bill(self.students[0], '1000', kind='per_session', course=course,
+                  reduction=Decimal('200'), reduction_target='total',
+                  teacher_percentage=Decimal('0'), school_percentage=Decimal('100'))
+        row = self.summary()
+        self.assertAlmostEqual(row['reductions_deducted'], 120)  # 60% of 200
+        self.assertAlmostEqual(row['earned'], 1800 - 120)
+
+    def test_package_rows_and_tile_are_net_of_the_discount(self):
+        course = Course.objects.create(tenant=self.tenant, title='Workshop', price=Decimal('1000'),
+                                       kind='standalone')
+        group = Group.objects.create(tenant=self.tenant, course=course, teacher=self.teacher, name='W')
+        group.students.add(*self.students)
+        self.bill(self.students[0], '1000', kind='course', course=course,
+                  reduction=Decimal('200'), reduction_target='total')
+        history = self._history()
+        row = history['packages'][0]
+        self.assertAlmostEqual(row['amount'], 1000)
+        self.assertAlmostEqual(row['reduction'], 120)
+        self.assertAlmostEqual(row['earned'], 600 - 120)
+        self.assertAlmostEqual(history['totals']['packages_earned'], 480)
+        self.assertAlmostEqual(history['totals']['total_earned'], 480)
+        self.assertAlmostEqual(self.summary()['earned'], 480)
+
+    def test_package_row_discount_charged_to_school_leaves_teacher_whole(self):
+        course = Course.objects.create(tenant=self.tenant, title='Workshop', price=Decimal('1000'),
+                                       kind='standalone')
+        group = Group.objects.create(tenant=self.tenant, course=course, teacher=self.teacher, name='W')
+        group.students.add(*self.students)
+        self.bill(self.students[0], '1000', kind='course', course=course,
+                  reduction=Decimal('200'), reduction_target='school')
+        row = self._history()['packages'][0]
+        self.assertAlmostEqual(row['earned'], 600)
+        self.assertAlmostEqual(row['reduction'], 0)
