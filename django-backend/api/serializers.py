@@ -436,6 +436,15 @@ class GradeSerializer(serializers.ModelSerializer):
     course_id = TenantScopedPKField(
         Course, source='course', allow_null=True, required=False
     )
+    # Sent with each row so the table never depends on the (capped) students
+    # list to show who a grade belongs to.
+    student_name = serializers.SerializerMethodField()
+
+    def get_student_name(self, obj):
+        if not obj.student:
+            return None
+        name = f"{obj.student.first_name or ''} {obj.student.last_name or ''}".strip()
+        return name or str(obj.student.student_code or obj.student_id)
 
     class Meta:
         model = Grade

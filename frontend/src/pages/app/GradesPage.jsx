@@ -3,6 +3,7 @@ import CrudPanel from "./CrudPanel";
 import { Award } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Field } from "./StudentsPage";
+import { StudentSearchSelect } from "./_shared";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -20,15 +21,10 @@ const DEFAULT_FORM = {
 export default function GradesPage() {
   const { t } = useI18n();
   const { canAdd, canModify, canDelete } = usePermission("grades");
-  const { data: students } = useQuery({
-    queryKey: ["students-list"],
-    queryFn: async () => (await api.get("/students")).data,
-  });
   const { data: courses } = useQuery({
     queryKey: ["courses-list"],
     queryFn: async () => (await api.get("/courses")).data,
   });
-  const stuMap = Object.fromEntries((students?.items || []).map((s) => [s.id, s]));
   const courseMap = Object.fromEntries((courses?.items || []).map((c) => [c.id, c]));
 
   return (
@@ -46,8 +42,7 @@ export default function GradesPage() {
         {
           key: "student", label: t("field.student"),
           render: (r) => {
-            const s = stuMap[r.student_id];
-            return s ? `${s.first_name} ${s.last_name}` : "—";
+            return r.student_name || "—";
           },
         },
         { key: "title", label: t("field.exam_subject"), render: (r) => <span className="font-medium">{r.title}</span> },
@@ -64,14 +59,7 @@ export default function GradesPage() {
       renderForm={(form, setForm) => (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Field label={t("field.student")} required>
-            <Select value={form.student_id || ""} onValueChange={(v) => setForm({ ...form, student_id: v })}>
-              <SelectTrigger className="bg-background"><SelectValue placeholder={t("placeholder.select_student")} /></SelectTrigger>
-              <SelectContent className="bg-popover max-h-72">
-                {(students?.items || []).map((s) => (
-                  <SelectItem key={s.id} value={s.id}>{s.first_name} {s.last_name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <StudentSearchSelect value={form.student_id} onChange={(id) => setForm({ ...form, student_id: id })} />
           </Field>
           <Field label={t("field.course")}>
             <Select value={form.course_id || ""} onValueChange={(v) => setForm({ ...form, course_id: v })}>
