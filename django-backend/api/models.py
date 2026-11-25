@@ -750,6 +750,9 @@ class PaymentItem(models.Model):
         max_digits=5, decimal_places=2, null=True, blank=True,
         validators=[MinValueValidator(Decimal('0')), MaxValueValidator(Decimal('100'))],
     )
+    # Set when this line's debt was written off (see debts_waive). The line is
+    # cancelled, but the sessions it covered were forgiven, not unbilled.
+    written_off = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
