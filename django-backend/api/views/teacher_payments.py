@@ -325,6 +325,25 @@ def compute_teacher_earned_total(tenant_id, date_from=None, date_to=None, _conte
     return round(sum(r['earned'] for r in breakdown.values()), 2)
 
 
+def _day_before(value):
+    """The date just before a YYYY-MM-DD string/date, or None."""
+    from datetime import date, timedelta
+    from django.utils.dateparse import parse_date
+    d = value if isinstance(value, date) else parse_date(str(value)[:10]) if value else None
+    return d - timedelta(days=1) if d else None
+
+
+def payouts_for_window(total_paid, earned_before, earned_in_window, capped):
+    """How much of everything a teacher was ever paid counts towards the work
+    of a date window. A payout is dated when it was handed over, not for the
+    period it settles, so payouts are applied to earnings oldest first: they
+    first clear what was earned before the window, and what is left pays the
+    window. When the window ends in the past (`capped`), what is left beyond
+    the window's own earnings belongs to later work, so it is not counted."""
+    applied = max(0.0, total_paid - earned_before)
+    return min(applied, max(0.0, earned_in_window)) if capped else applied
+
+
 def compute_teacher_earnings(tenant_id, request, _context=None):
     """Per-teacher rows for the Teacher Payments page: earned (see
     compute_teacher_breakdown), already paid out, and the balance.
@@ -339,10 +358,27 @@ def compute_teacher_earnings(tenant_id, request, _context=None):
         teacher_id=teacher_id, group_id=request.GET.get('group_id'), _context=_context,
     )
 
-    payouts = filter_by_date_range(TeacherPayout.objects.filter(tenant_id=tenant_id), request, 'paid_at')
+    # Payouts are matched to earnings oldest first (see payouts_for_window),
+    # so a payout made after the window for work inside it still counts. A
+    # group filter has no matching payouts, so it keeps the dated payouts.
+    date_from, date_to = request.GET.get('from'), request.GET.get('to')
+    group_id = request.GET.get('group_id')
     paid_out = {}
-    for po in payouts:
-        paid_out[po.teacher_id] = paid_out.get(po.teacher_id, 0.0) + float(po.amount)
+    if group_id:
+        for po in filter_by_date_range(TeacherPayout.objects.filter(tenant_id=tenant_id), request, 'paid_at'):
+            paid_out[po.teacher_id] = paid_out.get(po.teacher_id, 0.0) + float(po.amount)
+    else:
+        total_paid = {}
+        for po in TeacherPayout.objects.filter(tenant_id=tenant_id):
+            total_paid[po.teacher_id] = total_paid.get(po.teacher_id, 0.0) + float(po.amount)
+        before = {}
+        if date_from:
+            cutoff = _day_before(date_from)
+            if cutoff:
+                before = compute_teacher_breakdown(tenant_id, date_to=cutoff, teacher_id=teacher_id, _context=_context)
+        for tid_, total in total_paid.items():
+            paid_out[tid_] = payouts_for_window(
+                total, before.get(tid_, {}).get('earned', 0.0), breakdown.get(tid_, {}).get('earned', 0.0), bool(date_to))
 
     empty = {'present_count': 0, 'pardoned_count': 0, 'session_earned': 0.0, 'book_earned': 0.0, 'standalone_earned': 0.0,
              'waivers': 0.0, 'reductions': 0.0, 'earned': 0.0}
@@ -553,8 +589,13 @@ def teacher_payments_history(request, teacher_id):
     waivers_deducted = engine.get('waivers', 0.0)
     reductions_deducted = engine.get('reductions', 0.0)
     total_earned = round(engine.get('earned', 0.0), 2)
-    payouts_total = TeacherPayout.objects.filter(tenant_id=tid, teacher_id=teacher.id).aggregate(t=Sum('amount'))['t'] or 0
-    payouts_total = round(float(payouts_total), 2)
+    payouts_all = float(TeacherPayout.objects.filter(tenant_id=tid, teacher_id=teacher.id).aggregate(t=Sum('amount'))['t'] or 0)
+    earned_before = 0.0
+    if date_from and _day_before(date_from):
+        earned_before = compute_teacher_breakdown(
+            tid, date_to=_day_before(date_from), teacher_id=teacher.id,
+        ).get(teacher.id, {}).get('earned', 0.0)
+    payouts_total = round(payouts_for_window(payouts_all, earned_before, total_earned, bool(date_to)), 2)
 
     return Response({
         'teacher': {

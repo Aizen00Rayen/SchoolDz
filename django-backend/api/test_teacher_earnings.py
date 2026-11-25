@@ -148,6 +148,57 @@ class TeacherEarningsTests(TestCase):
         row = self.summary()
         self.assertAlmostEqual(row['earned'], 1800)
         self.assertAlmostEqual(row['paid_out'], 500)
+
+    def _paid(self, amount, day):
+        TeacherPayout.objects.create(tenant=self.tenant, teacher=self.teacher, amount=Decimal(amount),
+                                     paid_at=day)
+
+    def test_range_counts_a_payout_made_after_the_range(self):
+        _, group = self.regular_course('1000')
+        self.session(group, days_ago=40)        # 1800 earned in the range
+        self.session(group, days_ago=0)         # 1800 later
+        start = (timezone.now() - timedelta(days=50)).date().isoformat()
+        end = (timezone.now() - timedelta(days=30)).date().isoformat()
+        self._paid('1800', timezone.now().date())  # paid today for the old session
+        row = self.summary(**{'from': start, 'to': end})
+        self.assertAlmostEqual(row['earned'], 1800)
+        self.assertAlmostEqual(row['paid_out'], 1800)
+        self.assertAlmostEqual(row['balance'], 0)
+
+    def test_range_is_not_cleared_by_an_advance_for_later_work(self):
+        _, group = self.regular_course('1000')
+        self.session(group, days_ago=40)
+        start = (timezone.now() - timedelta(days=50)).date().isoformat()
+        end = (timezone.now() - timedelta(days=30)).date().isoformat()
+        self._paid('5000', timezone.now().date())  # more than the range earned
+        row = self.summary(**{'from': start, 'to': end})
+        self.assertAlmostEqual(row['paid_out'], 1800)   # capped at the range
+        self.assertAlmostEqual(row['balance'], 0)       # no negative balance
+
+    def test_range_still_owes_when_older_work_absorbs_the_payout(self):
+        _, group = self.regular_course('1000')
+        self.session(group, days_ago=60)   # 1800, before the range
+        self.session(group, days_ago=40)   # 1800, in the range
+        start = (timezone.now() - timedelta(days=50)).date().isoformat()
+        end = (timezone.now() - timedelta(days=30)).date().isoformat()
+        self._paid('2000', timezone.now().date())  # clears the old 1800, 200 into the range
+        row = self.summary(**{'from': start, 'to': end})
+        self.assertAlmostEqual(row['paid_out'], 200)
+        self.assertAlmostEqual(row['balance'], 1600)
+
+    def test_no_filter_keeps_plain_totals_and_history_agrees(self):
+        _, group = self.regular_course('1000')
+        self.session(group, days_ago=40)
+        self._paid('500', timezone.now().date())
+        row = self.summary()
+        self.assertAlmostEqual(row['paid_out'], 500)
+        self.assertAlmostEqual(row['balance'], 1300)
+        start = (timezone.now() - timedelta(days=50)).date().isoformat()
+        end = (timezone.now() - timedelta(days=30)).date().isoformat()
+        hist = self.client.get(f'{API}teacher-payments/{self.teacher.id}/history',
+                               {'from': start, 'to': end}).json()['totals']
+        self.assertAlmostEqual(hist['paid_out'], 500)
+        self.assertAlmostEqual(hist['balance'], 1300)
         self.assertAlmostEqual(row['balance'], 1300)
 
     def test_date_filter_limits_sessions(self):
