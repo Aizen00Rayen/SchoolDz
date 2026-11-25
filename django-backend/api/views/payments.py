@@ -864,6 +864,139 @@ def _pending_debt_by_student(tenant_id):
     return debt
 
 
+UNBILLED_LINE_KINDS = ('course', 'monthly', 'per_session')
+
+
+def compute_unbilled_sessions(tenant_id, student_ids=None, course_id=None):
+    """Sessions a student attended in a regular course beyond what has been
+    billed for it, priced at that student's own share.
+
+    Returns {(student_id, course_id): {sessions, gross, net, share, group_id,
+    teacher_percentage, school_percentage, pardon_type}}, only where something
+    is unbilled.
+
+    A bill line for a course covers amount / per-session-price sessions
+    (whatever the line's pardon or discount: a pardon changes what the
+    student pays, not how many sessions the line is for). Pending, paid and
+    pardoned lines all cover sessions; so do lines written off and lines on
+    bills that were cancelled after money was collected. What is left of the
+    attended sessions is unbilled. Its price is the course's per-session price
+    times the share the student pays on their latest line for the course: 100%
+    normally, 0% when fully pardoned, and the teacher's or the school's
+    percentage when only the other side was pardoned. Excused absences count
+    until recovered, and a fixed_sessions course never charges beyond its
+    session count — the same rules compute_student_balances uses."""
+    courses = {
+        c['id']: c for c in Course.objects.filter(tenant_id=tenant_id, kind='regular').values(
+            'id', 'price', 'pricing_type', 'sessions_count')
+    }
+    if course_id:
+        courses = {k: v for k, v in courses.items() if k == course_id}
+    pps = {
+        cid: course_per_session_price(c['price'], c['pricing_type'], c['sessions_count'])
+        for cid, c in courses.items()
+    }
+    if not courses:
+        return {}
+
+    session_meta = {
+        s['id']: (s['course_id'] or s['group__course_id'], s['group_id'])
+        for s in ClassSession.objects.filter(tenant_id=tenant_id).values('id', 'course_id', 'group__course_id', 'group_id')
+    }
+    attendance = Attendance.objects.filter(tenant_id=tenant_id).filter(
+        Q(status__in=ATTENDED_STATUSES) | Q(status='excused', recovery_status__in=('not_applicable', 'needs_recovery'))
+    )
+    if student_ids is not None:
+        attendance = attendance.filter(student_id__in=student_ids)
+    attended = {}
+    last_group = {}
+    for a in attendance.order_by('session__start_at').values('student_id', 'session_id'):
+        cid, gid = session_meta.get(a['session_id'], (None, None))
+        if cid not in courses:
+            continue
+        key = (a['student_id'], cid)
+        attended[key] = attended.get(key, 0) + 1
+        if gid:
+            last_group[key] = gid
+    for (sid, cid), n in list(attended.items()):
+        c = courses[cid]
+        if c['pricing_type'] == 'fixed_sessions' and c['sessions_count']:
+            attended[(sid, cid)] = min(n, c['sessions_count'])
+    if not attended:
+        return {}
+
+    lines = PaymentItem.objects.filter(
+        payment__tenant_id=tenant_id, course_id__in=list(courses), kind__in=UNBILLED_LINE_KINDS,
+    ).filter(
+        Q(written_off=True)
+        | Q(payment__status__in=('cancelled', 'refunded'), payment__paid_at__isnull=False)
+        | (~Q(status='cancelled') & ~Q(payment__status__in=('cancelled', 'refunded')))
+    ).select_related('payment')
+    if student_ids is not None:
+        lines = lines.filter(payment__student_id__in=student_ids)
+    covered = {}
+    latest = {}
+    for it in lines.order_by('payment__created_at', 'created_at'):
+        key = (it.payment.student_id, it.course_id)
+        price = pps.get(it.course_id) or 0.0
+        if price > 0:
+            covered[key] = covered.get(key, 0.0) + float(it.amount or 0) / price
+        if it.status != 'cancelled':
+            latest[key] = it
+
+    result = {}
+    for key, n in attended.items():
+        price = pps.get(key[1]) or 0.0
+        sessions = round(n - covered.get(key, 0.0), 4)
+        if price <= 0 or sessions <= 0.01:
+            continue
+        line = latest.get(key)
+        share = 1.0
+        if line and float(line.amount or 0) > 0:
+            probe = {
+                'amount': float(line.amount), 'teacher_percentage': line.teacher_percentage,
+                'school_percentage': line.school_percentage, 'status': line.status,
+                'pardon_type': line.pardon_type, 'payment__pardon_type': line.payment.pardon_type,
+                'payment__status': line.payment.status, 'reduction': 0,
+            }
+            share = max(0.0, min(1.0, 1.0 - _payment_item_discount(probe) / float(line.amount)))
+        gross = round(sessions * price, 2)
+        net = round(gross * share, 2)
+        if net <= BALANCE_THRESHOLD:
+            continue
+        pt = line.pardon_type or line.payment.pardon_type if line else None
+        result[key] = {
+            'sessions': sessions, 'gross': gross, 'net': net, 'share': share,
+            'group_id': last_group.get(key),
+            'teacher_percentage': line.teacher_percentage if line else None,
+            'school_percentage': line.school_percentage if line else None,
+            'pardon_type': pt if pt in ('school', 'teacher') else None,
+        }
+    return result
+
+
+def materialize_unbilled_debts(tenant_id, student_id):
+    """Turns a student's unbilled sessions into real pending bills (one per
+    course) so they can be paid or written off like any other debt. The line
+    copies the student's latest split, so it nets to exactly the unbilled
+    amount. Returns the bills created."""
+    created = []
+    for (sid, cid), u in compute_unbilled_sessions(tenant_id, student_ids=[student_id]).items():
+        payment = Payment.objects.create(
+            tenant_id=tenant_id, student_id=sid, kind='per_session', amount=Decimal('0'), discount=Decimal('0'),
+            method='cash', status='pending', pardon_type=u['pardon_type'],
+            due_date=timezone.now().date(), notes='حصص غير مفوترة',
+        )
+        PaymentItem.objects.create(
+            payment=payment, kind='per_session', course_id=cid, group_id=u['group_id'],
+            amount=Decimal(str(u['gross'])), status='pending', pardon_type=u['pardon_type'],
+            teacher_percentage=u['teacher_percentage'], school_percentage=u['school_percentage'],
+        )
+        _recompute_payment_totals(payment)
+        created.append(payment)
+    return created
+
+
 def compute_student_balances(tenant_id):
     """Per-student running balance = actual cash collected from COURSE items
     only (paid/partial PaymentItem rows with a course set, net of any
@@ -1115,6 +1248,10 @@ def compute_student_balances(tenant_id):
     # sessions they have attended; attendance only feeds the prepaid
     # ("overpaid") figure below.
     debt = _pending_debt_by_student(tenant_id)
+    # ...plus the sessions attended beyond what was billed, at the student's
+    # own share (see compute_unbilled_sessions).
+    for (unbilled_student, _course), u in compute_unbilled_sessions(tenant_id).items():
+        debt[unbilled_student] = debt.get(unbilled_student, 0.0) + u['net']
 
     balances = {}
     candidate_students = set(cost) | set(paid) | set(active_discount) | set(debt) | {row['payment__student_id'] for row in active_items}
@@ -1300,13 +1437,18 @@ def compute_course_payment_status(tenant_id, course_id, student_ids=None):
             if discount:
                 active_discount[row['payment__student_id']] = active_discount.get(row['payment__student_id'], 0.0) + discount
 
-    return {
+    status = {
         student_id: (
             paid.get(student_id, 0.0) + active_discount.get(student_id, 0.0) + BALANCE_THRESHOLD
             >= (cost_amount - written_off.get(student_id, 0.0))
         )
         for student_id, cost_amount in cost.items()
     }
+    # Sessions attended beyond what was billed are unpaid, whatever the
+    # lump-sum comparison above says.
+    for (unbilled_student, _course) in compute_unbilled_sessions(tenant_id, student_ids=student_ids, course_id=course_id):
+        status[unbilled_student] = False
+    return status
 
 
 @api_view(['GET'])
@@ -1439,6 +1581,9 @@ def debts_waive(request, student_id):
     if not student:
         raise NotFound('Student not found')
 
+    with transaction.atomic():
+        materialize_unbilled_debts(tid, student_id)
+
     balance = compute_student_balances(tid).get(student_id)
     owed = abs(balance['balance']) if balance and balance['status'] == 'owes' else 0.0
     if owed <= 0:
@@ -1450,7 +1595,7 @@ def debts_waive(request, student_id):
         # waiver row and the log line keep the record of what was forgiven).
         note = 'تم شطب الدين'
         for p in Payment.objects.filter(tenant_id=tid, student_id=student_id, status__in=('pending', 'partial')):
-            p.items.filter(status='pending').update(status='cancelled')
+            p.items.filter(status='pending').update(status='cancelled', written_off=True)
             active = list(p.items.exclude(status='cancelled'))
             if not active:
                 p.status = 'cancelled'          # nothing left on the bill (or an older bill without lines)
@@ -1517,6 +1662,8 @@ def debts_pay(request, student_id):
     if not student:
         raise NotFound('Student not found')
 
+    with transaction.atomic():
+        materialize_unbilled_debts(tid, student_id)
     balance_info = compute_student_balances(tid).get(student_id)
     owed = abs(balance_info['balance']) if balance_info and balance_info['status'] == 'owes' else 0.0
     if owed <= 0.01:

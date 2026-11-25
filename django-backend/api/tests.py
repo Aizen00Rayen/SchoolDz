@@ -330,13 +330,14 @@ class DebtPayTestCase(SimpleTestCase):
         from rest_framework.test import APIRequestFactory
         self.factory = APIRequestFactory()
 
+    @patch('api.views.payments.materialize_unbilled_debts')
     @patch('api.views.payments.transaction.atomic')
     @patch('api.views.payments.log_activity')
     @patch('api.views.payments.compute_student_balances')
     @patch('api.views.payments.Payment')
     @patch('api.views.payments.Student')
     @patch('api.views.payments.require_staff_tenant')
-    def test_debts_pay_validation(self, mock_tenant, mock_student, mock_payment, mock_balances, mock_log, mock_atomic):
+    def test_debts_pay_validation(self, mock_tenant, mock_student, mock_payment, mock_balances, mock_log, mock_atomic, mock_materialize):
         from rest_framework.test import force_authenticate
         from api.views import debts_pay
         from unittest.mock import MagicMock
@@ -393,10 +394,12 @@ class DebtPayTestCase(SimpleTestCase):
         self.assertEqual(resp.status_code, 404)
         self.assertEqual(resp.data['detail'], 'Student not found')
 
+    @patch('api.views.payments.materialize_unbilled_debts')
+    @patch('api.views.payments.transaction.atomic')
     @patch('api.views.payments.compute_student_balances')
     @patch('api.views.payments.Student')
     @patch('api.views.payments.require_staff_tenant')
-    def test_debts_pay_validation_errors(self, mock_tenant, mock_student, mock_balances):
+    def test_debts_pay_validation_errors(self, mock_tenant, mock_student, mock_balances, mock_atomic, mock_materialize):
         from api.views import debts_pay
         from rest_framework.test import force_authenticate
         from unittest.mock import MagicMock

@@ -61,20 +61,25 @@ class DebtTests(TestCase):
         return self.client.post(f'{API}debts/{self.student.pk}/pay', {'amount': amount, **extra}, format='json')
 
     # ---- no pending bill = no debt ---------------------------------------
-    def test_student_with_only_paid_bills_owes_nothing_even_after_attending(self):
+    def test_sessions_beyond_the_paid_bill_are_owed(self):
         self.attend(3)                      # 3 x 500 of sessions attended
-        self.bill(500, status='paid')       # but only one paid bill
+        self.bill(500, status='paid')       # but only one session paid for
         b = self.balance()
-        self.assertNotEqual(b['status'], 'owes')
-        self.assertEqual(b['debt'], 0)
+        self.assertEqual(b['status'], 'owes')
+        self.assertAlmostEqual(b['debt'], 1000)
 
-    def test_attended_but_never_billed_owes_nothing(self):
+    def test_a_bill_that_covers_the_sessions_leaves_no_debt(self):
+        self.attend(3)
+        self.bill(1500, status='paid')
+        self.assertNotEqual(self.balance()['status'], 'owes')
+
+    def test_attended_but_never_billed_owes_those_sessions(self):
         self.attend(4)
-        self.assertNotEqual(self.balance().get('status'), 'owes')
+        self.assertAlmostEqual(self.balance()['debt'], 2000)    # 4 x 500, nothing billed
 
-    def test_payments_balances_endpoint_has_no_red_students_without_pending_bills(self):
+    def test_payments_balances_endpoint_has_no_red_students_when_sessions_are_covered(self):
         self.attend(2)
-        self.bill(500, status='paid')
+        self.bill(1000, status='paid')
         rows = self.client.get(f'{API}payments/balances').json()['items']
         self.assertEqual([r for r in rows if r['status'] == 'owes'], [])
 
